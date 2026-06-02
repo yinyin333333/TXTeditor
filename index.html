@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TXTeditor</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <aside class="activity" aria-label="Activity">
+        <button class="activity-button active" data-command="toggle-sidebar" title="Explorer">E</button>
+      </aside>
+
+      <aside id="sidebar" class="sidebar" aria-label="Workspace">
+        <header class="sidebar-header">TXTeditor</header>
+        <div class="sidebar-actions">
+          <button data-command="open-file">Open File</button>
+          <button data-command="open-folder">Open Folder</button>
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </aside>
+
+      <main class="main">
+        <div id="tabs" class="tabs"></div>
+        <section class="toolbar">
+          <button data-command="open-file">Open</button>
+          <button data-command="save-file">Save</button>
+          <button data-command="save-as">Save As</button>
+          <button data-command="undo">Undo</button>
+          <button data-command="redo">Redo</button>
+          <button data-command="search">Find</button>
+          <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
+          <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
+          <button class="toggle-button" data-command="toggle-colorize">Colorize</button>
+          <select id="fontSelect" class="font-select" title="Grid font"></select>
+          <button class="toggle-button" data-command="toggle-theme">Light Mode</button>
+        </section>
+        <section id="gridHost" class="grid-host" tabindex="0" aria-label="Virtual table editor">
+          <canvas id="gridCanvas"></canvas>
+          <canvas id="frozenCanvas"></canvas>
+          <div id="scrollSurface" class="scroll-surface"></div>
+          <input id="cellEditor" class="cell-editor" autocomplete="off" spellcheck="false" />
+          <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
+        </section>
+      </main>
+    </div>
+
+    <div id="searchPanel" class="quick-panel hidden">
+      <input id="searchInput" placeholder="Search in current table" />
+      <button data-command="find-next">Find Next</button>
+      <span id="searchStatus"></span>
+    </div>
+
+    <div id="palette" class="palette hidden">
+      <input id="paletteInput" placeholder="Type a command" />
+      <div id="paletteResults" class="palette-results"></div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <div id="contextMenu" class="context-menu hidden"></div>
+    <div id="closeDialog" class="modal-backdrop hidden">
+      <div class="modal">
+        <h2>Save changes?</h2>
+        <p id="closeDialogText">This file has unsaved changes.</p>
+        <div class="modal-actions">
+          <button data-close-choice="save">Save</button>
+          <button data-close-choice="discard">Don't Save</button>
+          <button data-close-choice="cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <input id="hiddenFileInput" type="file" accept=".txt,.tsv,.tbl,.csv,text/plain" hidden />
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

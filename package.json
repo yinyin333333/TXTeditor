@@ -1,0 +1,32 @@
+{
+  "name": "txteditor",
+  "version": "0.1.0",
+  "description": "TXTeditor 0.1 - fast tabular text editing for large files",
+  "author": "yinyin333333",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/dev-server.js",
+    "dev": "node scripts/dev-server.js",
+    "build:web": "node scripts/build-web.js",
+    "icons": "node scripts/generate-tauri-icons.js",
+    "fixture": "node scripts/generate-fixture.js",
+    "fixture:20k": "node scripts/generate-fixture.js 20000",
+    "fixture:200k": "node scripts/generate-fixture.js 200000",
+    "test": "node --test tests/*.test.js",
+    "perf": "node scripts/perf-test.js 20000",
+    "perf:20k": "node scripts/perf-test.js 20000",
+    "perf:200k": "node scripts/perf-test.js 200000",
+    "clean": "node scripts/clean.js build",
+    "clean:build": "node scripts/clean.js build",
+    "clean:all": "node scripts/clean.js all",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -1,0 +1,700 @@
+:root {
+  color-scheme: dark;
+  --appBg: #1e1e1e;
+  --surfaceBg: #202124;
+  --toolbarBg: #252526;
+  --tabBg: #181818;
+  --tabActiveBg: #1e1e1e;
+  --tabText: #9aa7b2;
+  --tabActiveText: #f0f3f6;
+  --gridBg: #1e1f22;
+  --gridAltBg: #22252a;
+  --gridLine: #3e4750;
+  --gridLineStrong: #596879;
+  --rowIndexBg: #24282d;
+  --rowIndexText: #abb4bf;
+  --headerBg: #2b3036;
+  --headerText: #e3e8ee;
+  --cellText: #d7dce2;
+  --cellTextMuted: #7f8893;
+  --frozenBg: #293541;
+  --frozenCornerBg: #344252;
+  --frozenBorder: #7d9fc0;
+  --selectionBg: rgba(0, 88, 156, .70);
+  --selectionBorder: #5eb1ff;
+  --activeCellBorder: #5eb1ff;
+  --hoverBg: #2a2d2e;
+  --menuBg: #252526;
+  --menuHoverBg: #2f3640;
+  --menuText: #d7dce2;
+  --menuDisabledText: #737b85;
+  --buttonBg: #262a30;
+  --buttonHoverBg: #2f343a;
+  --buttonActiveBg: rgba(0, 88, 156, .34);
+  --buttonText: #d7dce2;
+  --columnTextA: #9ccff0;
+  --columnTextB: #a8cfa5;
+  --columnTextC: #d7ba7d;
+  --columnTextD: #c7a7d8;
+  --columnTextE: #88cfc6;
+
+  --bg: var(--appBg);
+  --surface-1: var(--tabBg);
+  --surface-2: var(--surfaceBg);
+  --surface-3: var(--toolbarBg);
+  --surface-4: #2b2d31;
+  --line: var(--gridLine);
+  --line-soft: #2f343a;
+  --text: var(--cellText);
+  --text-strong: var(--tabActiveText);
+  --muted: var(--tabText);
+  --accent: var(--activeCellBorder);
+  --accent-2: #0078d4;
+  --hover: var(--buttonHoverBg);
+  --selection: var(--buttonActiveBg);
+  --button-bg: var(--buttonBg);
+  --button-border: #3d454e;
+  --input-bg: #1b1d20;
+  --shadow: rgba(0, 0, 0, .42);
+  --danger-bg: #2a151c;
+  --danger-border: #5a3540;
+  --danger-text: #ffd7df;
+  --grid-bg: var(--gridBg);
+  --grid-row-odd: var(--gridBg);
+  --grid-row-even: var(--gridAltBg);
+  --grid-header-bg: var(--headerBg);
+  --grid-header-text: var(--headerText);
+  --grid-frozen-bg: var(--frozenBg);
+  --grid-frozen-header-bg: var(--frozenCornerBg);
+  --grid-line: var(--gridLine);
+  --grid-line-frozen: var(--gridLineStrong);
+  --grid-row-header-bg: var(--rowIndexBg);
+  --grid-row-header-frozen-bg: var(--frozenCornerBg);
+  --grid-selection: var(--selectionBg);
+  --grid-selection-frozen: rgba(0, 105, 185, .76);
+  --grid-active: var(--activeCellBorder);
+  --grid-row-text: var(--rowIndexText);
+  --grid-text: var(--cellText);
+  --grid-text-selected: #ffffff;
+  --grid-text-empty: var(--cellTextMuted);
+  --grid-frozen-divider: var(--frozenBorder);
+  --grid-font: Consolas, "Cascadia Mono", monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --appBg: #f7f8fb;
+  --surfaceBg: #f4f6f9;
+  --toolbarBg: #ffffff;
+  --tabBg: #eef2f6;
+  --tabActiveBg: #ffffff;
+  --tabText: #65717f;
+  --tabActiveText: #1f2933;
+  --gridBg: #ffffff;
+  --gridAltBg: #f6f8fb;
+  --gridLine: #d2dbe5;
+  --gridLineStrong: #9fb3c8;
+  --rowIndexBg: #edf2f7;
+  --rowIndexText: #52606d;
+  --headerBg: #e7eef7;
+  --headerText: #21364d;
+  --cellText: #1f2933;
+  --cellTextMuted: #8a96a3;
+  --frozenBg: #e2edf8;
+  --frozenCornerBg: #d8e6f4;
+  --frozenBorder: #2f75ad;
+  --selectionBg: rgba(0, 96, 170, .34);
+  --selectionBorder: #005fb8;
+  --activeCellBorder: #005fb8;
+  --hoverBg: #e6edf5;
+  --menuBg: #ffffff;
+  --menuHoverBg: #e7f0fa;
+  --menuText: #1f2933;
+  --menuDisabledText: #98a2ad;
+  --buttonBg: #f7f9fb;
+  --buttonHoverBg: #e6edf5;
+  --buttonActiveBg: rgba(0, 96, 170, .16);
+  --buttonText: #1f2933;
+  --columnTextA: #005a9e;
+  --columnTextB: #2f6b3f;
+  --columnTextC: #8a5a00;
+  --columnTextD: #6f42c1;
+  --columnTextE: #00756f;
+
+  --bg: var(--appBg);
+  --surface-1: var(--tabBg);
+  --surface-2: var(--surfaceBg);
+  --surface-3: var(--toolbarBg);
+  --surface-4: #e7ebf0;
+  --line: var(--gridLine);
+  --line-soft: #e2e7ec;
+  --text: var(--cellText);
+  --text-strong: var(--tabActiveText);
+  --muted: var(--tabText);
+  --accent: var(--activeCellBorder);
+  --accent-2: #0f6cbd;
+  --hover: var(--buttonHoverBg);
+  --selection: var(--buttonActiveBg);
+  --button-bg: var(--buttonBg);
+  --button-border: #cbd5df;
+  --input-bg: #ffffff;
+  --shadow: rgba(31, 35, 40, .18);
+  --danger-bg: #fff1f3;
+  --danger-border: #d1242f;
+  --danger-text: #86181d;
+  --grid-bg: var(--gridBg);
+  --grid-row-odd: var(--gridBg);
+  --grid-row-even: var(--gridAltBg);
+  --grid-header-bg: var(--headerBg);
+  --grid-header-text: var(--headerText);
+  --grid-frozen-bg: var(--frozenBg);
+  --grid-frozen-header-bg: var(--frozenCornerBg);
+  --grid-line: var(--gridLine);
+  --grid-line-frozen: var(--gridLineStrong);
+  --grid-row-header-bg: var(--rowIndexBg);
+  --grid-row-header-frozen-bg: var(--frozenCornerBg);
+  --grid-selection: var(--selectionBg);
+  --grid-selection-frozen: rgba(0, 96, 170, .42);
+  --grid-active: var(--activeCellBorder);
+  --grid-row-text: var(--rowIndexText);
+  --grid-text: var(--cellText);
+  --grid-text-selected: #08111c;
+  --grid-text-empty: var(--cellTextMuted);
+  --grid-frozen-divider: var(--frozenBorder);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+select {
+  font: inherit;
+}
+
+button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover,
+button.active {
+  background: var(--hover);
+  border-color: var(--button-border);
+}
+
+.toggle-button.active {
+  color: var(--text-strong);
+  border-color: var(--accent);
+  background: var(--selection);
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 48px 244px 1fr;
+  grid-template-rows: 1fr;
+  width: 100vw;
+  height: 100vh;
+}
+
+.shell.sidebar-hidden {
+  grid-template-columns: 48px 0 1fr;
+}
+
+.activity {
+  grid-row: 1;
+  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  gap: 6px;
+}
+
+.activity-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.activity-button.active {
+  color: var(--text-strong);
+  border-left: 2px solid var(--accent);
+}
+
+.sidebar {
+  background: var(--surface-2);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 34px auto 1fr;
+  transition: width .12s ease;
+}
+
+.shell.sidebar-hidden .sidebar {
+  border-right: 0;
+  visibility: hidden;
+}
+
+.sidebar-header {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .08em;
+}
+
+.sidebar-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+}
+
+.sidebar-actions button,
+.toolbar button {
+  background: var(--button-bg);
+  border: 1px solid var(--button-border);
+  border-radius: 4px;
+  height: 30px;
+  color: var(--text);
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  scrollbar-color: var(--muted) var(--surface-2);
+}
+
+.file-list button {
+  flex: 0 0 auto;
+  height: 28px;
+  text-align: left;
+  padding: 0 10px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 34px 38px 1fr;
+}
+
+.tabs {
+  display: flex;
+  align-items: end;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.tabs button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  min-width: 130px;
+  max-width: 220px;
+  padding: 0 12px;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--muted);
+}
+
+.tab-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.tab-close:hover {
+  color: var(--text-strong);
+  background: var(--hover);
+}
+
+.tabs button.active {
+  background: var(--bg);
+  border-top: 1px solid var(--accent);
+  color: var(--text-strong);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 38px;
+  padding: 4px 8px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+
+.toolbar button {
+  min-width: 72px;
+  height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.font-select {
+  height: 28px;
+  min-width: 148px;
+  flex: 0 0 auto;
+  border: 1px solid var(--button-border);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--text);
+  padding: 0 28px 0 8px;
+  outline: none;
+}
+
+.font-select:focus {
+  border-color: var(--accent);
+}
+
+.grid-host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  background: var(--bg);
+  scrollbar-color: var(--muted) var(--surface-3);
+}
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 14px;
+  pointer-events: none;
+  background: var(--bg);
+}
+
+.empty-state.hidden {
+  display: none;
+}
+
+#gridCanvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  display: block;
+  pointer-events: none;
+}
+
+#frozenCanvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  display: block;
+  pointer-events: none;
+}
+
+.scroll-surface {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+}
+
+.cell-editor {
+  position: fixed;
+  z-index: 5;
+  display: none;
+  border: 2px solid var(--accent);
+  background: var(--grid-selection);
+  color: var(--grid-text-selected);
+  padding: 0 6px;
+  outline: none;
+  font-family: var(--grid-font);
+  font-size: 12px;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.cell-editor.active {
+  display: block;
+}
+
+.quick-panel,
+.palette {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 32px));
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 60px var(--shadow);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.quick-panel.hidden,
+.palette.hidden {
+  display: none;
+}
+
+.quick-panel input,
+.palette input {
+  flex: 1;
+  height: 34px;
+  background: var(--input-bg);
+  border: 1px solid var(--button-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.quick-panel button {
+  height: 34px;
+  padding: 0 12px;
+  background: var(--button-bg);
+  border-radius: 6px;
+}
+
+.palette {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.palette-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.palette-results button {
+  height: 30px;
+  text-align: left;
+  padding: 0 10px;
+  border-radius: 5px;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 178px;
+  max-width: 220px;
+  max-height: calc(100vh - 16px);
+  padding: 4px;
+  border: 1px solid var(--gridLine);
+  border-radius: 6px;
+  background: var(--menuBg);
+  box-shadow: 0 12px 34px var(--shadow);
+  overflow: visible;
+}
+
+.context-menu.hidden {
+  display: none;
+}
+
+.context-menu button {
+  display: flex;
+  width: 100%;
+  height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 4px;
+  padding: 0 8px;
+  text-align: left;
+  color: var(--menuText);
+}
+
+.context-menu button:hover:not([disabled]),
+.menu-group:hover > .submenu-label {
+  background: var(--menuHoverBg);
+  color: var(--tabActiveText);
+}
+
+.menu-group {
+  position: relative;
+}
+
+.submenu-label {
+  font-weight: 500;
+}
+
+.menu-arrow {
+  color: var(--muted);
+  padding-left: 18px;
+}
+
+.submenu {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  min-width: 188px;
+  max-width: 240px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--gridLine);
+  border-radius: 6px;
+  background: var(--menuBg);
+  box-shadow: 0 12px 34px var(--shadow);
+}
+
+.submenu::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  width: 8px;
+}
+
+.submenu[data-side="left"]::before {
+  left: auto;
+  right: -8px;
+}
+
+.menu-group:hover .submenu,
+.menu-group:focus-within .submenu {
+  display: block;
+}
+
+.context-menu button[disabled] {
+  color: var(--menuDisabledText);
+  cursor: default;
+}
+
+.context-menu button[disabled]:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.context-menu .separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--gridLine);
+}
+
+.toast {
+  position: fixed;
+  z-index: 40;
+  right: 16px;
+  bottom: 34px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 7px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  box-shadow: 0 10px 32px var(--shadow);
+}
+
+.toast.hidden {
+  display: none;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .48);
+}
+
+.modal-backdrop.hidden {
+  display: none;
+}
+
+.modal {
+  width: min(420px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+  box-shadow: 0 20px 70px var(--shadow);
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.modal p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-actions button {
+  min-width: 86px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--button-bg);
+  border: 1px solid var(--button-border);
+}
