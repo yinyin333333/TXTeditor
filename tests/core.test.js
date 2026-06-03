@@ -18,7 +18,8 @@ import {
   resizeColumnCommand,
   resizeRowCommand
 } from "../src/core/operations.js";
-import { boundedTableExtent, classifyPanePoint, columnColorIndex } from "../src/ui/grid-geometry.js";
+import { shouldDrawCellText } from "../src/ui/canvas-grid.js";
+import { boundedTableExtent, classifyGridHit, classifyPanePoint, columnColorIndex } from "../src/ui/grid-geometry.js";
 
 test("parses and serializes TSV while preserving CRLF and final newline", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\r\n1\t2\r\n");
@@ -55,6 +56,18 @@ test("cell commands undo and redo without full table snapshots", () => {
   assert.equal(doc.getCell(1, 1), "42");
 });
 
+test("first row cell edits are undoable and saved as file data", () => {
+  const doc = TableDocument.fromText("skills.txt", "pSrvDoFunc\tpSrvHitFunc\n1\t2\n");
+  const undo = new UndoManager();
+  const command = makeCellCommand("Edit Header Cell", doc, [{ row: 0, column: 0, value: "renamedFunc" }]);
+  command.redo(doc);
+  undo.push(command);
+  assert.equal(doc.getCell(0, 0), "renamedFunc");
+  assert.equal(doc.toText(), "renamedFunc\tpSrvHitFunc\n1\t2\n");
+  undo.undo(doc);
+  assert.equal(doc.getCell(0, 0), "pSrvDoFunc");
+});
+
 test("committed multi-character cell edit is one undoable command", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
@@ -78,6 +91,11 @@ test("selection supports ranges and select all", () => {
 test("search wraps through the document", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\tneedle\nlast\trow");
   assert.deepEqual(findInTable(doc, "needle", { row: 2, column: 1 }), { row: 1, column: 1 });
+});
+
+test("search finds first-row header names as normal cells", () => {
+  const doc = TableDocument.fromText("skills.txt", "pSrvDoFunc\tpSrvHitFunc\n1\t2");
+  assert.deepEqual(findInTable(doc, "pSrvDoFunc", { row: 1, column: 0 }), { row: 0, column: 0 });
 });
 
 test("insert and delete row are grouped undoable commands", () => {
@@ -204,6 +222,32 @@ test("frozen pane geometry classifies header and frozen regions", () => {
   assert.equal(classifyPanePoint({ ...base, x: 220, y: 40 }), "frozen-row");
   assert.equal(classifyPanePoint({ ...base, x: 100, y: 90 }), "frozen-column");
   assert.equal(classifyPanePoint({ ...base, x: 220, y: 90 }), "cell");
+});
+
+test("first row data cells are hit as cells, not column headers", () => {
+  assert.deepEqual(
+    classifyGridHit({ pane: "cell", row: 0, column: 2, x: 250, y: 8 }),
+    { kind: "cell", row: 0, column: 2, x: 250, y: 8 }
+  );
+});
+
+test("frozen first row and first column data cells stay cell targets", () => {
+  assert.deepEqual(
+    classifyGridHit({ pane: "frozen-row", row: 0, column: 2, x: 250, y: 8 }),
+    { kind: "cell", row: 0, column: 2, x: 250, y: 8, frozen: true }
+  );
+  assert.deepEqual(
+    classifyGridHit({ pane: "frozen-column", row: 4, column: 0, x: 72, y: 140 }),
+    { kind: "cell", row: 4, column: 0, x: 72, y: 140, frozen: true }
+  );
+});
+
+test("renderer skips stale text for the active editing cell only", () => {
+  const editingCell = { row: 0, column: 1 };
+  assert.equal(shouldDrawCellText(0, 1, editingCell), false);
+  assert.equal(shouldDrawCellText(0, 0, editingCell), true);
+  assert.equal(shouldDrawCellText(1, 1, editingCell), true);
+  assert.equal(shouldDrawCellText(0, 1, null), true);
 });
 
 test("frozen pane dividers are bounded to visible table content", () => {

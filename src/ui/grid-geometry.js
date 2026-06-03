@@ -7,6 +7,14 @@ export function classifyPanePoint({ x, y, rowHeaderWidth, headerHeight, frozenCo
   return "cell";
 }
 
+export function classifyGridHit({ pane, row, column, x, y }) {
+  if (pane === "corner") return { kind: "corner", row: 0, column: 0, x, y };
+  if (pane === "column-header") return { kind: "column-header", row: 0, column, x, y };
+  if (pane === "row-header") return { kind: "row-header", row, column: 0, x, y };
+  if (pane === "frozen-row" || pane === "frozen-column") return { kind: "cell", row, column, x, y, frozen: true };
+  return { kind: "cell", row, column, x, y };
+}
+
 export function boundedTableExtent({ fixedExtent = 0, scrollableExtent = 0, scrollOffset = 0, viewportExtent = 0 }) {
   const extent = Math.ceil(fixedExtent + scrollableExtent - scrollOffset);
   return Math.max(0, Math.min(extent, viewportExtent));
