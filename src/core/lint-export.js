@@ -6,6 +6,37 @@ export function formatD2rlintCompatibleExport({ diagnostics = [] } = {}) {
   return `${sortedDiagnostics.map(formatD2rlintDiagnosticLine).join("\n")}${sortedDiagnostics.length ? "\n" : ""}`;
 }
 
+export function formatTxteditorLintExport({ diagnostics = [] } = {}) {
+  const sortedDiagnostics = [...diagnostics].sort(compareTxteditorDiagnostics);
+  const lines = [
+    "severity\truleId\tprofile\tfilePath\tfileName\trowIndex\tline\trowLabel\tcolumnName\tcellValue\tmessage"
+  ];
+  for (const diagnostic of sortedDiagnostics) {
+    lines.push([
+      severityLabel(diagnostic.severity),
+      diagnostic.ruleId,
+      diagnostic.profile,
+      diagnostic.filePath,
+      diagnostic.fileName,
+      Number.isFinite(diagnostic.rowIndex) ? diagnostic.rowIndex : "",
+      rowNumber(diagnostic),
+      diagnostic.rowLabel,
+      diagnostic.columnName,
+      diagnostic.offendingValue,
+      diagnostic.message
+    ].map(field).join("\t"));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function compareTxteditorDiagnostics(a, b) {
+  return String(a.filePath || a.fileName || "").localeCompare(String(b.filePath || b.fileName || "")) ||
+    numericExportValue(a.rowIndex) - numericExportValue(b.rowIndex) ||
+    numericExportValue(a.columnIndex) - numericExportValue(b.columnIndex) ||
+    String(a.ruleId ?? "").localeCompare(String(b.ruleId ?? "")) ||
+    String(a.message ?? "").localeCompare(String(b.message ?? ""));
+}
+
 export function compareD2rlintDiagnostics(a, b) {
   return String(a.ruleId ?? "").localeCompare(String(b.ruleId ?? "")) ||
     String(a.fileName ?? "").localeCompare(String(b.fileName ?? "")) ||
@@ -16,7 +47,7 @@ export function compareD2rlintDiagnostics(a, b) {
 }
 
 function formatD2rlintDiagnosticLine(diagnostic) {
-  return `WARN\t${field(diagnostic.ruleId)}\t${d2rlintMessage(diagnostic)}`;
+  return `${severityLabel(diagnostic.severity)}\t${field(diagnostic.ruleId)}\t${d2rlintMessage(diagnostic)}`;
 }
 
 function d2rlintMessage(diagnostic) {
@@ -32,6 +63,12 @@ function rowNumber(diagnostic) {
 
 function numericExportValue(value) {
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function severityLabel(severity) {
+  if (severity === "error") return "ERROR";
+  if (severity === "info") return "INFO";
+  return "WARN";
 }
 
 function field(value) {

@@ -71,6 +71,17 @@ export async function saveDocumentNative(doc, saveAs = false) {
   return true;
 }
 
+export async function saveTextNative(defaultName, text) {
+  const api = await tauriApi();
+  const target = await api.invoke("save_file_dialog", { defaultName });
+  if (!target) return false;
+  await api.invoke("write_text_file_safe", {
+    path: target,
+    text
+  });
+  return true;
+}
+
 export async function listenForNativeDrops(callback) {
   if (!isTauriRuntime()) return () => {};
   const api = await tauriApi();

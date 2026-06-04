@@ -35,7 +35,7 @@ import {
   normalizeLintSettings,
   runLint
 } from "../src/core/lint-engine.js";
-import { formatD2rlintCompatibleExport } from "../src/core/lint-export.js";
+import { formatD2rlintCompatibleExport, formatTxteditorLintExport } from "../src/core/lint-export.js";
 
 function lintDocs(docs, profile = "RotW") {
   const settings = createDefaultLintSettings();
@@ -371,7 +371,7 @@ test("profile-specific rule groups exactly match RotW and 2.4 TXT rule lists", (
   assert.deepEqual(ruleIdsForProfile("RotW"), [
     "Basic/NoDuplicateExcel",
     "Basic/ExcelColumns",
-    "Basic/MonEquipLevelOrder",
+    "Basic/LinkedExcel",
     "Basic/StringCheck",
     "Basic/NumericBounds",
     "Basic/BooleanFields",
@@ -393,6 +393,7 @@ test("profile-specific rule groups exactly match RotW and 2.4 TXT rule lists", (
   assert.deepEqual(ruleIdsForProfile("2.4"), [
     "Basic/NoDuplicateExcel",
     "Basic/ExcelColumns",
+    "Basic/LinkedExcel",
     "Basic/MissileRangeFieldSemantics",
     "Basic/MonstatsDesecratedTreasureClassSemantics",
     "Basic/MonEquipLevelOrder",
@@ -421,13 +422,16 @@ test("profile-specific rule groups hide 2.4-only rules from RotW", () => {
   const d2r24Ids = lintRuleGroupsForProfile("2.4").flatMap((group) => group.rules.map((rule) => rule.id));
   assert.equal(rotwIds.includes("Basic/MissileRangeFieldSemantics"), false);
   assert.equal(rotwIds.includes("Basic/MonstatsDesecratedTreasureClassSemantics"), false);
+  assert.equal(rotwIds.includes("Basic/MonEquipLevelOrder"), false);
   assert.equal(d2r24Ids.includes("Basic/MissileRangeFieldSemantics"), true);
   assert.equal(d2r24Ids.includes("Basic/MonstatsDesecratedTreasureClassSemantics"), true);
+  assert.equal(d2r24Ids.includes("Basic/MonEquipLevelOrder"), true);
 });
 
 test("lint settings default to RotW with implemented rules enabled only", () => {
   const settings = normalizeLintSettings({});
   assert.equal(settings.profile, "RotW");
+  assert.equal(settings.profiles.RotW.rules["Basic/LinkedExcel"].enabled, true);
   assert.equal(settings.profiles.RotW.rules["Cube/ValidInputs"].enabled, true);
   assert.equal(settings.profiles.RotW.rules["Items/ValidSockets"].enabled, true);
   assert.equal(settings.profiles.RotW.rules["Basic/MissileRangeFieldSemantics"], undefined);
@@ -443,6 +447,59 @@ test("lint catches duplicate excel identifiers and maps diagnostics to cells", (
   assert.equal(duplicate.columnIndex, 0);
   assert.equal(groupDiagnosticsByCell(diagnostics).has("2:0"), true);
   assert.equal(diagnosticsForDocument(diagnostics, doc).length > 0, true);
+});
+
+test("Basic/LinkedExcel reports bad references from workspace docs with exact cells", () => {
+  const docs = [
+    TableDocument.fromText("properties.txt", "code\nknown-prop", { path: "excel/properties.txt" }),
+    TableDocument.fromText("itemstatcost.txt", "stat\nknown-stat", { path: "excel/itemstatcost.txt" }),
+    TableDocument.fromText("missiles.txt", "missile\tskill\nknownmissile\tMissingSkill", { path: "excel/missiles.txt" }),
+    TableDocument.fromText("skills.txt", "skill\tsrvmissilea\nKnownSkill\tmissingmissile", { path: "excel/skills.txt" }),
+    TableDocument.fromText("uniqueitems.txt", "index\tprop3\nBad Unique\tmissing-prop", { path: "excel/uniqueitems.txt" }),
+    TableDocument.fromText("misc.txt", "code\tname\tstat1\tnamestr\nbadmisc\tBad Misc\tmissing-stat\t", { path: "excel/misc.txt" })
+  ];
+  const diagnostics = lintDocs(docs).filter((item) => item.ruleId === "Basic/LinkedExcel");
+  assert.ok(diagnostics.some((item) => item.fileName === "uniqueitems.txt" && item.rowIndex === 1 && item.columnName === "prop3" && item.rowLabel === "Bad Unique"));
+  assert.ok(diagnostics.some((item) => item.fileName === "missiles.txt" && item.rowIndex === 1 && item.columnName === "skill" && item.rowLabel === "knownmissile"));
+  assert.ok(diagnostics.some((item) => item.fileName === "skills.txt" && item.rowIndex === 1 && item.columnName === "srvmissilea" && item.rowLabel === "KnownSkill"));
+  assert.ok(diagnostics.some((item) => item.fileName === "misc.txt" && item.rowIndex === 1 && item.columnName === "stat1" && item.rowLabel === "badmisc"));
+  assert.ok(diagnostics.some((item) => item.fileName === "misc.txt" && item.rowIndex === 1 && item.columnName === "namestr" && item.d2rMessage === "misc.txt, line 2: namestr for 'Bad Misc' is blank but required"));
+});
+
+test("Basic/LinkedExcel resolves RotW propertygroups without hiding 2.4 or casing mismatches", () => {
+  const docs = [
+    TableDocument.fromText("properties.txt", "code\ngethit-skill"),
+    TableDocument.fromText("propertygroups.txt", "code\tprop1\nGelid-Affix5\tgethit-skill\nBreaching-Affix4\tGelid-Affix5"),
+    TableDocument.fromText("uniqueitems.txt", "index\tprop1\tprop2\tprop3\nRotW Item\tGelid-Affix5\tBreaching-Affix4\tGethit-skill"),
+    TableDocument.fromText("magicprefix.txt", "name\tmod3code\nGelid\tGelid-Affix5")
+  ];
+  const rotw = lintDocs(docs, "RotW").filter((item) => item.ruleId === "Basic/LinkedExcel");
+  assert.equal(rotw.some((item) => item.columnName === "prop1" && item.offendingValue === "Gelid-Affix5"), false);
+  assert.equal(rotw.some((item) => item.columnName === "prop2" && item.offendingValue === "Breaching-Affix4"), false);
+  assert.equal(rotw.some((item) => item.columnName === "mod3code" && item.offendingValue === "Gelid-Affix5"), false);
+  assert.ok(rotw.some((item) => item.columnName === "prop3" && item.offendingValue === "Gethit-skill"));
+
+  const d24 = lintDocs(docs, "2.4").filter((item) => item.ruleId === "Basic/LinkedExcel");
+  assert.ok(d24.some((item) => item.columnName === "prop1" && item.offendingValue === "Gelid-Affix5"));
+});
+
+test("Basic/LinkedExcel covers d2rlint item type, sound, skilldesc, and summode links", () => {
+  const docs = [
+    TableDocument.fromText("properties.txt", "code\nknown-prop"),
+    TableDocument.fromText("itemtypes.txt", "code\nwand"),
+    TableDocument.fromText("magicprefix.txt", "name\titype1\nBurning\tstaff"),
+    TableDocument.fromText("monsounds.txt", "id\nzombie"),
+    TableDocument.fromText("monstats.txt", "id\tmonsound\tumonsound\nhorse\thorse\thorse"),
+    TableDocument.fromText("skilldesc.txt", "skilldesc\nknown desc"),
+    TableDocument.fromText("monmode.txt", "code\nNU"),
+    TableDocument.fromText("skills.txt", "skill\tskilldesc\tsummon\tsummode\nUberAncientsHeal\tself heal\tzombie\t")
+  ];
+  const diagnostics = lintDocs(docs, "RotW").filter((item) => item.ruleId === "Basic/LinkedExcel");
+  assert.ok(diagnostics.some((item) => item.fileName === "magicprefix.txt" && item.columnName === "itype1" && item.d2rMessage === "magicprefix.txt, line 2: itype1 'staff' not found for 'Burning'"));
+  assert.ok(diagnostics.some((item) => item.fileName === "monstats.txt" && item.columnName === "monsound" && item.d2rMessage === "monstats.txt, line 2: monsound 'horse' not found for 'horse'"));
+  assert.ok(diagnostics.some((item) => item.fileName === "monstats.txt" && item.columnName === "umonsound" && item.d2rMessage === "monstats.txt, line 2: umonsound 'horse' not found for 'horse'"));
+  assert.ok(diagnostics.some((item) => item.fileName === "skills.txt" && item.columnName === "skilldesc" && item.d2rMessage === "skills.txt, line 2: skilldesc 'self heal' not found for 'UberAncientsHeal'"));
+  assert.ok(diagnostics.some((item) => item.fileName === "skills.txt" && item.columnName === "summode" && item.d2rMessage === "skills.txt, line 2: invalid summode '' for 'UberAncientsHeal'"));
 });
 
 test("lint checks numeric bounds, boolean fields, cube rules, and treasure class rules", () => {
@@ -468,15 +525,29 @@ test("lint checks numeric bounds, boolean fields, cube rules, and treasure class
   assert.ok(diagnostics.some((item) => item.ruleId === "TC/ValidProbs" && item.columnName === "Prob2"));
 });
 
+test("Items/ValidSockets carries d2rlint-compatible socket messages", () => {
+  const docs = [
+    TableDocument.fromText("itemtypes.txt", "code\tmaxsocketslevelthreshold1\tmaxsocketslevelthreshold2\tmaxsockets1\tmaxsockets2\tmaxsockets3\namul\t0\t0\t0\t0\t0\norb\t0\t0\t3\t3\t3"),
+    TableDocument.fromText("armor.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\n"),
+    TableDocument.fromText("misc.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\nAmulet\tamu\tamul\t\t1\t1\t0\t1\t1"),
+    TableDocument.fromText("weapons.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\nEagle Orb\tob1\torb\t\t1\t4\t0\t1\t2")
+  ];
+  const diagnostics = lintDocs(docs).filter((item) => item.ruleId === "Items/ValidSockets");
+  assert.ok(diagnostics.some((item) => item.fileName === "misc.txt" && item.d2rMessage === "misc.txt, line 4: gemsockets (1) won't spawn on 'Amulet' because its type(s) won't allow more than 0 sockets."));
+  assert.ok(diagnostics.some((item) => item.fileName === "weapons.txt" && item.d2rMessage === "weapons.txt, line 4: gemsockets (4) won't spawn on 'Eagle Orb' because its type(s) won't allow more than 3 sockets."));
+  assert.ok(diagnostics.some((item) => item.fileName === "weapons.txt" && item.d2rMessage === "weapons.txt, line 4: 'Eagle Orb' has more gemsockets (4) than inventory spaces used (1 x 2 = 2)"));
+});
+
 test("remaining D2R TXT lint rules produce concrete diagnostics", () => {
   assert.ok(lintDocs([TableDocument.fromText("cubemain.txt", "description\tenabled\nbad\t1")]).some((item) => item.ruleId === "Basic/ExcelColumns"));
-  assert.ok(lintDocs([TableDocument.fromText("monequip.txt", "monster\tlevel\nzombie\t5\nzombie\t10")]).some((item) => item.ruleId === "Basic/MonEquipLevelOrder" && item.columnName === "level"));
   assert.ok(lintDocs([TableDocument.fromText("localstrings.txt", "id\tKey\tenUS\tdeDE\n1\tHello\tHello\tHallo\n1\tOther\tOther\t")]).some((item) => item.ruleId === "Basic/StringCheck" && item.columnName === "id"));
   assert.ok(lintDocs([TableDocument.fromText("localstrings.txt", "id\tKey\tenUS\tdeDE\n1\tHello\tHello\t")]).some((item) => item.ruleId === "String/NoUntranslated" && item.columnName === "deDE"));
 
   const socketDocs = [
     TableDocument.fromText("itemtypes.txt", "code\tmaxsocketslevelthreshold1\tmaxsocketslevelthreshold2\tmaxsockets1\tmaxsockets2\tmaxsockets3\narmo\t30\t20\t2\t1\t7"),
-    TableDocument.fromText("armor.txt", "code\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\ncap\tarmo\t\t1\t4\t5\t1\t2")
+    TableDocument.fromText("armor.txt", "code\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\ncap\tarmo\t\t1\t4\t5\t1\t2"),
+    TableDocument.fromText("misc.txt", "code\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\n"),
+    TableDocument.fromText("weapons.txt", "code\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\n")
   ];
   const socketDiagnostics = lintDocs(socketDocs);
   assert.ok(socketDiagnostics.some((item) => item.ruleId === "Items/ValidSockets" && item.columnName === "maxsocketslevelthreshold1"));
@@ -492,9 +563,21 @@ test("remaining D2R TXT lint rules produce concrete diagnostics", () => {
   const statDocs = [
     TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nbadprop\t1\titem_strength"),
     TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\tsave add\tsigned\tencode\nitem_strength\t2\t0\t0\t0"),
+    TableDocument.fromText("skills.txt", "skill\nAttack"),
     TableDocument.fromText("uniqueitems.txt", "index\tprop1\tpar1\tmin1\tmax1\nBad Unique\tbadprop\t\t0\t5")
   ];
   assert.ok(lintDocs(statDocs).some((item) => item.ruleId === "Items/ValidStatParameters" && item.columnName === "max1"));
+
+  const narrowStatDocs = [
+    TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nreal-prop\t1\treal_stat\nbroad-prop\t20\t"),
+    TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\tsave add\tsigned\tencode\nreal_stat\t1\t0\t1\t0"),
+    TableDocument.fromText("skills.txt", "skill\nAttack"),
+    TableDocument.fromText("monprop.txt", "id\tprop1\tmin1\tmax1\ndruidhawk\treal-prop\t-1\t-1"),
+    TableDocument.fromText("magicprefix.txt", "name\tmod1code\tmod1min\tmod1max\nMassive\tbroad-prop\t65\t65")
+  ];
+  const statWarnings = lintDocs(narrowStatDocs).filter((item) => item.ruleId === "Items/ValidStatParameters");
+  assert.equal(statWarnings.length, 2);
+  assert.ok(statWarnings.every((item) => item.fileName === "monprop.txt"));
 
   const levelDocs = [
     TableDocument.fromText("levels.txt", "id\tname\tvis0\twarp0\twaypoint\n1\tOne\t2\t5\t1\n2\tTwo\t0\t0\t1"),
@@ -511,15 +594,89 @@ test("remaining D2R TXT lint rules produce concrete diagnostics", () => {
   ]).some((item) => item.ruleId === "Skills/EqualSkills" && item.columnName === "code"));
 });
 
+test("d2rlint parity avoids socket checks when a required item table is absent", () => {
+  const docs = [
+    TableDocument.fromText("armor.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\nCap\tcap\tarmo\t\t1\t6\t9\t1\t1"),
+    TableDocument.fromText("misc.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\n"),
+    TableDocument.fromText("weapons.txt", "name\tcode\ttype\ttype2\thasinv\tgemsockets\tgemapplytype\tinvwidth\tinvheight\n")
+  ];
+  assert.equal(lintDocs(docs).some((item) => item.ruleId === "Items/ValidSockets"), false);
+});
+
+test("cube output lint resolves quoted items and property group output mods", () => {
+  const docs = [
+    TableDocument.fromText("armor.txt", "code\ncap"),
+    TableDocument.fromText("misc.txt", "code\n"),
+    TableDocument.fromText("weapons.txt", "code\n"),
+    TableDocument.fromText("setitems.txt", "index\n"),
+    TableDocument.fromText("uniqueitems.txt", "index\n"),
+    TableDocument.fromText("itemtypes.txt", "code\narmo"),
+    TableDocument.fromText("cubemod.txt", "code\n"),
+    TableDocument.fromText("properties.txt", "code\nknown-property"),
+    TableDocument.fromText("propertygroups.txt", "code\nknown-group"),
+    TableDocument.fromText("cubemain.txt", "description\tenabled\tnuminputs\tinput 1\toutput\tb mod 1\nok\t1\t1\tcap\t\"cap,mag\"\tknown-group")
+  ];
+  const diagnostics = lintDocs(docs).filter((item) => item.ruleId === "Cube/ValidOutputs");
+  assert.equal(diagnostics.length, 0);
+});
+
+test("valid stat parameter lint follows d2rlint file scope and ignores cubemain mods", () => {
+  const docs = [
+    TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nbadprop\t1\titem_strength"),
+    TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\tsave add\tsigned\tencode\nitem_strength\t2\t0\t0\t0"),
+    TableDocument.fromText("skills.txt", "skill\nAttack"),
+    TableDocument.fromText("cubemain.txt", "description\tenabled\tmod 1\tmod 1 min\tmod 1 max\ncube\t1\tbadprop\t0\t5")
+  ];
+  assert.equal(lintDocs(docs).some((item) => item.ruleId === "Items/ValidStatParameters"), false);
+});
+
 test("2.4-only TXT lint rules are implemented and hidden from RotW", () => {
   const docs = [
     TableDocument.fromText("missiles.txt", "missile\trange\nbolt\tpar3"),
-    TableDocument.fromText("monstats.txt", "id\ttreasureclassdesecrated\ttreasureclassdesecratedchamp\ttreasureclassdesecratedunique\nzombie\t\tAct 1 Champ\t")
+    TableDocument.fromText("monstats.txt", "id\ttreasureclassdesecrated\ttreasureclassdesecratedchamp\ttreasureclassdesecratedunique\nzombie\t\tAct 1 Champ\t"),
+    TableDocument.fromText("monequip.txt", "monster\tlevel\nzombie\t5\nzombie\t10")
   ];
-  assert.equal(lintDocs(docs, "RotW").some((item) => item.ruleId === "Basic/MissileRangeFieldSemantics" || item.ruleId === "Basic/MonstatsDesecratedTreasureClassSemantics"), false);
+  assert.equal(lintDocs(docs, "RotW").some((item) =>
+    item.ruleId === "Basic/MissileRangeFieldSemantics" ||
+    item.ruleId === "Basic/MonstatsDesecratedTreasureClassSemantics" ||
+    item.ruleId === "Basic/MonEquipLevelOrder"
+  ), false);
   const diagnostics = lintDocs(docs, "2.4");
   assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MissileRangeFieldSemantics" && item.columnName === "range"));
   assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MonstatsDesecratedTreasureClassSemantics" && item.columnName === "treasureclassdesecrated"));
+  assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MonEquipLevelOrder" && item.columnName === "level"));
+});
+
+test("RotW 3.2 schema accepts new Excel columns without Basic/ExcelColumns warnings", () => {
+  const docs = [
+    TableDocument.fromText("charstats.txt", "class\ttwohandedoffhandrestrictitemtype\ttwohandeddamageasonehanded\nama\taxe\t1"),
+    TableDocument.fromText("levels.txt", "id\tcompletiontotalroomsoverride\n1\t0"),
+    TableDocument.fromText("monpet.txt", "monster\tcalc1\tcalc2\tcalc3\tcalc4\tcalc5\tboundstat1\tboundcalc1\tboundstat2\tboundcalc2\tboundstat3\tboundcalc3\tboundstat4\tboundcalc4\tboundstat5\tboundcalc5\nwolf\t1\t2\t3\t4\t5\thp\t1\tmana\t2\tstr\t3\tdex\t4\tvit\t5"),
+    TableDocument.fromText("soundenviron.txt", "index\tinheritenvironment\tinheritenvrionment\ncave\t1\t0")
+  ];
+  const warnings = lintDocs(docs, "RotW").filter((item) => item.ruleId === "Basic/ExcelColumns");
+  assert.deepEqual(warnings.map((item) => `${item.fileName}:${item.columnName}`), []);
+});
+
+test("RotW 3.2 missile pcltdofunc allows 77 but still rejects larger values", () => {
+  const doc = TableDocument.fromText("missiles.txt", "missile\tpcltdofunc\nok\t77\nbad\t78");
+  const diagnostics = lintDocs([doc], "RotW").filter((item) => item.ruleId === "Basic/NumericBounds" && item.columnName === "pcltdofunc");
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].rowIndex, 2);
+  assert.equal(diagnostics[0].offendingValue, "78");
+});
+
+test("RotW 3.2 schema and bounds do not leak into the 2.4 profile", () => {
+  const docs = [
+    TableDocument.fromText("charstats.txt", "class\ttwohandedoffhandrestrictitemtype\ttwohandeddamageasonehanded\nama\taxe\t1"),
+    TableDocument.fromText("levels.txt", "id\tcompletiontotalroomsoverride\n1\t0"),
+    TableDocument.fromText("missiles.txt", "missile\tpcltdofunc\nbolt\t77")
+  ];
+  const diagnostics = lintDocs(docs, "2.4");
+  assert.ok(diagnostics.some((item) => item.ruleId === "Basic/ExcelColumns" && item.fileName === "charstats.txt" && item.columnName === "twohandedoffhandrestrictitemtype"));
+  assert.ok(diagnostics.some((item) => item.ruleId === "Basic/ExcelColumns" && item.fileName === "charstats.txt" && item.columnName === "twohandeddamageasonehanded"));
+  assert.ok(diagnostics.some((item) => item.ruleId === "Basic/ExcelColumns" && item.fileName === "levels.txt" && item.columnName === "completiontotalroomsoverride"));
+  assert.ok(diagnostics.some((item) => item.ruleId === "Basic/NumericBounds" && item.fileName === "missiles.txt" && item.columnName === "pcltdofunc" && item.offendingValue === "77"));
 });
 
 test("single-file lint avoids cross-file cube reference false positives", () => {
@@ -544,6 +701,14 @@ test("fixed lint diagnostics disappear after re-running on edited data", () => {
   assert.equal(runLint([doc], createDefaultLintSettings()).some((item) => item.ruleId === "Basic/BooleanFields"), false);
 });
 
+test("blank version is ignored only on dummy section rows", () => {
+  const doc = TableDocument.fromText("uniqueitems.txt", "index\tversion\tcode\tprop1\nWarlock Class Pack\t\t\t\nReal Missing\t\tcap\t\nReal Bad\t2\tcap\t");
+  const diagnostics = lintDocs([doc], "RotW").filter((item) => item.ruleId === "Basic/NumericBounds" && item.fileName === "uniqueitems.txt");
+  assert.equal(diagnostics.some((item) => item.rowIndex === 1 && item.columnName === "version"), false);
+  assert.ok(diagnostics.some((item) => item.rowIndex === 2 && item.columnName === "version"));
+  assert.ok(diagnostics.some((item) => item.rowIndex === 3 && item.columnName === "version"));
+});
+
 test("lint diagnostics expose semantic labels and active profile", () => {
   const doc = TableDocument.fromText("treasureclassex.txt", "Treasure Class\tPicks\tItem1\tProb1\nAct 1 (N) Unique B\t-2\tcap\t1");
   const diagnostic = runLint([doc], createDefaultLintSettings()).find((item) => item.ruleId === "TC/ValidNegativePicks");
@@ -561,6 +726,33 @@ test("d2rlint-compatible export uses WARN tab-separated diagnostics", () => {
   const diagnostics = runLint([doc], createDefaultLintSettings());
   const text = formatD2rlintCompatibleExport({ diagnostics });
   assert.match(text, /^WARN\tTC\/ValidNegativePicks\ttreasureclassex\.txt, line 2: 'picks' \(-2\) doesn't match negative sum of probs \(-1\) for 'Act 1 \(N\) Unique B'$/m);
+  assert.equal(text.split("\n").filter(Boolean).length, diagnostics.length);
+  assert.equal(/Log started|20\d\d-\d\d-\d\d|T\d\d:\d\d/.test(text), false);
+  assert.equal(formatD2rlintCompatibleExport({ diagnostics }), text);
+});
+
+test("d2rlint-compatible export preserves severity labels and selected profile diagnostics", () => {
+  const diagnostics = [
+    { severity: "info", ruleId: "Info/Rule", fileName: "z.txt", rowIndex: 4, columnIndex: 0, message: "info message", profile: "2.4" },
+    { severity: "error", ruleId: "Error/Rule", fileName: "a.txt", rowIndex: 0, columnIndex: 1, message: "error message", profile: "2.4" }
+  ];
+  const text = formatD2rlintCompatibleExport({ diagnostics });
+  assert.match(text, /^ERROR\tError\/Rule\ta\.txt, line 1: error message$/m);
+  assert.match(text, /^INFO\tInfo\/Rule\tz\.txt, line 5: info message$/m);
+  assert.equal(text.split("\n").filter(Boolean).length, 2);
+});
+
+test("lint exports use the canonical diagnostics count and deterministic ordering", () => {
+  const diagnostics = [
+    { severity: "warning", ruleId: "B/Rule", profile: "RotW", filePath: "z/misc.txt", fileName: "misc.txt", rowIndex: 5, columnIndex: 3, rowLabel: "Zed", columnName: "code", offendingValue: "bad", message: "z message" },
+    { severity: "warning", ruleId: "A/Rule", profile: "RotW", filePath: "a/armor.txt", fileName: "armor.txt", rowIndex: 1, columnIndex: 2, rowLabel: "Cap", columnName: "prop1", offendingValue: "Gelid-Affix5", message: "a message" }
+  ];
+  const readable = formatTxteditorLintExport({ diagnostics });
+  const compatible = formatD2rlintCompatibleExport({ diagnostics });
+  assert.equal(readable.trimEnd().split("\n").length - 1, diagnostics.length);
+  assert.equal(compatible.trimEnd().split("\n").filter(Boolean).length, diagnostics.length);
+  assert.match(readable, /^severity\truleId\tprofile\tfilePath\tfileName\trowIndex\tline\trowLabel\tcolumnName\tcellValue\tmessage\nWARN\tA\/Rule\tRotW\ta\/armor\.txt/m);
+  assert.match(compatible, /^WARN\tA\/Rule\tarmor\.txt, line 2: a message\nWARN\tB\/Rule\tmisc\.txt, line 6: z message\n$/);
 });
 
 test("disabling a lint rule removes that rule's diagnostics", () => {
@@ -569,6 +761,17 @@ test("disabling a lint rule removes that rule's diagnostics", () => {
   assert.equal(runLint([doc], settings).some((item) => item.ruleId === "Basic/NoDuplicateExcel"), true);
   settings.profiles.RotW.rules["Basic/NoDuplicateExcel"].enabled = false;
   assert.equal(runLint([doc], settings).some((item) => item.ruleId === "Basic/NoDuplicateExcel"), false);
+});
+
+test("disabling Basic/LinkedExcel removes linked-reference diagnostics", () => {
+  const docs = [
+    TableDocument.fromText("properties.txt", "code\nknown-prop"),
+    TableDocument.fromText("uniqueitems.txt", "index\tprop1\nBad Unique\tmissing-prop")
+  ];
+  const settings = createDefaultLintSettings();
+  assert.equal(runLint(docs, settings).some((item) => item.ruleId === "Basic/LinkedExcel"), true);
+  settings.profiles.RotW.rules["Basic/LinkedExcel"].enabled = false;
+  assert.equal(runLint(docs, settings).some((item) => item.ruleId === "Basic/LinkedExcel"), false);
 });
 
 test("profile switching replaces previous profile diagnostics", () => {
@@ -636,12 +839,23 @@ test("lint controls live in the bottom Problems panel, not the main toolbar", ()
     assert.equal(toolbar.includes(command), false);
     assert.equal(problems.includes(command), true);
   }
-  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
+  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
     assert.equal(html.includes(removed), false);
   }
   assert.equal(problems.includes("lintProfileSelect"), true);
   assert.equal(problems.includes("problemsResizer"), true);
   assert.equal(html.includes("sidebarResizer"), true);
+});
+
+test("temporary lint TXT export commands are not exposed in the app UI", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.equal(source.includes("export-lint-txt"), false);
+  assert.equal(source.includes("export-d2rlint-txt"), false);
+  assert.equal(source.includes("Export Lint TXT"), false);
+  assert.equal(source.includes("Export d2rlint TXT"), false);
+  assert.equal(source.includes("function exportLintTxt"), false);
+  assert.equal(source.includes("formatTxteditorLintExport"), false);
+  assert.equal(source.includes("formatD2rlintCompatibleExport"), false);
 });
 
 test("Open File and Open Folder sidebar buttons are constrained to one line", () => {

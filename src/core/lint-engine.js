@@ -8,9 +8,10 @@ export const LINT_RULE_GROUPS = [
     rules: [
       rule("Basic/NoDuplicateExcel", "No duplicate Excel IDs", true),
       rule("Basic/ExcelColumns", "Required Excel columns", true),
+      rule("Basic/LinkedExcel", "Linked Excel references", true),
       rule("Basic/MissileRangeFieldSemantics", "Missile range field semantics", true, true, ["2.4"]),
       rule("Basic/MonstatsDesecratedTreasureClassSemantics", "Desecrated treasure class semantics", true, true, ["2.4"]),
-      rule("Basic/MonEquipLevelOrder", "Monster equipment level order", true),
+      rule("Basic/MonEquipLevelOrder", "Monster equipment level order", true, true, ["2.4"]),
       rule("Basic/StringCheck", "String references", true),
       rule("Basic/NumericBounds", "Numeric bounds", true),
       rule("Basic/BooleanFields", "Boolean fields", true)
@@ -59,6 +60,7 @@ export const LINT_RULES = LINT_RULE_GROUPS.flatMap((group) =>
 const IMPLEMENTED_RUNNERS = {
   "Basic/ExcelColumns": lintExcelColumns,
   "Basic/NoDuplicateExcel": lintNoDuplicateExcel,
+  "Basic/LinkedExcel": lintLinkedExcel,
   "Basic/MissileRangeFieldSemantics": lintMissileRangeFieldSemantics,
   "Basic/MonstatsDesecratedTreasureClassSemantics": lintMonstatsDesecratedTreasureClassSemantics,
   "Basic/MonEquipLevelOrder": lintMonEquipLevelOrder,
@@ -125,9 +127,27 @@ const DUPLICATE_KEYS = {
   "weapons.txt": ["code"]
 };
 
-const NON_STANDARD_COLUMNS = {
-  "charstats.txt": ["twohandedoffhandrestrictitemtype", "twohandeddamageasonehanded"],
-  "levels.txt": ["completiontotalroomsoverride"]
+const PROFILE_ACCEPTED_COLUMNS = {
+  RotW: {
+    "charstats.txt": ["twohandedoffhandrestrictitemtype", "twohandeddamageasonehanded"],
+    "levels.txt": ["completiontotalroomsoverride"],
+    "monpet.txt": [
+      "calc1", "calc2", "calc3", "calc4", "calc5",
+      "boundstat1", "boundcalc1",
+      "boundstat2", "boundcalc2",
+      "boundstat3", "boundcalc3",
+      "boundstat4", "boundcalc4",
+      "boundstat5", "boundcalc5"
+    ],
+    "soundenviron.txt": ["inheritenvironment", "inheritenvrionment"]
+  }
+};
+
+const PROFILE_NON_STANDARD_COLUMNS = {
+  "2.4": {
+    "charstats.txt": ["twohandedoffhandrestrictitemtype", "twohandeddamageasonehanded"],
+    "levels.txt": ["completiontotalroomsoverride"]
+  }
 };
 
 const VERSION_CHECKS = [
@@ -175,6 +195,14 @@ const NUMERIC_BOUNDS = {
   "monstats.txt": {
     velocity: [0, 20],
     run: [0, 20]
+  }
+};
+
+const PROFILE_NUMERIC_BOUNDS = {
+  RotW: {
+    "missiles.txt": {
+      pcltdofunc: [0, 77]
+    }
   }
 };
 
@@ -270,6 +298,9 @@ export function buildWorkspaceIndex(documents, profile = DEFAULT_PROFILE) {
   const tablesByName = new Map();
   for (const table of tables) tablesByName.set(table.fileName, table);
   const itemCodes = unionSets(setFromColumn(tablesByName, "armor.txt", "code"), setFromColumn(tablesByName, "misc.txt", "code"), setFromColumn(tablesByName, "weapons.txt", "code"));
+  const properties = setFromColumn(tablesByName, "properties.txt", "code", { caseSensitive: true });
+  const propertyGroups = setFromColumn(tablesByName, "propertygroups.txt", "code", { caseSensitive: true });
+  const propertyReferenceValues = profile === "RotW" ? unionSets(properties, propertyGroups) : properties;
   return {
     profile,
     files: buildWorkspaceFileStates(
@@ -282,13 +313,21 @@ export function buildWorkspaceIndex(documents, profile = DEFAULT_PROFILE) {
     rowLabelsByFile: new Map(tables.map((table) => [table.fileKey, rowLabelsForTable(table)])),
     hasWorkspace: tables.length > 1,
     itemCodes,
+    allProperties: propertyReferenceValues,
     itemTypes: setFromColumn(tablesByName, "itemtypes.txt", "code"),
+    monModes: setFromColumn(tablesByName, "monmode.txt", "code"),
+    monSounds: setFromColumn(tablesByName, "monsounds.txt", "id"),
+    missiles: setFromColumn(tablesByName, "missiles.txt", "missile"),
+    overlays: setFromColumn(tablesByName, "overlay.txt", "overlay"),
+    sounds: setFromColumn(tablesByName, "sounds.txt", "sound"),
+    states: setFromColumn(tablesByName, "states.txt", "state"),
     setItems: setFromColumn(tablesByName, "setitems.txt", "index"),
     uniqueItems: setFromColumn(tablesByName, "uniqueitems.txt", "index"),
-    properties: setFromColumn(tablesByName, "properties.txt", "code"),
-    propertyGroups: setFromColumn(tablesByName, "propertygroups.txt", "group"),
+    properties,
+    propertyGroups,
     itemStats: setFromColumn(tablesByName, "itemstatcost.txt", "stat"),
     skills: unionSets(setFromColumn(tablesByName, "skills.txt", "skill"), setFromColumn(tablesByName, "skills.txt", "Id")),
+    skillDescs: setFromColumn(tablesByName, "skilldesc.txt", "skilldesc"),
     treasureClasses: setFromColumn(tablesByName, "treasureclassex.txt", "treasure class")
   };
 }
@@ -365,9 +404,11 @@ function lintExcelColumns(index, ctx) {
         }
       }
     }
-    const nonStandard = new Set(NON_STANDARD_COLUMNS[table.fileName] ?? []);
+    const accepted = acceptedColumnsForProfile(index.profile, table.fileName);
+    const nonStandard = nonStandardColumnsForProfile(index.profile, table.fileName);
     for (const header of table.headers) {
       const normalized = normalizeHeader(header);
+      if (accepted.has(normalized)) continue;
       if (nonStandard.has(normalized)) {
         ctx.add(table, 0, header, `Non-standard column "${header}" found.`, {
           d2rMessage: `${table.displayName} - non-standard column '${normalized}' found`
@@ -396,6 +437,61 @@ function lintNoDuplicateExcel(index, ctx) {
       }
     }
   }
+}
+
+function lintLinkedExcel(index, ctx) {
+  const optional = { allowNull: true };
+  const propertyOptional = { allowNull: true, caseSensitive: true };
+  const allProperties = index.allProperties;
+
+  for (const table of [index.tablesByName.get("armor.txt"), index.tablesByName.get("misc.txt"), index.tablesByName.get("weapons.txt")]) {
+    for (const field of ["stat1", "stat2", "stat3"]) {
+      mustExist(index, ctx, table, field, "code", index.itemStats, optional);
+    }
+  }
+
+  for (const table of [index.tablesByName.get("magicprefix.txt"), index.tablesByName.get("magicsuffix.txt")]) {
+    for (const field of numberedFields("mod", "code", 3)) {
+      mustExist(index, ctx, table, field, "name", allProperties, propertyOptional);
+    }
+    for (const field of [...numberedFields("itype", "", 7), ...numberedFields("etype", "", 5)]) {
+      mustExist(index, ctx, table, field, "name", index.itemTypes, optional);
+    }
+  }
+
+  if (index.profile === "RotW") {
+    const propertyGroups = index.tablesByName.get("propertygroups.txt");
+    for (const field of numberedFields("prop", "", 8)) {
+      mustExist(index, ctx, propertyGroups, field, "code", allProperties, propertyOptional);
+    }
+  }
+
+  const setItems = index.tablesByName.get("setitems.txt");
+  for (const field of [...numberedFields("prop", "", 9), ...numberedFields("aprop", "a", 5), ...numberedFields("aprop", "b", 5)]) {
+    mustExist(index, ctx, setItems, field, "index", allProperties, propertyOptional);
+  }
+
+  const uniqueItems = index.tablesByName.get("uniqueitems.txt");
+  for (const field of numberedFields("prop", "", 12)) {
+    mustExist(index, ctx, uniqueItems, field, "index", allProperties, propertyOptional);
+  }
+
+  mustExist(index, ctx, index.tablesByName.get("missiles.txt"), "skill", "missile", index.skills, optional);
+
+  const monStats = index.tablesByName.get("monstats.txt");
+  mustExist(index, ctx, monStats, "monsound", "id", index.monSounds, optional);
+  mustExist(index, ctx, monStats, "umonsound", "id", index.monSounds, optional);
+
+  const skills = index.tablesByName.get("skills.txt");
+  mustExist(index, ctx, skills, "skilldesc", "skill", index.skillDescs, optional);
+  for (const field of ["srvmissile", "srvmissilea", "srvmissileb", "srvmissilec", "cltmissile", "cltmissilea", "cltmissileb", "cltmissilec", "cltmissiled"]) {
+    mustExist(index, ctx, skills, field, "skill", index.missiles, optional);
+  }
+  validateSkillSummode(index, ctx, skills);
+
+  requiredString(index, ctx, index.tablesByName.get("armor.txt"), "namestr", "name");
+  requiredString(index, ctx, index.tablesByName.get("misc.txt"), "namestr", "name");
+  requiredString(index, ctx, index.tablesByName.get("weapons.txt"), "namestr", "name");
 }
 
 function lintMissileRangeFieldSemantics(index, ctx) {
@@ -482,25 +578,25 @@ function lintStringCheck(index, ctx) {
 
 function lintItemSockets(index, ctx) {
   const itemTypes = index.tablesByName.get("itemtypes.txt");
+  const armor = index.tablesByName.get("armor.txt");
+  const misc = index.tablesByName.get("misc.txt");
+  const weapons = index.tablesByName.get("weapons.txt");
+  if (!armor || !misc || !weapons || !itemTypes) return;
   const itemTypeRows = rowsByKey(itemTypes, "code");
-  if (itemTypes) {
-    itemTypes.eachRow((row) => {
-      const threshold1 = integerFromRow(row, "maxsocketslevelthreshold1");
-      const threshold2 = integerFromRow(row, "maxsocketslevelthreshold2");
-      const sockets = ["maxsockets1", "maxsockets2", "maxsockets3"].map((columnName) => [columnName, integerFromRow(row, columnName)]);
-      if (threshold1 !== null && threshold2 !== null && threshold1 > threshold2) ctx.add(itemTypes, row.rowIndex, "maxsocketslevelthreshold1", "MaxSocketsLevelThreshold1 must be less than or equal to MaxSocketsLevelThreshold2.");
-      for (let socketIndex = 0; socketIndex < sockets.length; socketIndex += 1) {
-        const [columnName, value] = sockets[socketIndex];
-        if (value === null) continue;
-        if (value < 0 || value > 6) ctx.add(itemTypes, row.rowIndex, columnName, `${columnName} must be between 0 and 6.`);
-        const next = sockets[socketIndex + 1]?.[1];
-        if (next !== undefined && next !== null && value > next) ctx.add(itemTypes, row.rowIndex, columnName, `${columnName} must be less than or equal to ${sockets[socketIndex + 1][0]}.`);
-      }
-    });
-  }
-  for (const fileName of ["armor.txt", "misc.txt", "weapons.txt"]) {
-    const table = index.tablesByName.get(fileName);
-    if (!table) continue;
+  itemTypes.eachRow((row) => {
+    const threshold1 = integerFromRow(row, "maxsocketslevelthreshold1");
+    const threshold2 = integerFromRow(row, "maxsocketslevelthreshold2");
+    const sockets = ["maxsockets1", "maxsockets2", "maxsockets3"].map((columnName) => [columnName, integerFromRow(row, columnName)]);
+    if (threshold1 !== null && threshold2 !== null && threshold1 > threshold2) ctx.add(itemTypes, row.rowIndex, "maxsocketslevelthreshold1", "MaxSocketsLevelThreshold1 must be less than or equal to MaxSocketsLevelThreshold2.");
+    for (let socketIndex = 0; socketIndex < sockets.length; socketIndex += 1) {
+      const [columnName, value] = sockets[socketIndex];
+      if (value === null) continue;
+      if (value < 0 || value > 6) ctx.add(itemTypes, row.rowIndex, columnName, `${columnName} must be between 0 and 6.`);
+      const next = sockets[socketIndex + 1]?.[1];
+      if (next !== undefined && next !== null && value > next) ctx.add(itemTypes, row.rowIndex, columnName, `${columnName} must be less than or equal to ${sockets[socketIndex + 1][0]}.`);
+    }
+  });
+  for (const table of [misc, armor, weapons]) {
     table.eachRow((row) => {
       const hasInv = integerFromRow(row, "hasinv");
       if (hasInv !== 1) return;
@@ -509,9 +605,19 @@ function lintItemSockets(index, ctx) {
       const invWidth = integerFromRow(row, "invwidth") ?? 0;
       const invHeight = integerFromRow(row, "invheight") ?? 0;
       const typeLimit = Math.max(maxSocketsForType(itemTypeRows.get(normalizeToken(rowValue(row, "type")))), maxSocketsForType(itemTypeRows.get(normalizeToken(rowValue(row, "type2")))));
-      if (gemSockets !== null && typeLimit > 0 && gemSockets > typeLimit) ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds the socket limit (${typeLimit}) from type/type2.`);
+      const name = clean(row.get("name")) || rowLabelFor(table, row.rowIndex);
+      const d2rLine = row.rowIndex + 3;
+      if (gemSockets !== null && gemSockets > typeLimit) {
+        ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds the socket limit (${typeLimit}) from type/type2.`, {
+          d2rMessage: `${table.displayName}, line ${d2rLine}: gemsockets (${gemSockets}) won't spawn on '${name}' because its type(s) won't allow more than ${typeLimit} sockets.`
+        });
+      }
       if (gemApplyType !== null && (gemApplyType < 0 || gemApplyType > 3)) ctx.add(table, row.rowIndex, "gemapplytype", "gemapplytype must be between 0 and 3.");
-      if (gemSockets !== null && invWidth > 0 && invHeight > 0 && gemSockets > invWidth * invHeight) ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds inventory size ${invWidth} x ${invHeight}.`);
+      if (gemSockets !== null && invWidth > 0 && invHeight > 0 && gemSockets > invWidth * invHeight) {
+        ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds inventory size ${invWidth} x ${invHeight}.`, {
+          d2rMessage: `${table.displayName}, line ${d2rLine}: '${name}' has more gemsockets (${gemSockets}) than inventory spaces used (${invWidth} x ${invHeight} = ${invWidth * invHeight})`
+        });
+      }
     });
   }
 }
@@ -540,8 +646,9 @@ function lintNoIllegalGambling(index, ctx) {
 function lintValidStatParameters(index, ctx) {
   const properties = rowsByKey(index.tablesByName.get("properties.txt"), "code");
   const itemStatCost = rowsByKey(index.tablesByName.get("itemstatcost.txt"), "stat");
-  if (!properties.size || !itemStatCost.size) return;
-  const skillRows = index.tablesByName.get("skills.txt")?.rows?.length ?? 0;
+  const skillsTable = index.tablesByName.get("skills.txt");
+  if (!properties.size || !itemStatCost.size || !skillsTable) return;
+  const skillRows = skillsTable.rows?.length ?? 0;
   for (const table of index.tables) {
     const columns = propertyTupleColumns(table);
     if (!columns.length) continue;
@@ -636,14 +743,33 @@ function lintValidWaypoints(index, ctx) {
 function lintMonsterChains(index, ctx) {
   const table = index.tablesByName.get("monstats.txt");
   if (!table?.hasColumn("id") || !table.hasColumn("baseid") || !table.hasColumn("nextinclass")) return;
-  const ids = rowsByKey(table, "id");
+  const chains = [];
   table.eachRow((row) => {
-    if (clean(row.get("boss")) === "1" || clean(row.get("primeevil")) === "1") return;
-    const next = clean(row.get("nextinclass"));
-    if (next && !ids.has(normalizeToken(next))) ctx.add(table, row.rowIndex, "nextinclass", `nextinclass "${next}" does not exist in monstats.txt.`);
+    const boss = clean(row.get("boss"));
+    const primeevil = clean(row.get("primeevil"));
+    if (boss && boss !== "0" || primeevil && primeevil !== "0") return;
     const baseId = clean(row.get("baseid"));
-    if (baseId && !ids.has(normalizeToken(baseId))) ctx.add(table, row.rowIndex, "baseid", `baseid "${baseId}" does not exist in monstats.txt.`);
+    const id = clean(row.get("id"));
+    const nextInChain = clean(row.get("nextinclass"));
+    const foundIndex = chains.findIndex((chain) => chain.baseId === baseId);
+    if (foundIndex < 0) {
+      chains.push({ baseId, id, nextInChain, rowIndex: row.rowIndex });
+      return;
+    }
+    const found = chains[foundIndex];
+    if (found.nextInChain !== id) {
+      ctx.add(table, found.rowIndex, "nextinclass", `Broken baseId chain "${baseId}".`, {
+        d2rMessage: `${table.displayName}, line ${found.rowIndex + 1}: broken baseId chain '${baseId}', nextInClass for '${found.id}' should point to '${id}' but it points to '${found.nextInChain}' instead`
+      });
+    }
+    chains.splice(foundIndex, 1, { baseId, id, nextInChain, rowIndex: row.rowIndex });
   });
+  for (const chain of chains) {
+    if (!chain.nextInChain) continue;
+    ctx.add(table, chain.rowIndex, "nextinclass", `nextInClass for "${chain.id}" (${chain.nextInChain}) does not exist.`, {
+      d2rMessage: `${table.displayName}, line ${chain.rowIndex + 1}: nextInClass for '${chain.id}' (${chain.nextInChain}) doesn't exist.`
+    });
+  }
 }
 
 function lintEqualSkills(index, ctx) {
@@ -686,7 +812,7 @@ function lintNumericBounds(index, ctx) {
   validVersion(index.tablesByName.get("cubemain.txt"), ctx, "description", "version", (row) => clean(row.get("enabled")) === "1");
 
   for (const table of index.tables) {
-    const rules = NUMERIC_BOUNDS[table.fileName];
+    const rules = numericBoundsForProfile(index.profile, table.fileName);
     if (!rules) continue;
     for (const [columnName, [min, max]] of Object.entries(rules)) {
       if (!table.hasColumn(columnName)) continue;
@@ -710,6 +836,22 @@ function lintNumericBounds(index, ctx) {
       });
     }
   }
+}
+
+function acceptedColumnsForProfile(profile, fileName) {
+  return new Set(PROFILE_ACCEPTED_COLUMNS[profile]?.[fileName] ?? []);
+}
+
+function nonStandardColumnsForProfile(profile, fileName) {
+  return new Set(PROFILE_NON_STANDARD_COLUMNS[profile]?.[fileName] ?? []);
+}
+
+function numericBoundsForProfile(profile, fileName) {
+  const base = NUMERIC_BOUNDS[fileName];
+  const override = PROFILE_NUMERIC_BOUNDS[profile]?.[fileName];
+  if (!base) return override;
+  if (!override) return base;
+  return { ...base, ...override };
 }
 
 function lintBooleanFields(index, ctx) {
@@ -771,12 +913,13 @@ function lintCubeOutputs(index, ctx) {
       validateCubeItemReference(index, ctx, table, row.rowIndex, columnName, parsed, "output");
       validateOutputQualifiers(ctx, table, row.rowIndex, columnName, parsed);
     }
-    for (let indexNo = 1; indexNo <= 5; indexNo += 1) {
-      const propColumn = `mod ${indexNo}`;
+    for (const propColumn of CUBE_OUTPUT_MOD_COLUMNS) {
       if (!table.hasColumn(propColumn)) continue;
       const property = clean(row.get(propColumn));
-      if (property && index.hasWorkspace && index.properties.size && !index.properties.has(normalizeToken(property))) {
-        ctx.add(table, row.rowIndex, propColumn, `Unknown cube output property "${property}".`);
+      if (property && index.hasWorkspace && index.tablesByName.has("properties.txt") && !index.properties.has(property) && !index.propertyGroups.has(property)) {
+        ctx.add(table, row.rowIndex, propColumn, `Unknown cube output property "${property}".`, {
+          d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid property '${property}' for '${propColumn}' in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
+        });
       }
     }
   });
@@ -953,15 +1096,69 @@ function tableFromDocument(doc) {
   };
 }
 
-function setFromColumn(tablesByName, fileName, columnName) {
+function setFromColumn(tablesByName, fileName, columnName, options = {}) {
   const table = tablesByName.get(fileName);
   const values = new Set();
   if (!table?.hasColumn(columnName)) return values;
   table.eachRow((row) => {
     const value = clean(row.get(columnName));
-    if (value) values.add(normalizeToken(value));
+    if (value) values.add(options.caseSensitive ? value : normalizeToken(value));
   });
   return values;
+}
+
+function numberedFields(prefix, suffix, count, start = 1) {
+  const fields = [];
+  for (let value = start; value < start + count; value += 1) fields.push(`${prefix}${value}${suffix}`);
+  return fields;
+}
+
+function mustExist(index, ctx, table, fieldName, labelColumn, targetValues, options = {}) {
+  if (!table?.hasColumn(fieldName) || !table.hasColumn(labelColumn)) return;
+  if (!(targetValues instanceof Set) || targetValues.size === 0) return;
+  const allowNull = options.allowNull === true;
+  const nullChecker = options.nullChecker ?? ((value) => clean(value) === "" || value === undefined);
+  const normalizeReference = options.caseSensitive ? clean : normalizeToken;
+  table.eachRow((row) => {
+    const label = clean(row.get(labelColumn));
+    if (!label || label === "Expansion" || label === "*end*  do not remove" || label.startsWith("@")) return;
+    const value = clean(row.get(fieldName));
+    if (allowNull && nullChecker(value)) return;
+    if (!targetValues.has(normalizeReference(value))) {
+      ctx.add(table, row.rowIndex, fieldName, `${fieldName} "${value}" not found for "${label}".`, {
+        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${fieldName} '${value}' not found for '${label}'`
+      });
+    }
+  });
+}
+
+function requiredString(index, ctx, table, fieldName, labelColumn) {
+  if (!table?.hasColumn(fieldName) || !table.hasColumn(labelColumn)) return;
+  table.eachRow((row) => {
+    const label = clean(row.get(labelColumn));
+    if (!label || label === "Expansion" || label === "Null" || label === "Elite Uniques" || label.startsWith("@")) return;
+    if (!clean(row.get(fieldName))) {
+      ctx.add(table, row.rowIndex, fieldName, `${fieldName} is blank but required for "${label}".`, {
+        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${fieldName} for '${label}' is blank but required`
+      });
+    }
+  });
+}
+
+function validateSkillSummode(index, ctx, table) {
+  if (!table?.hasColumn("summon") || !table.hasColumn("summode") || !table.hasColumn("skill")) return;
+  if (!(index.monModes instanceof Set) || index.monModes.size === 0) return;
+  table.eachRow((row) => {
+    const summon = clean(row.get("summon"));
+    if (!summon) return;
+    const summode = clean(row.get("summode"));
+    const skill = clean(row.get("skill"));
+    if (!index.monModes.has(normalizeToken(summode))) {
+      ctx.add(table, row.rowIndex, "summode", `Invalid summode "${summode}" for "${skill}".`, {
+        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid summode '${summode}' for '${skill}'`
+      });
+    }
+  });
 }
 
 function rowLabelFor(table, rowIndex) {
@@ -999,6 +1196,139 @@ const ROW_LABEL_COLUMNS = {
   "uniqueitems.txt": ["index"],
   "weapons.txt": ["code", "name"]
 };
+
+const CUBE_OUTPUT_MOD_COLUMNS = [
+  ...numberedFields("mod ", "", 5),
+  ...numberedFields("b mod ", "", 5),
+  ...numberedFields("c mod ", "", 5)
+];
+
+const STAT_PARAMETER_TUPLES = new Map([
+  ["automagic.txt", buildStatTuples(
+    numberedFields("mod", "code", 3),
+    numberedFields("mod", "param", 3),
+    numberedFields("mod", "min", 3),
+    numberedFields("mod", "max", 3)
+  )],
+  ["gems.txt", buildStatTuples(
+    [
+      ...numberedFields("weaponmod", "code", 3),
+      ...numberedFields("helmmod", "code", 3),
+      ...numberedFields("shieldmod", "code", 3)
+    ],
+    [
+      ...numberedFields("weaponmod", "param", 3),
+      ...numberedFields("helmmod", "param", 3),
+      ...numberedFields("shieldmod", "param", 3)
+    ],
+    [
+      ...numberedFields("weaponmod", "min", 3),
+      ...numberedFields("helmmod", "min", 3),
+      ...numberedFields("shieldmod", "min", 3)
+    ],
+    [
+      ...numberedFields("weaponmod", "max", 3),
+      ...numberedFields("helmmod", "max", 3),
+      ...numberedFields("shieldmod", "max", 3)
+    ]
+  )],
+  ["magicprefix.txt", buildStatTuples(
+    numberedFields("mod", "code", 3),
+    numberedFields("mod", "param", 3),
+    numberedFields("mod", "min", 3),
+    numberedFields("mod", "max", 3)
+  )],
+  ["magicsuffix.txt", buildStatTuples(
+    numberedFields("mod", "code", 3),
+    numberedFields("mod", "param", 3),
+    numberedFields("mod", "min", 3),
+    numberedFields("mod", "max", 3)
+  )],
+  ["monprop.txt", buildStatTuples(
+    [
+      ...numberedFields("prop", "", 6),
+      ...numberedFields("prop", " (n)", 6),
+      ...numberedFields("prop", " (h)", 6)
+    ],
+    [
+      ...numberedFields("par", "", 6),
+      ...numberedFields("par", " (n)", 6),
+      ...numberedFields("par", " (h)", 6)
+    ],
+    [
+      ...numberedFields("min", "", 6),
+      ...numberedFields("min", " (n)", 6),
+      ...numberedFields("min", " (h)", 6)
+    ],
+    [
+      "max1", "max2", "max3", "max5", "max5", "max6",
+      ...numberedFields("max", " (n)", 6),
+      ...numberedFields("max", " (h)", 6)
+    ]
+  )],
+  ["qualityitems.txt", buildStatTuples(
+    numberedFields("mod", "code", 2),
+    numberedFields("mod", "param", 2),
+    numberedFields("mod", "min", 2),
+    numberedFields("mod", "max", 2)
+  )],
+  ["runes.txt", buildStatTuples(
+    numberedFields("t1code", "", 7),
+    numberedFields("t1param", "", 7),
+    numberedFields("t1min", "", 7),
+    numberedFields("t1max", "", 7)
+  )],
+  ["setitems.txt", buildStatTuples(
+    [
+      ...numberedFields("prop", "", 9),
+      ...numberedFields("aprop", "a", 5),
+      ...numberedFields("aprop", "b", 5)
+    ],
+    [
+      ...numberedFields("par", "", 9),
+      ...numberedFields("apar", "a", 5),
+      ...numberedFields("apar", "b", 5)
+    ],
+    [
+      ...numberedFields("min", "", 9),
+      ...numberedFields("amin", "a", 5),
+      ...numberedFields("amin", "b", 5)
+    ],
+    [
+      ...numberedFields("max", "", 9),
+      ...numberedFields("amax", "a", 5),
+      ...numberedFields("amax", "b", 5)
+    ]
+  )],
+  ["sets.txt", buildStatTuples(
+    [
+      ...numberedFields("pcode", "a", 4, 2),
+      ...numberedFields("pcode", "b", 4, 2),
+      ...numberedFields("fcode", "", 8)
+    ],
+    [
+      ...numberedFields("pparam", "a", 4, 2),
+      ...numberedFields("pparam", "b", 4, 2),
+      ...numberedFields("fparam", "", 8)
+    ],
+    [
+      ...numberedFields("pmin", "a", 4, 2),
+      ...numberedFields("pmin", "b", 4, 2),
+      ...numberedFields("fmin", "", 8)
+    ],
+    [
+      ...numberedFields("pmax", "a", 4, 2),
+      ...numberedFields("pmax", "b", 4, 2),
+      ...numberedFields("fmax", "", 8)
+    ]
+  )],
+  ["uniqueitems.txt", buildStatTuples(
+    numberedFields("prop", "", 12),
+    numberedFields("par", "", 12),
+    numberedFields("min", "", 12),
+    numberedFields("max", "", 12)
+  )]
+]);
 
 function unionSets(...sets) {
   const values = new Set();
@@ -1053,41 +1383,23 @@ function isStringLikeTable(table) {
 }
 
 function propertyTupleColumns(table) {
-  if (!table || table.fileName === "properties.txt") return [];
-  const tuples = [];
-  for (const header of table.headers) {
-    const normalized = normalizeHeader(header);
-        const tuple = propertyTupleForHeader(table, header, normalized);
-    if (tuple) tuples.push(tuple);
-  }
-  return tuples;
+  const tuples = STAT_PARAMETER_TUPLES.get(table?.fileName);
+  if (!table || !tuples) return [];
+  return tuples.map((tuple) => ({
+    property: table.hasColumn(tuple.property) ? tuple.property : "",
+    param: table.hasColumn(tuple.param) ? tuple.param : "",
+    min: table.hasColumn(tuple.min) ? tuple.min : "",
+    max: table.hasColumn(tuple.max) ? tuple.max : ""
+  })).filter((tuple) => tuple.property && (tuple.param || tuple.min || tuple.max));
 }
 
-function propertyTupleForHeader(table, header, normalized) {
-  let match = normalized.match(/^prop(\d+)$/);
-  if (match) return tupleIfUseful(table, header, [`par${match[1]}`], [`min${match[1]}`], [`max${match[1]}`]);
-  match = normalized.match(/^prop(\d+) \(([nh])\)$/);
-  if (match) return tupleIfUseful(table, header, [`par${match[1]} (${match[2]})`], [`min${match[1]} (${match[2]})`], [`max${match[1]} (${match[2]})`]);
-  match = normalized.match(/^mod\s+(\d+)$/);
-  if (match) return tupleIfUseful(table, header, [`mod ${match[1]} param`], [`mod ${match[1]} min`], [`mod ${match[1]} max`]);
-  match = normalized.match(/^mod(\d+)code$/);
-  if (match) return tupleIfUseful(table, header, [`mod${match[1]}param`], [`mod${match[1]}min`], [`mod${match[1]}max`]);
-  match = normalized.match(/^(.+mod)(\d+)code$/);
-  if (match) return tupleIfUseful(table, header, [`${match[1]}${match[2]}param`], [`${match[1]}${match[2]}min`], [`${match[1]}${match[2]}max`]);
-  match = normalized.match(/^t(\d+)code(\d+)$/);
-  if (match) return tupleIfUseful(table, header, [`t${match[1]}param${match[2]}`], [`t${match[1]}min${match[2]}`], [`t${match[1]}max${match[2]}`]);
-  return null;
-}
-
-function tupleIfUseful(table, property, paramCandidates, minCandidates, maxCandidates) {
-  const param = firstExistingColumn(table, paramCandidates);
-  const min = firstExistingColumn(table, minCandidates);
-  const max = firstExistingColumn(table, maxCandidates);
-  return param || min || max ? { property, param, min, max } : null;
-}
-
-function firstExistingColumn(table, candidates) {
-  return candidates.find((columnName) => table.hasColumn(columnName)) ?? "";
+function buildStatTuples(properties, params, mins, maxs) {
+  return properties.map((property, index) => ({
+    property,
+    param: params[index] ?? "",
+    min: mins[index] ?? "",
+    max: maxs[index] ?? ""
+  }));
 }
 
 function propertyStats(propertyRow) {
@@ -1095,10 +1407,7 @@ function propertyStats(propertyRow) {
   const implicitStatByFunction = {
     "5": "mindamage",
     "6": "maxdamage",
-    "7": "secondary_mindamage",
-    "8": "secondary_maxdamage",
-    "20": "item_armor_percent",
-    "21": "item_maxdamage_percent"
+    "7": "item_mindamage_percent"
   };
   for (let index = 1; index <= 7; index += 1) {
     const func = clean(rowValue(propertyRow, `func${index}`));
@@ -1161,11 +1470,23 @@ function validateCubeItemReference(index, ctx, table, rowIndex, columnName, pars
   if (!index.tablesByName.has("armor.txt") || !index.tablesByName.has("misc.txt") || !index.tablesByName.has("weapons.txt") || !index.tablesByName.has("setitems.txt") || !index.tablesByName.has("uniqueitems.txt") || !index.tablesByName.has("itemtypes.txt")) return;
   const token = normalizeToken(parsed.code);
   const compact = token.replace(/\s+/g, "");
-  if (!token || token === "any" || token === "useitem" || token === "usetype" || compact === "cowportal" || compact === "redportal" || compact === "pandemoniumportal" || compact === "pandemoniumfinaleportal" || token === "pandportal") return;
+  if (!token) return;
+  if (kind === "input" && token === "any") return;
+  if (token === "useitem" || token === "usetype") {
+    if (kind === "output" && columnName !== "output") {
+      ctx.add(table, rowIndex, columnName, `${parsed.code} is only valid for the first cube output.`, {
+        d2rMessage: `${table.displayName}, line ${rowIndex + 1}: ${parsed.code} is not valid in '${columnName}', it is only valid for the first output`
+      });
+    }
+    return;
+  }
+  if (compact === "cowportal" || compact === "redportal" || compact === "pandemoniumportal" || compact === "pandemoniumfinaleportal" || token === "pandportal") return;
   const valid = index.itemCodes.has(token) || index.itemTypes.has(token) || index.setItems.has(token) || index.uniqueItems.has(token);
   if (!valid) {
     ctx.add(table, rowIndex, columnName, `Unknown cube ${kind} "${parsed.code}".`, {
-      d2rMessage: `${table.displayName}, line ${rowIndex + 1}: couldn't find '${parsed.code}' for ${columnName} in recipe '${rawRowValue(table, rowIndex, "description")}'`
+      d2rMessage: kind === "output"
+        ? `${table.displayName}, line ${rowIndex + 1}: could not find '${parsed.code}' for ${columnName} in recipe '${rawRowValue(table, rowIndex, "description")}'`
+        : `${table.displayName}, line ${rowIndex + 1}: couldn't find '${parsed.code}' for ${columnName} in recipe '${rawRowValue(table, rowIndex, "description")}'`
     });
   }
 }
@@ -1201,10 +1522,25 @@ function validVersion(table, ctx, labelColumn, versionColumn, shouldConsider = n
     if (!label || label === "Expansion" || label === "Armor" || label === "Elite Uniques" || label === "Rings" || label === "Class Specific" || label.startsWith("@")) return;
     if (version === "0" || version === "1" || version === "100") return;
     if (shouldConsider && !shouldConsider(row)) return;
+    if (isDummyVersionRow(table, row, labelColumn, versionColumn)) return;
     ctx.add(table, row.rowIndex, versionColumn, `Invalid version "${version}" for "${label}".`, {
       d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid 'version' (${version}) for '${label}'`
     });
   });
+}
+
+function isDummyVersionRow(table, row, labelColumn, versionColumn) {
+  const label = clean(row.get(labelColumn));
+  const version = clean(row.get(versionColumn));
+  if (!label || label.startsWith("@") || version) return false;
+  const ignoredColumns = new Set([normalizeHeader(labelColumn), normalizeHeader(versionColumn), "skipindocs"]);
+  const values = table.rows[row.rowIndex] ?? [];
+  for (let columnIndex = 0; columnIndex < table.headers.length; columnIndex += 1) {
+    const header = normalizeHeader(table.headers[columnIndex]);
+    if (ignoredColumns.has(header) || header.startsWith("*")) continue;
+    if (clean(values[columnIndex])) return false;
+  }
+  return true;
 }
 
 function numericBoundsLabel(table, row) {
@@ -1254,7 +1590,9 @@ function isHardcodedWarpException(id, warpColumn) {
 function parseCubeItem(value) {
   const raw = clean(value);
   if (!raw) return { raw: "", code: "", qualifiers: [], qty: null };
-  const parts = raw.split(",").map((part) => clean(part)).filter(Boolean);
+  const quoted = raw.match(/"(.+)"/);
+  const formula = quoted ? quoted[1] : raw;
+  const parts = formula.split(",").map((part) => clean(part)).filter(Boolean);
   let code = parts[0] ?? "";
   const qualifiers = [];
   let qty = null;

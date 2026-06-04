@@ -936,6 +936,7 @@ function scheduleLintFull(reason = "change", delay = 420) {
 
 async function runLintNow(reason = "lint", version = ++state.lint.version) {
   clearTimeout(state.lint.timer);
+  state.lint.timer = 0;
   if (!lintActive() || version !== state.lint.version) return;
   state.lint.running = true;
   state.lint.status = state.workspace?.files?.length ? "Indexing workspace..." : `Linting ${state.lint.settings.profile}...`;
@@ -974,6 +975,7 @@ function lintActive() {
 
 function cancelLintJobs({ clearDiagnostics = false } = {}) {
   clearTimeout(state.lint.timer);
+  state.lint.timer = 0;
   state.lint.version += 1;
   state.lint.running = false;
   state.lint.status = "";
