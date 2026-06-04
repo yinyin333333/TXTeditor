@@ -1,7 +1,7 @@
 {
   "name": "txteditor",
-  "version": "0.3.0",
-  "description": "TXTeditor 0.3 - fast tabular text editing for large files",
+  "version": "0.32.0",
+  "description": "TXTeditor 0.32 - fast tabular text editing for large files",
   "author": "yinyin333333",
   "license": "GPL-3.0-or-later",
   "private": true,

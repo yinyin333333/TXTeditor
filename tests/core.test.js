@@ -9,6 +9,7 @@ import {
   addColumnsCommand,
   addRowsCommand,
   clearRangesCommand,
+  cloneRowsCommand,
   copyRange,
   copyRanges,
   deleteColumnsCommand,
@@ -56,17 +57,24 @@ test("parses and serializes TSV while preserving CRLF and final newline", () => 
   assert.equal(doc.toText(), "a\tb\r\n1\t2\r\n");
 });
 
-test("initial column sizing is header-first with only capped body influence", () => {
+test("initial column sizing is compact and header-first", () => {
   const doc = TableDocument.fromText("x.txt", "very_long_header_name\tb\nshort\tmedium_content\nshort\t" + "x".repeat(200));
-  assert.ok(doc.columnWidths[0] > 120);
-  assert.ok(doc.columnWidths[1] < 120);
-  assert.ok(doc.columnWidths[1] <= 82 + 40);
+  assert.ok(doc.columnWidths[0] > 160);
+  assert.ok(doc.columnWidths[1] <= 64);
 });
 
 test("initial column sizing prioritizes the real first row header", () => {
   const doc = TableDocument.fromText("x.txt", "really_long_header_name_that_should_not_clip\tid\nx\t1\ny\t2");
   assert.ok(doc.columnWidths[0] > doc.columnWidths[1] * 2);
-  assert.ok(doc.columnWidths[0] >= 300);
+  assert.ok(doc.columnWidths[0] >= 280);
+});
+
+test("short headers get compact independent initial widths per document", () => {
+  const stats = TableDocument.fromText("stats.txt", "class\tstr\tdex\tint\tvit\nama\t20\t25\t15\t20");
+  const skills = TableDocument.fromText("skills.txt", "really_long_skill_header\tid\nvalue\t1");
+  assert.ok(stats.columnWidths.every((width) => width <= 64));
+  assert.ok(skills.columnWidths[0] > stats.columnWidths[0] * 3);
+  assert.ok(skills.columnWidths[1] <= 64);
 });
 
 test("cell commands undo and redo without full table snapshots", () => {
@@ -168,6 +176,25 @@ test("insert and delete row are grouped undoable commands", () => {
   assert.equal(doc.rowCount, 1);
   undo.undo(doc);
   assert.equal(doc.getCell(1, 1), "2");
+});
+
+test("clone rows inserts body-row copies below the selected range and skips the header row", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4\n5\t6");
+  const undo = new UndoManager();
+  const command = cloneRowsCommand(doc, [0, 1, 2], 3);
+  command.redo(doc);
+  undo.push(command);
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.rowCount, 6);
+  assert.equal(doc.getCell(3, 0), "1");
+  assert.equal(doc.getCell(4, 0), "3");
+  assert.equal(doc.getCell(5, 0), "5");
+  undo.undo(doc);
+  assert.equal(doc.rowCount, 4);
+  assert.equal(doc.getCell(3, 0), "5");
+  undo.redo(doc);
+  assert.equal(doc.getCell(3, 1), "2");
+  assert.equal(doc.getCell(4, 1), "4");
 });
 
 test("add row and add column append grouped undoable changes", () => {
@@ -292,6 +319,13 @@ test("explicit auto-fit can still expand for long body content", () => {
   const initial = doc.columnWidths[0];
   doc.autoFitColumn(0, 300);
   assert.ok(doc.columnWidths[0] > initial);
+});
+
+test("manual column width survives table shape refresh", () => {
+  const doc = TableDocument.fromText("x.txt", "class\tstr\nama\t20");
+  doc.columnWidths[0] = 240;
+  doc.refreshShape();
+  assert.equal(doc.columnWidths[0], 240);
 });
 
 test("keyboard commit movement targets expected cells", () => {
@@ -880,4 +914,79 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.match(source, /state\.problemsVisible/);
   assert.match(source, /ensureWorkspaceIndexed/);
   assert.match(source, /cancelLintJobs/);
+});
+
+test("Problems lint scheduling is gated by the active P panel and lint enabled state", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /function scheduleLintForChange\(doc\)\s*\{\s*if \(!lintActive\(\)\) return;/);
+  assert.match(source, /function scheduleLintFull\(reason = "change", delay = 420\)\s*\{\s*if \(!lintActive\(\)\) return;/);
+  assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.settings\.enabled;/);
+  assert.match(source, /state\.problemsVisible && state\.lint\.settings\.enabled[\s\S]*scheduleLintFull\("problems-opened", 0\)/);
+});
+
+test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /function openContextSubmenu\(group\)/);
+  assert.match(source, /candidate\.classList\.toggle\("active", candidate === group\)/);
+  assert.match(source, /state\.contextMenuActiveGroup = ""/);
+  assert.match(source, /if \(event\.key === "Escape" && !els\.contextMenu\.classList\.contains\("hidden"\)\)[\s\S]*hideContextMenu\(\)/);
+  assert.match(source, /\{ id: "clone-row", label: "Clone Row"/);
+  assert.equal(source.includes("Swap Rows"), false);
+  assert.match(css, /\.menu-group\.active > \.submenu\s*\{\s*display: block;/);
+  assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
+});
+
+test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(html, /id="searchPanel" class="modal-backdrop search-backdrop hidden"/);
+  assert.match(html, /class="modal search-modal"/);
+  assert.match(html, /id="searchInput" class="modal-input"/);
+  assert.match(html, /data-search-close/);
+  assert.doesNotMatch(html, /id="searchPanel" class="quick-panel/);
+  assert.match(source, /function closeSearch\(\)/);
+  assert.match(source, /if \(!editingCell && isTextInputTarget\(event\.target\)\) return;/);
+  assert.match(source, /function isTextInputTarget\(target\)/);
+  assert.match(source, /target\.closest\("input, textarea, select, \[contenteditable=''\], \[contenteditable='true'\]"\)/);
+  assert.match(source, /if \(event\.key === "Enter"\) \{\s*event\.preventDefault\(\);\s*findNext\(\);/);
+  assert.match(css, /\.modal-backdrop\s*\{[\s\S]*align-items: center;[\s\S]*justify-content: center;/);
+  assert.match(css, /\.search-modal\s*\{/);
+});
+
+test("initial canvas column fit is header-only and compact", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /autoFitInitialColumns\(\{ min = 56, max = 420, padding = 24 \} = \{\}\)/);
+  assert.match(source, /this\.ctx\.measureText\(this\.doc\.getCell\(0, column\)\)\.width \+ padding \* this\.zoom/);
+  assert.doesNotMatch(source, /for \(let row = 1; row < rows; row\+\+\)/);
+});
+
+test("quick typing edit commits on arrow navigation while explicit edit keeps caret behavior", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /this\.startEdit\(event\.key, true, "quick"\)/);
+  assert.match(source, /this\.startEdit\(null, false, "explicit"\)/);
+  assert.match(source, /this\.editMode === "quick" && isArrowNavigationKey\(event\.key\)/);
+  assert.match(source, /this\.commitEdit\(\);\s*this\.moveSelectionBy\(rowDelta, columnDelta\);/);
+  assert.match(source, /this\.host\.addEventListener\("dblclick", \(\) => this\.startEdit\(null, false, "explicit"\)\)/);
+  assert.match(source, /this\.editor\.selectionStart = this\.editor\.value\.length;\s*this\.editor\.selectionEnd = this\.editor\.value\.length;/);
+  assert.equal(source.includes("this.editor.select();"), false);
+});
+
+test("version metadata is bumped to TXTeditor 0.32", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
+  const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
+  const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
+  const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.equal(pkg.version, "0.32.0");
+  assert.equal(lock.version, "0.32.0");
+  assert.equal(lock.packages[""].version, "0.32.0");
+  assert.match(pkg.description, /TXTeditor 0\.32/);
+  assert.match(cargoToml, /version = "0\.32\.0"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.32/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.32\.0"/);
+  assert.equal(tauri.version, "0.32.0");
+  assert.match(readme, /TXTeditor 0\.32 is/);
 });

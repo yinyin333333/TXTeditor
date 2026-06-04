@@ -9,6 +9,7 @@ import {
   arithmeticCommand,
   clearRangeCommand,
   clearRangesCommand,
+  cloneRowsCommand,
   copyRange,
   copyRanges,
   deleteColumnsCommand,
@@ -120,6 +121,7 @@ const state = {
   problemsVisible: localStorage.getItem("txteditor.problems") === "visible",
   problemsHeight: savedProblemsHeight,
   contextHit: null,
+  contextMenuActiveGroup: "",
   theme: savedTheme,
   gridFont: savedGridFont,
   colorizeColumns: savedColorize,
@@ -185,6 +187,7 @@ const commandLabelsBase = [
   ["select-all", "Select All"],
   ["add-row", "Add Row"],
   ["insert-row", "Insert Row"],
+  ["clone-row", "Clone Row"],
   ["delete-row", "Delete Row"],
   ["clear-row", "Clear Row"],
   ["hide-row", "Hide Row"],
@@ -318,8 +321,17 @@ function wireEvents() {
   });
   wirePaneResizers();
   els.searchInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") findNext();
-    if (event.key === "Escape") els.searchPanel.classList.add("hidden");
+    if (event.key === "Enter") {
+      event.preventDefault();
+      findNext();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSearch();
+    }
+  });
+  els.searchPanel.addEventListener("click", (event) => {
+    if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();
   });
   els.paletteInput.addEventListener("input", renderPalette);
   els.paletteInput.addEventListener("keydown", (event) => {
@@ -334,6 +346,8 @@ function wireEvents() {
 
 function handleGlobalKeydown(event) {
   if (event.defaultPrevented) return;
+  const key = event.key.toLowerCase();
+  const editingCell = els.editor.classList.contains("active");
   if (event.key === "Escape" && !els.contextMenu.classList.contains("hidden")) {
     event.preventDefault();
     hideContextMenu();
@@ -341,8 +355,7 @@ function handleGlobalKeydown(event) {
   }
   if (event.key === "Escape" && !els.searchPanel.classList.contains("hidden")) {
     event.preventDefault();
-    els.searchPanel.classList.add("hidden");
-    els.host.focus();
+    closeSearch();
     return;
   }
   if (event.key === "Escape" && !els.palette.classList.contains("hidden")) {
@@ -351,9 +364,8 @@ function handleGlobalKeydown(event) {
     els.host.focus();
     return;
   }
-  const key = event.key.toLowerCase();
-  const editingCell = els.editor.classList.contains("active");
   if (editingCell && !(event.ctrlKey && ["s", "w"].includes(key))) return;
+  if (!editingCell && isTextInputTarget(event.target)) return;
   if (event.ctrlKey && (key === "+" || key === "=")) return prevent(event, () => runCommand("zoom-in"));
   if (event.ctrlKey && key === "-") return prevent(event, () => runCommand("zoom-out"));
   if (event.ctrlKey && key === "0") return prevent(event, () => runCommand("zoom-reset"));
@@ -545,6 +557,11 @@ function showSearch() {
   els.searchInput.select();
 }
 
+function closeSearch() {
+  els.searchPanel.classList.add("hidden");
+  els.host.focus();
+}
+
 function findNext() {
   const found = findInTable(activeDoc(), els.searchInput.value, state.selection.focus);
   if (!found) {
@@ -579,6 +596,7 @@ function runCommand(id) {
   if (id === "clear-selection") return execute(clearRangesCommand(doc, state.selection.ranges));
   if (id === "add-row") return addRows();
   if (id === "insert-row") return execute(insertRowCommand(doc, rect.top));
+  if (id === "clone-row") return cloneRows();
   if (id === "delete-row") return execute(deleteRowsCommand(doc, rect.top, rect.bottom - rect.top + 1));
   if (id === "clear-row") return execute(clearRangeCommand(doc, { top: rect.top, bottom: rect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row"));
   if (id === "hide-row") return execute(hiddenRowsCommand(rowsFromSelection(), true));
@@ -1173,6 +1191,19 @@ function autoFitRows(rows) {
   execute(command);
 }
 
+function cloneRows() {
+  const doc = activeDoc();
+  const rows = rowsForContextOperation().filter((row) => row > 0 && row < doc.rowCount);
+  if (!rows.length) return showError("Select one or more body rows to clone.");
+  const insertAt = clamp(Math.max(...rows) + 1, 1, doc.rowCount);
+  execute(cloneRowsCommand(doc, rows, insertAt));
+  const column = clamp(state.selection.focus.column, 0, Math.max(0, doc.columnCount - 1));
+  state.selection.setRange(insertAt, 0, insertAt + rows.length - 1, doc.columnCount - 1, { row: insertAt, column });
+  grid.scrollCellIntoView(insertAt, column);
+  grid.draw();
+  renderChrome();
+}
+
 function commitResize(resize) {
   if (!resize || resize.before === resize.current) return;
   const command = resize.kind === "column"
@@ -1209,6 +1240,7 @@ function renderPalette() {
 
 function showContextMenu({ x, y, hit }) {
   state.contextHit = hit;
+  state.contextMenuActiveGroup = "";
   const canUnhide = activeDoc().hiddenRows.size > 0 || activeDoc().hiddenColumns.size > 0;
   const entries = [
     { type: "submenu", label: "Column Operations", items: colItems() },
@@ -1230,7 +1262,13 @@ function showContextMenu({ x, y, hit }) {
     });
   }
   for (const group of els.contextMenu.querySelectorAll(".menu-group")) {
-    group.addEventListener("mouseenter", () => positionSubmenu(group));
+    const activate = () => openContextSubmenu(group);
+    group.addEventListener("mouseenter", activate);
+    group.querySelector(".submenu-label")?.addEventListener("focus", activate);
+    group.querySelector(".submenu-label")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      activate();
+    });
   }
   els.contextMenu.classList.remove("hidden");
   els.contextMenu.dataset.x = String(x);
@@ -1248,7 +1286,16 @@ function positionContextMenu() {
   const top = requestedY + rect.height + margin > window.innerHeight ? requestedY - rect.height : requestedY;
   els.contextMenu.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin))}px`;
   els.contextMenu.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin))}px`;
-  for (const group of els.contextMenu.querySelectorAll(".menu-group")) positionSubmenu(group);
+  for (const group of els.contextMenu.querySelectorAll(".menu-group.active")) positionSubmenu(group);
+}
+
+function openContextSubmenu(group) {
+  if (!group) return;
+  state.contextMenuActiveGroup = group.dataset.menuGroup ?? "";
+  for (const candidate of els.contextMenu.querySelectorAll(".menu-group")) {
+    candidate.classList.toggle("active", candidate === group);
+  }
+  positionSubmenu(group);
 }
 
 function positionSubmenu(group) {
@@ -1274,6 +1321,8 @@ function positionSubmenu(group) {
 
 function hideContextMenu() {
   els.contextMenu.classList.add("hidden");
+  state.contextMenuActiveGroup = "";
+  for (const group of els.contextMenu.querySelectorAll(".menu-group.active")) group.classList.remove("active");
 }
 
 function menuButton(item) {
@@ -1286,13 +1335,15 @@ function menuEntry(entry) {
 }
 
 function submenu(label, items) {
-  return `<div class="menu-group"><button class="submenu-label"><span>${label}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(menuButton).join("")}</div></div>`;
+  const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${label}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(menuButton).join("")}</div></div>`;
 }
 
 function rowItems() {
   return [
     { id: "add-row", label: "Add Rows..." },
     { id: "insert-row", label: "Insert Row" },
+    { id: "clone-row", label: "Clone Row", disabled: rowsForContextOperation().filter((row) => row > 0 && row < activeDoc().rowCount).length === 0 },
     { id: "hide-row", label: "Hide Row(s)" },
     { id: "delete-row", label: "Delete Row(s)" }
   ];
@@ -1519,6 +1570,13 @@ function rowsFromSelection() {
   return sortedUnique(state.selection.ranges.flatMap((rect) => range(rect.top, rect.bottom)));
 }
 
+function rowsForContextOperation() {
+  const hit = state.contextHit;
+  const doc = activeDoc();
+  if (hit?.kind === "row-header" && !state.selection.hasFullRow(hit.row, doc.columnCount)) return [hit.row];
+  return rowsFromSelection();
+}
+
 function columnsFromSelection() {
   return sortedUnique(state.selection.ranges.flatMap((rect) => range(rect.left, rect.right)));
 }
@@ -1539,6 +1597,11 @@ function range(start, end) {
 
 function sortedUnique(values) {
   return [...new Set(values)].sort((a, b) => a - b);
+}
+
+function isTextInputTarget(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
 }
 
 function isTextLikeFile(file) {

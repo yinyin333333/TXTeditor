@@ -23,7 +23,16 @@ const allTargets = [
   "node_modules"
 ];
 
-const targets = mode === "all" ? allTargets : buildTargets;
+const cleanupPatterns = [
+  /^.*\.log$/i,
+  /^TXTeditor_lint_result.*\.txt$/i,
+  /^.*_lint_result.*\.txt$/i
+];
+
+const targets = [
+  ...(mode === "all" ? allTargets : buildTargets),
+  ...matchedCleanupFiles()
+];
 
 for (const relative of targets) {
   const absolute = path.resolve(root, relative);
@@ -33,4 +42,10 @@ for (const relative of targets) {
   if (!fs.existsSync(absolute)) continue;
   fs.rmSync(absolute, { recursive: true, force: true });
   console.log(`removed ${relative}`);
+}
+
+function matchedCleanupFiles() {
+  return fs.readdirSync(root)
+    .filter((name) => cleanupPatterns.some((pattern) => pattern.test(name)))
+    .filter((name) => fs.statSync(path.resolve(root, name)).isFile());
 }

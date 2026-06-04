@@ -88,6 +88,7 @@ export class CanvasGrid {
     this.resizing = null;
     this.resizeGuide = null;
     this.editing = false;
+    this.editMode = null;
     this.colorizeColumns = false;
     this.diagnosticsByCell = new Map();
     this.raf = 0;
@@ -170,7 +171,7 @@ export class CanvasGrid {
     this.host.addEventListener("mousedown", (event) => this.onMouseDown(event));
     this.host.addEventListener("mousemove", (event) => this.onMouseMove(event));
     this.host.addEventListener("contextmenu", (event) => this.onContext(event));
-    this.host.addEventListener("dblclick", () => this.startEdit());
+    this.host.addEventListener("dblclick", () => this.startEdit(null, false, "explicit"));
     this.host.addEventListener("keydown", (event) => this.onKeyDown(event));
     this.host.addEventListener("wheel", (event) => {
       if (!event.ctrlKey) return;
@@ -792,12 +793,12 @@ export class CanvasGrid {
     }
     if (key === "Enter" || key === "F2") {
       event.preventDefault();
-      this.startEdit();
+      this.startEdit(null, false, "explicit");
       return;
     }
     if (isPrintableEditKey(event)) {
       event.preventDefault();
-      this.startEdit(event.key, true);
+      this.startEdit(event.key, true, "quick");
       return;
     }
     let { row, column } = this.selection.focus;
@@ -856,7 +857,13 @@ export class CanvasGrid {
   }
 
   onEditorKeyDown(event) {
-    if (event.key === "Enter" || event.key === "Tab") {
+    if (this.editMode === "quick" && isArrowNavigationKey(event.key)) {
+      event.preventDefault();
+      const { rowDelta, columnDelta } = arrowNavigationDelta(event.key);
+      this.commitEdit();
+      this.moveSelectionBy(rowDelta, columnDelta);
+      this.host.focus();
+    } else if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
       const rowDelta = event.key === "Enter" ? (event.shiftKey ? -1 : 1) : 0;
       const columnDelta = event.key === "Tab" ? (event.shiftKey ? -1 : 1) : 0;
@@ -870,7 +877,7 @@ export class CanvasGrid {
     }
   }
 
-  startEdit(initialText = null, replace = false) {
+  startEdit(initialText = null, replace = false, mode = replace ? "quick" : "explicit") {
     if (this.editing && replace) return;
     const { row, column } = this.selection.focus;
     const box = this.cellBox(row, column);
@@ -886,14 +893,11 @@ export class CanvasGrid {
     this.styleEditorForCell(row, column);
     this.editor.classList.add("active");
     this.editing = true;
+    this.editMode = mode;
     this.draw();
     this.editor.focus();
-    if (replace) {
-      this.editor.selectionStart = this.editor.value.length;
-      this.editor.selectionEnd = this.editor.value.length;
-    } else {
-      this.editor.select();
-    }
+    this.editor.selectionStart = this.editor.value.length;
+    this.editor.selectionEnd = this.editor.value.length;
   }
 
   commitEdit() {
@@ -901,6 +905,7 @@ export class CanvasGrid {
     const row = Number(this.editor.dataset.row);
     const column = Number(this.editor.dataset.column);
     this.editing = false;
+    this.editMode = null;
     this.editor.classList.remove("active");
     this.onEdit?.([{ row, column, value: this.editor.value }], "Edit Cell");
     this.draw();
@@ -908,6 +913,7 @@ export class CanvasGrid {
 
   cancelEdit() {
     this.editing = false;
+    this.editMode = null;
     this.editor.classList.remove("active");
     this.draw();
   }
@@ -948,19 +954,11 @@ export class CanvasGrid {
     return clamp(Math.ceil(width / this.zoom), 36, 2000);
   }
 
-  autoFitInitialColumns({ sampleRows = 500, min = 82, max = 560, bodyMax = 340 } = {}) {
+  autoFitInitialColumns({ min = 56, max = 420, padding = 24 } = {}) {
     if (!this.doc?.columnCount) return;
-    const rows = Math.min(this.doc.rowCount, Math.max(1, sampleRows));
     for (let column = 0; column < this.doc.columnCount; column++) {
       this.ctx.font = this.font(600);
-      const headerWidth = this.ctx.measureText(this.doc.getCell(0, column)).width + 46 * this.zoom;
-      let width = Math.max(min * this.zoom, headerWidth);
-      const bodyCap = headerWidth + 40 * this.zoom;
-      this.ctx.font = this.font(400);
-      for (let row = 1; row < rows; row++) {
-        const measured = this.ctx.measureText(this.doc.getCell(row, column)).width + 30 * this.zoom;
-        width = Math.max(width, Math.min(measured, Math.min(bodyCap, bodyMax * this.zoom)));
-      }
+      const width = this.ctx.measureText(this.doc.getCell(0, column)).width + padding * this.zoom;
       this.doc.columnWidths[column] = clamp(Math.ceil(width / this.zoom), min, max);
     }
   }
@@ -1007,6 +1005,18 @@ export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
     row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)),
     column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1))
   };
+}
+
+function isArrowNavigationKey(key) {
+  return key === "ArrowDown" || key === "ArrowUp" || key === "ArrowRight" || key === "ArrowLeft";
+}
+
+function arrowNavigationDelta(key) {
+  if (key === "ArrowDown") return { rowDelta: 1, columnDelta: 0 };
+  if (key === "ArrowUp") return { rowDelta: -1, columnDelta: 0 };
+  if (key === "ArrowRight") return { rowDelta: 0, columnDelta: 1 };
+  if (key === "ArrowLeft") return { rowDelta: 0, columnDelta: -1 };
+  return { rowDelta: 0, columnDelta: 0 };
 }
 
 function cellBackground(row, selected, frozen, firstColumnLabel) {

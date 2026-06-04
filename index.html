@@ -68,10 +68,16 @@
       </section>
     </div>
 
-    <div id="searchPanel" class="quick-panel hidden">
-      <input id="searchInput" placeholder="Search in current table" />
-      <button data-command="find-next">Find Next</button>
-      <span id="searchStatus"></span>
+    <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
+      <div class="modal search-modal">
+        <h2 id="searchTitle">Find</h2>
+        <input id="searchInput" class="modal-input" placeholder="Search in current table" />
+        <div id="searchStatus" class="search-status"></div>
+        <div class="modal-actions">
+          <button data-command="find-next">Find Next</button>
+          <button data-search-close>Close</button>
+        </div>
+      </div>
     </div>
 
     <div id="palette" class="palette hidden">

@@ -41,8 +41,7 @@ export class TableDocument {
     this.columnCount = this.rows.reduce((max, row) => Math.max(max, row.length), 1);
     while (this.columnWidths.length < this.columnCount) {
       const col = this.columnWidths.length;
-      const header = this.getCell(0, col);
-      this.columnWidths.push(Math.min(260, Math.max(96, 32 + header.length * 8)));
+      this.columnWidths.push(initialHeaderColumnWidth(this.getCell(0, col)));
     }
     if (this.columnWidths.length > this.columnCount) this.columnWidths.length = this.columnCount;
     while (this.rowHeights.length < this.rowCount) this.rowHeights.push(this.defaultRowHeight);
@@ -206,16 +205,8 @@ export class TableDocument {
   }
 
   autoFitInitialColumns(sampleLimit = 300) {
-    const last = Math.min(this.rows.length, Math.max(1, sampleLimit));
     for (let column = 0; column < this.columnCount; column++) {
-      const headerWidth = 44 + estimateTextWidth(this.getCell(0, column));
-      let width = Math.max(82, headerWidth);
-      const bodyCap = headerWidth + 40;
-      for (let row = 1; row < last; row++) {
-        const sampled = 30 + estimateTextWidth(this.getCell(row, column));
-        width = Math.max(width, Math.min(sampled, bodyCap));
-      }
-      this.columnWidths[column] = clamp(Math.ceil(width), 82, 560);
+      this.columnWidths[column] = initialHeaderColumnWidth(this.getCell(0, column));
     }
   }
 }
@@ -237,6 +228,10 @@ function shiftSetForDelete(set, index, count) {
     else if (value >= index + count) shifted.add(value - count);
   }
   return shifted;
+}
+
+function initialHeaderColumnWidth(header) {
+  return clamp(Math.ceil(estimateTextWidth(header) + 24), 56, 420);
 }
 
 function estimateTextWidth(value) {

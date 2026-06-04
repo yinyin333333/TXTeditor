@@ -597,7 +597,6 @@ button.active {
   display: block;
 }
 
-.quick-panel,
 .palette {
   position: fixed;
   z-index: 20;
@@ -615,12 +614,10 @@ button.active {
   align-items: center;
 }
 
-.quick-panel.hidden,
 .palette.hidden {
   display: none;
 }
 
-.quick-panel input,
 .palette input {
   flex: 1;
   height: 34px;
@@ -630,13 +627,6 @@ button.active {
   border-radius: 6px;
   padding: 0 10px;
   outline: none;
-}
-
-.quick-panel button {
-  height: 34px;
-  padding: 0 12px;
-  background: var(--button-bg);
-  border-radius: 6px;
 }
 
 .palette {
@@ -835,7 +825,7 @@ button.active {
 }
 
 .context-menu button:hover:not([disabled]),
-.menu-group:hover > .submenu-label {
+.menu-group.active > .submenu-label {
   background: var(--menuHoverBg);
   color: var(--tabActiveText);
 }
@@ -883,8 +873,7 @@ button.active {
   right: -8px;
 }
 
-.menu-group:hover .submenu,
-.menu-group:focus-within .submenu {
+.menu-group.active > .submenu {
   display: block;
 }
 
@@ -975,6 +964,21 @@ button.active {
   min-height: 18px;
   margin: -8px 0 12px;
   color: var(--danger-text);
+  font-size: 12px;
+}
+
+.search-modal {
+  display: grid;
+  gap: 10px;
+}
+
+.search-modal .modal-input {
+  margin-bottom: 0;
+}
+
+.search-status {
+  min-height: 18px;
+  color: var(--muted);
   font-size: 12px;
 }
 

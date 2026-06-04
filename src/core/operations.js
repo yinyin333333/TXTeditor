@@ -176,6 +176,23 @@ export function addRowsCommand(doc, count = 1) {
   });
 }
 
+export function cloneRowsCommand(doc, rows, insertAt = null) {
+  const targets = [...new Set(rows)]
+    .filter((row) => row > 0 && row < doc.rowCount)
+    .sort((a, b) => a - b);
+  const values = targets.map((row) => Array.from({ length: doc.columnCount }, (_, column) => doc.getCell(row, column)));
+  const at = clamp(insertAt ?? ((targets.at(-1) ?? 0) + 1), 1, doc.rowCount);
+  return makeCustomCommand(`Clone ${targets.length} Row(s)`, {
+    empty: targets.length === 0,
+    redo(target) {
+      values.forEach((rowValues, index) => target.insertRow(at + index, rowValues));
+    },
+    undo(target) {
+      target.removeRows(at, values.length);
+    }
+  });
+}
+
 export function deleteRowsCommand(doc, index, count = 1) {
   const at = clamp(index, 0, Math.max(0, doc.rowCount - 1));
   let deleted = null;
