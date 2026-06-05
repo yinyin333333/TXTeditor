@@ -60,7 +60,9 @@ npm test
 - `Ctrl+S`: save
 - `Ctrl+Shift+S`: save as
 - `Ctrl+F`: search
-- `Ctrl+B`: toggle Explorer/sidebar
+- `Ctrl+B`: toggle Explorer panel
+- `Ctrl+L`: toggle Problems panel
+- `Ctrl+H`: reset all row heights to default
 - `Ctrl+Z`: undo
 - `Ctrl+Y` / `Ctrl+Shift+Z`: redo
 - `Ctrl+C`: copy selection
