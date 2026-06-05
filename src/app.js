@@ -14,12 +14,10 @@ import {
   copyRanges,
   deleteColumnsCommand,
   deleteRowsCommand,
-  fillRangesCommand,
-  fillSelectionCommand,
-  incrementFillRangesCommand,
+  fillSelectedCellsCommand,
   hiddenColumnsCommand,
   hiddenRowsCommand,
-  incrementFillCommand,
+  incrementFillSelectedCellsCommand,
   insertColumnCommand,
   insertRowCommand,
   pasteTextToRangesCommand,
@@ -115,6 +113,9 @@ const state = {
     status: "not-started",
     files: [],
     error: ""
+  },
+  search: {
+    lastQuery: ""
   },
   sidebarVisible: localStorage.getItem("txteditor.sidebar") !== "hidden",
   sidebarWidth: savedSidebarWidth,
@@ -215,6 +216,7 @@ const commandLabelsBase = [
   ["zoom-reset", "Reset Zoom"],
   ["resize-fit", "Resize To Fit"],
   ["resize-selected-fit", "Resize Selected To Fit"],
+  ["reset-row-heights", "Reset Row Heights"],
   ["toggle-sidebar", "Toggle Explorer"],
   ["toggle-theme", "Toggle Light/Dark Mode"]
 ];
@@ -330,6 +332,9 @@ function wireEvents() {
       closeSearch();
     }
   });
+  els.searchInput.addEventListener("input", () => {
+    state.search.lastQuery = "";
+  });
   els.searchPanel.addEventListener("click", (event) => {
     if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();
   });
@@ -364,13 +369,15 @@ function handleGlobalKeydown(event) {
     els.host.focus();
     return;
   }
-  if (editingCell && !(event.ctrlKey && ["s", "w"].includes(key))) return;
+  if (editingCell && !(event.ctrlKey && ["s", "w", "h", "l"].includes(key))) return;
   if (!editingCell && isTextInputTarget(event.target)) return;
   if (event.ctrlKey && (key === "+" || key === "=")) return prevent(event, () => runCommand("zoom-in"));
   if (event.ctrlKey && key === "-") return prevent(event, () => runCommand("zoom-out"));
   if (event.ctrlKey && key === "0") return prevent(event, () => runCommand("zoom-reset"));
   if (event.ctrlKey && key === "o") return prevent(event, openFile);
   if (event.ctrlKey && key === "b") return prevent(event, toggleSidebar);
+  if (event.ctrlKey && key === "l") return prevent(event, toggleProblemsPanel);
+  if (event.ctrlKey && key === "h") return prevent(event, resetRowHeights);
   if (event.ctrlKey && key === "s" && event.shiftKey) return prevent(event, saveAs);
   if (event.ctrlKey && key === "s") return prevent(event, saveFile);
   if (event.ctrlKey && key === "f") return prevent(event, showSearch);
@@ -563,11 +570,14 @@ function closeSearch() {
 }
 
 function findNext() {
-  const found = findInTable(activeDoc(), els.searchInput.value, state.selection.focus);
+  const query = els.searchInput.value;
+  const includeStart = query !== state.search.lastQuery;
+  const found = findInTable(activeDoc(), query, state.selection.focus, { includeStart });
   if (!found) {
     els.searchStatus.textContent = "No results";
     return;
   }
+  state.search.lastQuery = query;
   state.selection.set(found.row, found.column);
   grid.scrollCellIntoView(found.row, found.column);
   grid.draw();
@@ -608,8 +618,8 @@ function runCommand(id) {
   if (id === "hide-column") return execute(hiddenColumnsCommand(columnsFromSelection(), true));
   if (id === "unhide-columns") return execute(hiddenColumnsCommand([...doc.hiddenColumns], false));
   if (id === "unhide-all") return unhideAll();
-  if (id === "fill") return execute(state.selection.isMultiRange ? fillRangesCommand(doc, state.selection.ranges) : fillSelectionCommand(doc, rect));
-  if (id === "increment-fill") return execute(state.selection.isMultiRange ? incrementFillRangesCommand(doc, state.selection.ranges) : incrementFillCommand(doc, rect));
+  if (id === "fill") return execute(fillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
+  if (id === "increment-fill") return execute(incrementFillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
   if (id.startsWith("math-")) return math(id.replace("math-", ""));
   if (id === "toggle-freeze-row") return toggleFreeze("row");
   if (id === "toggle-freeze-column") return toggleFreeze("column");
@@ -623,6 +633,7 @@ function runCommand(id) {
   if (id === "zoom-reset") return zoomReset();
   if (id === "resize-fit") return resizeFit(false);
   if (id === "resize-selected-fit") return resizeFit(true);
+  if (id === "reset-row-heights") return resetRowHeights();
   if (id === "toggle-sidebar") return toggleSidebar();
   if (id === "toggle-theme") return toggleTheme();
 }
@@ -810,6 +821,13 @@ function zoomBy(delta) {
 function zoomReset() {
   if (!hasOpenDocument()) return;
   grid.setZoom(1);
+  renderChrome();
+}
+
+function resetRowHeights() {
+  if (!hasOpenDocument()) return;
+  activeDoc().resetRowHeights();
+  grid.layout();
   renderChrome();
 }
 
@@ -1382,6 +1400,14 @@ function renderChrome() {
   updateGridDiagnostics();
   for (const button of document.querySelectorAll("[data-command='show-explorer']")) {
     button.classList.toggle("active", state.sidebarVisible);
+    const count = lintNotificationCount();
+    if (count) {
+      button.dataset.badge = String(count);
+      button.title = `Explorer (${count} problems)`;
+    } else {
+      delete button.dataset.badge;
+      button.title = "Explorer";
+    }
   }
   for (const button of document.querySelectorAll("[data-command='show-problems']")) {
     button.classList.toggle("active", state.problemsVisible);
@@ -1513,10 +1539,19 @@ function groupDiagnosticsByFile(diagnostics) {
 }
 
 function problemBadgeForPath(path) {
+  if (!lintNotificationsVisible()) return "";
   if (!path) return "";
   const key = lintPathKey(path);
   const count = state.lint.diagnostics.filter((diagnostic) => diagnostic.fileKey === key).length;
   return count ? ` <span class="file-problem-badge">${count}</span>` : "";
+}
+
+function lintNotificationsVisible() {
+  return state.problemsVisible && state.lint.settings.enabled && state.lint.diagnostics.length > 0;
+}
+
+function lintNotificationCount() {
+  return lintNotificationsVisible() ? state.lint.diagnostics.length : 0;
 }
 
 async function closeTab(index) {

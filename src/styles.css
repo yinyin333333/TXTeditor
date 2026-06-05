@@ -250,6 +250,7 @@ button.active {
 }
 
 .activity-button {
+  position: relative;
   width: 36px;
   height: 36px;
   border-radius: 6px;
@@ -260,6 +261,22 @@ button.active {
 .activity-button.active {
   color: var(--text-strong);
   border-left: 2px solid var(--accent);
+}
+
+.activity-button[data-badge]::after {
+  content: attr(data-badge);
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
 }
 
 .sidebar {
@@ -891,6 +908,27 @@ button.active {
   height: 1px;
   margin: 5px 4px;
   background: var(--gridLine);
+}
+
+.first-column-hover-preview {
+  position: fixed;
+  z-index: 35;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: 0 10px 30px var(--shadow);
+  font: 12px Consolas, "Cascadia Mono", monospace;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.first-column-hover-preview.hidden {
+  display: none;
 }
 
 .toast {

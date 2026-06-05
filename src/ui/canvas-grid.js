@@ -1,5 +1,5 @@
 import { clamp } from "../core/table-model.js";
-import { boundedTableExtent, classifyGridHit, classifyPanePoint, columnColorIndex } from "./grid-geometry.js";
+import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle, columnColorIndex } from "./grid-geometry.js";
 
 const BASE_ROW_HEIGHT = 26;
 const BASE_ROW_HEADER_MIN = 38;
@@ -87,6 +87,8 @@ export class CanvasGrid {
     this.dragging = false;
     this.resizing = null;
     this.resizeGuide = null;
+    this.hoverPreview = createFirstColumnHoverPreview();
+    this.hoverCell = null;
     this.editing = false;
     this.editMode = null;
     this.colorizeColumns = false;
@@ -136,6 +138,7 @@ export class CanvasGrid {
   }
 
   setDocument(doc) {
+    this.hideFirstColumnHoverPreview();
     this.doc = doc;
     this.selection.set(0, 0);
     this.host.scrollLeft = Math.max(0, doc.scrollLeft ?? 0);
@@ -166,10 +169,12 @@ export class CanvasGrid {
         this.doc.scrollLeft = this.scrollLeft;
         this.doc.scrollTop = this.scrollTop;
       }
+      this.hideFirstColumnHoverPreview();
       this.requestRender("scroll");
     });
     this.host.addEventListener("mousedown", (event) => this.onMouseDown(event));
     this.host.addEventListener("mousemove", (event) => this.onMouseMove(event));
+    this.host.addEventListener("mouseleave", () => this.hideFirstColumnHoverPreview());
     this.host.addEventListener("contextmenu", (event) => this.onContext(event));
     this.host.addEventListener("dblclick", () => this.startEdit(null, false, "explicit"));
     this.host.addEventListener("keydown", (event) => this.onKeyDown(event));
@@ -187,6 +192,7 @@ export class CanvasGrid {
   }
 
   layout() {
+    this.hideFirstColumnHoverPreview();
     const rect = this.host.getBoundingClientRect();
     this.syncTheme();
     this.layoutCanvas(this.canvas, this.ctx, rect);
@@ -462,7 +468,8 @@ export class CanvasGrid {
     this.ctx.font = this.font(400);
     const label = String(row + 1);
     const x = Math.max(6, this.rowHeaderWidth - this.ctx.measureText(label).width - 8);
-    this.ctx.fillText(label, x, y + Math.round(17 * this.zoom));
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillText(label, x, y + height / 2);
   }
 
   drawCell(row, column, x, y, width, height, options = {}) {
@@ -487,7 +494,8 @@ export class CanvasGrid {
     const value = this.doc.getCell(row, column);
     if (shouldDrawCellText(row, column, this.editingCell())) {
       ctx.fillStyle = cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
-      this.fillText(value, x + 8, y + Math.round(17 * this.zoom), width - 12);
+      ctx.textBaseline = "middle";
+      this.fillText(value, x + 8, y + height / 2, width - 12);
     }
     this.drawDiagnosticMarker(row, column, x, y, width, height);
     if (active) {
@@ -644,20 +652,9 @@ export class CanvasGrid {
   }
 
   resizeHit(hit) {
-    const tolerance = Math.max(4, Math.round(5 * this.zoom));
-    if (hit.kind === "column-header") {
-      const right = this.screenXForColumn(hit.column) + this.scaledColumnWidth(hit.column);
-      if (Math.abs(hit.x - right) <= tolerance) return { kind: "column", index: hit.column };
-    }
-    if (hit.kind === "cell" && hit.row === 0) {
-      const right = this.screenXForColumn(hit.column) + this.scaledColumnWidth(hit.column);
-      if (Math.abs(hit.x - right) <= tolerance) return { kind: "column", index: hit.column };
-    }
-    if (hit.kind === "row-header") {
-      const bottom = this.screenYForRow(hit.row) + this.scaledRowHeight(hit.row);
-      if (Math.abs(hit.y - bottom) <= tolerance) return { kind: "row", index: hit.row };
-    }
-    return null;
+    const columnRight = this.screenXForColumn(hit.column) + this.scaledColumnWidth(hit.column);
+    const rowBottom = this.screenYForRow(hit.row) + this.scaledRowHeight(hit.row);
+    return classifyResizeHandle({ hit, columnRight, rowBottom, zoom: this.zoom });
   }
 
   screenXForColumn(column) {
@@ -673,6 +670,7 @@ export class CanvasGrid {
   onMouseDown(event) {
     if (event.button !== 0) return;
     if (this.isScrollbarEvent(event)) return;
+    this.hideFirstColumnHoverPreview();
     this.host.focus();
     const hit = this.hitTest(event);
     const resize = this.resizeHit(hit);
@@ -700,6 +698,7 @@ export class CanvasGrid {
   onMouseMove(event) {
     const hit = this.hitTest(event);
     if (this.resizing) {
+      this.hideFirstColumnHoverPreview();
       if (this.resizing.kind === "column") {
         const next = Math.max(36, this.resizing.before + (hit.x - this.resizing.startX) / this.zoom);
         this.doc.columnWidths[this.resizing.index] = next;
@@ -707,6 +706,7 @@ export class CanvasGrid {
       } else {
         const next = Math.max(18, this.resizing.before + (hit.y - this.resizing.startY) / this.zoom);
         this.doc.rowHeights[this.resizing.index] = next;
+        this.doc.hasCustomRowHeights = true;
         this.resizeGuide = { kind: "row", y: hit.y };
       }
       this.resizing.current = this.resizing.kind === "column" ? this.doc.columnWidths[this.resizing.index] : this.doc.rowHeights[this.resizing.index];
@@ -715,10 +715,17 @@ export class CanvasGrid {
     }
     const resize = this.resizeHit(hit);
     this.host.style.cursor = resize?.kind === "column" ? "col-resize" : resize?.kind === "row" ? "row-resize" : "default";
+    if (resize) {
+      this.hideFirstColumnHoverPreview();
+      return;
+    }
     if (this.dragging && hit.kind === "cell") {
+      this.hideFirstColumnHoverPreview();
       this.selection.extend(hit.row, hit.column);
       this.draw();
+      return;
     }
+    this.updateFirstColumnHoverPreview(hit, event);
   }
 
   onMouseUp() {
@@ -733,6 +740,7 @@ export class CanvasGrid {
 
   onContext(event) {
     event.preventDefault();
+    this.hideFirstColumnHoverPreview();
     this.host.focus();
     const hit = this.hitTest(event);
     if (hit.kind === "empty") {
@@ -746,6 +754,37 @@ export class CanvasGrid {
     if (hit.kind === "corner") this.selection.selectAll(this.doc.rowCount, this.doc.columnCount);
     this.draw();
     this.onContextMenu?.({ x: event.clientX, y: event.clientY, hit });
+  }
+
+  updateFirstColumnHoverPreview(hit, event) {
+    const value = hit.kind === "cell" ? this.doc.getCell(hit.row, hit.column) : "";
+    if (!shouldShowFirstColumnHover(hit, value)) {
+      this.hideFirstColumnHoverPreview();
+      return;
+    }
+    this.hoverCell = { row: hit.row, column: hit.column };
+    this.hoverPreview.textContent = String(value);
+    this.hoverPreview.dataset.row = String(hit.row);
+    this.hoverPreview.dataset.column = String(hit.column);
+    this.hoverPreview.classList.remove("hidden");
+
+    const gap = 12;
+    let left = event.clientX + gap;
+    let top = event.clientY + gap;
+    const box = this.hoverPreview.getBoundingClientRect();
+    if (left + box.width > window.innerWidth - 8) left = Math.max(8, event.clientX - box.width - gap);
+    if (top + box.height > window.innerHeight - 8) top = Math.max(8, event.clientY - box.height - gap);
+    this.hoverPreview.style.left = `${left}px`;
+    this.hoverPreview.style.top = `${top}px`;
+  }
+
+  hideFirstColumnHoverPreview() {
+    if (!this.hoverPreview) return;
+    this.hoverPreview.classList.add("hidden");
+    this.hoverPreview.textContent = "";
+    delete this.hoverPreview.dataset.row;
+    delete this.hoverPreview.dataset.column;
+    this.hoverCell = null;
   }
 
   applyHitSelection(hit, extend, toggle = false) {
@@ -1000,11 +1039,23 @@ export function shouldDrawCellText(row, column, editingCell) {
   return !editingCell || editingCell.row !== row || editingCell.column !== column;
 }
 
+export function shouldShowFirstColumnHover(hit, value) {
+  return hit?.kind === "cell" && hit.column === 0 && String(value ?? "") !== "";
+}
+
 export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
   return {
     row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)),
     column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1))
   };
+}
+
+function createFirstColumnHoverPreview() {
+  const preview = document.createElement("div");
+  preview.className = "first-column-hover-preview hidden";
+  preview.setAttribute("role", "tooltip");
+  document.body.append(preview);
+  return preview;
 }
 
 function isArrowNavigationKey(key) {

@@ -23,6 +23,10 @@ export function rangeCells(ranges) {
   return cells;
 }
 
+export function selectedCellsInGridOrder(ranges) {
+  return rangeCells(ranges).sort((a, b) => a.row - b.row || a.column - b.column);
+}
+
 export function copyRange(doc, rect) {
   const lines = [];
   for (let row = rect.top; row <= rect.bottom; row++) {
@@ -84,6 +88,12 @@ export function fillRangesCommand(doc, ranges) {
   return makeCellCommand("Fill Selected Cells", doc, uniqueEdits(edits));
 }
 
+export function fillSelectedCellsCommand(doc, ranges, sourceCell) {
+  const source = sourceCellOrFirstRangeCell(ranges, sourceCell);
+  const value = doc.getCell(source.row, source.column);
+  return makeCellCommand("Fill Selected Cells", doc, selectedCellsInGridOrder(ranges).map(({ row, column }) => ({ row, column, value })));
+}
+
 export function incrementFillCommand(doc, rect) {
   const seed = String(doc.getCell(rect.top, rect.left)).trim();
   if (seed === "") return makeCellCommand("Increment Fill", doc, []);
@@ -114,6 +124,15 @@ export function incrementFillRangesCommand(doc, ranges) {
     }
   }
   return makeCellCommand("Increment Fill", doc, uniqueEdits(edits));
+}
+
+export function incrementFillSelectedCellsCommand(doc, ranges, sourceCell) {
+  const source = sourceCellOrFirstRangeCell(ranges, sourceCell);
+  const seed = String(doc.getCell(source.row, source.column)).trim();
+  if (seed === "") return makeCellCommand("Increment Fill", doc, []);
+  const nextValue = incrementValueFactory(seed);
+  const edits = selectedCellsInGridOrder(ranges).map(({ row, column }, index) => ({ row, column, value: nextValue(index) }));
+  return makeCellCommand("Increment Fill", doc, edits);
 }
 
 export function arithmeticCommand(doc, rect, operator, operand) {
@@ -307,6 +326,12 @@ function incrementValueFactory(seed) {
 
 function formatNumber(value) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(8)));
+}
+
+function sourceCellOrFirstRangeCell(ranges, sourceCell) {
+  if (sourceCell && Number.isInteger(sourceCell.row) && Number.isInteger(sourceCell.column)) return sourceCell;
+  const first = selectedCellsInGridOrder(ranges)[0];
+  return first ?? { row: 0, column: 0 };
 }
 
 function uniqueEdits(edits) {

@@ -14,7 +14,9 @@ import {
   copyRanges,
   deleteColumnsCommand,
   deleteRowsCommand,
+  fillSelectedCellsCommand,
   fillSelectionCommand,
+  incrementFillSelectedCellsCommand,
   incrementFillCommand,
   insertColumnCommand,
   insertRowCommand,
@@ -23,8 +25,8 @@ import {
   resizeColumnCommand,
   resizeRowCommand
 } from "../src/core/operations.js";
-import { movedCell, shouldDrawCellText } from "../src/ui/canvas-grid.js";
-import { boundedTableExtent, classifyGridHit, classifyPanePoint, columnColorIndex } from "../src/ui/grid-geometry.js";
+import { movedCell, shouldDrawCellText, shouldShowFirstColumnHover } from "../src/ui/canvas-grid.js";
+import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle, columnColorIndex } from "../src/ui/grid-geometry.js";
 import {
   LINT_RULES,
   buildWorkspaceFileStates,
@@ -160,6 +162,27 @@ test("search finds first-row header names as normal cells", () => {
   assert.deepEqual(findInTable(doc, "pSrvDoFunc", { row: 1, column: 0 }), { row: 0, column: 0 });
 });
 
+test("search includes the first real data column", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tid\tdesc\nbash\t1\tmelee\nwarcry\t2\tbuff");
+  assert.deepEqual(findInTable(doc, "warcry", { row: 0, column: 0 }), { row: 2, column: 0 });
+});
+
+test("search can land on the current first-column cell for a changed query", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tref\nWar Cry\twarcry\nLeap\twarcry");
+  assert.deepEqual(findInTable(doc, "war cry", { row: 1, column: 0 }, { includeStart: true }), { row: 1, column: 0 });
+  assert.deepEqual(findInTable(doc, "warcry", { row: 0, column: 0 }), { row: 1, column: 1 });
+  assert.equal(findInTable(doc, "3", { row: 0, column: 0 }, { includeStart: true }), null);
+});
+
+test("search matching is case-insensitive only, without whitespace normalization", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\nWarcry\nWARCRY\nWar Cry\nwar cry");
+  assert.deepEqual(findInTable(doc, "warcry", { row: 0, column: 0 }), { row: 1, column: 0 });
+  assert.deepEqual(findInTable(doc, "warcry", { row: 1, column: 0 }), { row: 2, column: 0 });
+  assert.deepEqual(findInTable(doc, "warcry", { row: 2, column: 0 }), { row: 1, column: 0 });
+  assert.deepEqual(findInTable(doc, "War Cry", { row: 0, column: 0 }), { row: 3, column: 0 });
+  assert.deepEqual(findInTable(doc, "war cry", { row: 0, column: 0 }), { row: 3, column: 0 });
+});
+
 test("insert and delete row are grouped undoable commands", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
@@ -276,6 +299,45 @@ test("fill copies the top-left selected value over the selection", () => {
   assert.equal(doc.getCell(2, 1), "5");
 });
 
+test("fill uses the vertical selection anchor instead of the last focused cell", () => {
+  const doc = TableDocument.fromText("x.txt", "v\n20\n10");
+  const selection = new SelectionModel();
+  selection.set(1, 0);
+  selection.extend(2, 0);
+  fillSelectedCellsCommand(doc, selection.ranges, selection.anchor).redo(doc);
+  assert.equal(doc.getCell(1, 0), "20");
+  assert.equal(doc.getCell(2, 0), "20");
+});
+
+test("fill uses the horizontal selection anchor instead of the last focused cell", () => {
+  const doc = TableDocument.fromText("x.txt", "left\tright\n20\t115");
+  const selection = new SelectionModel();
+  selection.set(1, 0);
+  selection.extend(1, 1);
+  fillSelectedCellsCommand(doc, selection.ranges, selection.anchor).redo(doc);
+  assert.equal(doc.getCell(1, 0), "20");
+  assert.equal(doc.getCell(1, 1), "20");
+});
+
+test("fill uses the anchor cell over a non-contiguous selected cell set only", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\tseed\t3\n4\t5\t6");
+  const selection = new SelectionModel();
+  selection.set(1, 1);
+  selection.toggleCell(2, 0);
+  selection.toggleCell(0, 2);
+  const command = fillSelectedCellsCommand(doc, selection.ranges, selection.anchor);
+  command.redo(doc);
+  assert.equal(doc.getCell(0, 2), "seed");
+  assert.equal(doc.getCell(1, 1), "seed");
+  assert.equal(doc.getCell(2, 0), "seed");
+  assert.equal(doc.getCell(0, 0), "a");
+  assert.equal(doc.getCell(1, 0), "1");
+  assert.equal(doc.getCell(2, 1), "5");
+  command.undo(doc);
+  assert.equal(doc.getCell(0, 2), "c");
+  assert.equal(doc.getCell(2, 0), "4");
+});
+
 test("increment fill handles numbers and trailing numeric text", () => {
   const numeric = TableDocument.fromText("x.txt", "v\n1\n\n");
   incrementFillCommand(numeric, { top: 1, left: 0, bottom: 3, right: 0 }).redo(numeric);
@@ -295,6 +357,32 @@ test("increment fill handles numbers and trailing numeric text", () => {
   assert.equal(padded.getCell(2, 0), "abc100");
 });
 
+test("increment fill starts from the anchor and walks selected cells in deterministic grid order", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\tco7\t3\n4\t5\t6");
+  const selection = new SelectionModel();
+  selection.set(1, 1);
+  selection.toggleCell(2, 0);
+  selection.toggleCell(0, 2);
+  incrementFillSelectedCellsCommand(doc, selection.ranges, selection.anchor).redo(doc);
+  assert.equal(doc.getCell(0, 2), "co7");
+  assert.equal(doc.getCell(1, 1), "co8");
+  assert.equal(doc.getCell(2, 0), "co9");
+  assert.equal(doc.getCell(0, 0), "a");
+  assert.equal(doc.getCell(2, 1), "5");
+});
+
+test("context menu source stays anchored when right-clicking inside a multi-cell selection", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n20\t25\t30");
+  const selection = new SelectionModel();
+  selection.set(1, 0);
+  selection.extend(1, 2);
+  const contextHit = { kind: "cell", row: 1, column: 2 };
+  if (contextHit.kind === "cell" && !selection.contains(contextHit.row, contextHit.column)) selection.set(contextHit.row, contextHit.column);
+  assert.deepEqual(selection.anchor, { row: 1, column: 0 });
+  fillSelectedCellsCommand(doc, selection.ranges, selection.anchor).redo(doc);
+  assert.deepEqual(doc.rows[1], ["20", "20", "20"]);
+});
+
 test("resize commands are undoable without table snapshots", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
@@ -312,6 +400,17 @@ test("resize commands are undoable without table snapshots", () => {
   assert.equal(doc.rowHeights[1], 44);
   undo.undo(doc);
   assert.equal(doc.rowHeights[1], beforeHeight);
+});
+
+test("row height reset clears custom row heights without marking TXT data dirty", () => {
+  const doc = TableDocument.fromText("x.txt", "a\n1\n2", { dirty: false });
+  doc.rowHeights[1] = 88;
+  doc.hasCustomRowHeights = true;
+  const changed = doc.resetRowHeights();
+  assert.equal(changed, true);
+  assert.equal(doc.hasCustomRowHeights, false);
+  assert.deepEqual(doc.rowHeights, [doc.defaultRowHeight, doc.defaultRowHeight, doc.defaultRowHeight]);
+  assert.equal(doc.dirty, false);
 });
 
 test("explicit auto-fit can still expand for long body content", () => {
@@ -370,6 +469,15 @@ test("renderer skips stale text for the active editing cell only", () => {
   assert.equal(shouldDrawCellText(0, 1, null), true);
 });
 
+test("first-column hover is gated to real first-column cells with text", () => {
+  assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, "full-code-value"), true);
+  assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 1 }, "full-code-value"), false);
+  assert.equal(shouldShowFirstColumnHover({ kind: "row-header", row: 2, column: 0 }, "full-code-value"), false);
+  assert.equal(shouldShowFirstColumnHover({ kind: "column-header", row: 0, column: 0 }, "full-code-value"), false);
+  assert.equal(shouldShowFirstColumnHover({ kind: "empty" }, "full-code-value"), false);
+  assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, ""), false);
+});
+
 test("frozen pane dividers are bounded to visible table content", () => {
   assert.equal(boundedTableExtent({
     fixedExtent: 0,
@@ -389,6 +497,45 @@ test("frozen pane dividers are bounded to visible table content", () => {
     scrollOffset: 700,
     viewportExtent: 900
   }), 0);
+});
+
+test("resize handles are detected on cell boundaries, not only headers", () => {
+  assert.deepEqual(
+    classifyResizeHandle({
+      hit: { kind: "cell", row: 4, column: 2, x: 198, y: 122 },
+      columnRight: 200,
+      rowBottom: 148,
+      zoom: 1
+    }),
+    { kind: "column", index: 2 }
+  );
+  assert.deepEqual(
+    classifyResizeHandle({
+      hit: { kind: "cell", row: 4, column: 2, x: 162, y: 147 },
+      columnRight: 200,
+      rowBottom: 148,
+      zoom: 1
+    }),
+    { kind: "row", index: 4 }
+  );
+  assert.deepEqual(
+    classifyResizeHandle({
+      hit: { kind: "row-header", row: 6, column: 0, x: 20, y: 310 },
+      columnRight: 72,
+      rowBottom: 312,
+      zoom: 1
+    }),
+    { kind: "row", index: 6 }
+  );
+  assert.equal(
+    classifyResizeHandle({
+      hit: { kind: "cell", row: 4, column: 2, x: 160, y: 122 },
+      columnRight: 200,
+      rowBottom: 148,
+      zoom: 1
+    }),
+    null
+  );
 });
 
 test("column text color cycle is predictable and bounded", () => {
@@ -937,6 +1084,17 @@ test("context menu uses one explicit active submenu and exposes Clone Row only",
   assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
 });
 
+test("Explorer problem badges are visible only while Problems lint notifications are active", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /function lintNotificationsVisible\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.settings\.enabled && state\.lint\.diagnostics\.length > 0;/);
+  assert.match(source, /function lintNotificationCount\(\)\s*\{\s*return lintNotificationsVisible\(\) \? state\.lint\.diagnostics\.length : 0;/);
+  assert.match(source, /function problemBadgeForPath\(path\)\s*\{\s*if \(!lintNotificationsVisible\(\)\) return "";/);
+  assert.match(source, /button\.dataset\.badge = String\(count\)/);
+  assert.match(source, /delete button\.dataset\.badge/);
+  assert.match(css, /\.activity-button\[data-badge\]::after/);
+});
+
 test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
@@ -962,6 +1120,51 @@ test("initial canvas column fit is header-only and compact", () => {
   assert.doesNotMatch(source, /for \(let row = 1; row < rows; row\+\+\)/);
 });
 
+test("canvas drag row resizing opts into custom row-height layout", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /classifyResizeHandle\(\{ hit, columnRight, rowBottom, zoom: this\.zoom \}\)/);
+  assert.match(source, /this\.doc\.rowHeights\[this\.resizing\.index\] = next;\s*this\.doc\.hasCustomRowHeights = true;/);
+});
+
+test("first-column hover preview is single and clears on grid context changes", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /this\.hoverPreview = createFirstColumnHoverPreview\(\);/);
+  assert.match(source, /this\.host\.addEventListener\("mouseleave", \(\) => this\.hideFirstColumnHoverPreview\(\)\);/);
+  assert.match(source, /setDocument\(doc\) \{\s*this\.hideFirstColumnHoverPreview\(\);/);
+  assert.match(source, /this\.hideFirstColumnHoverPreview\(\);\s*this\.requestRender\("scroll"\);/);
+  assert.match(source, /onContext\(event\) \{\s*event\.preventDefault\(\);\s*this\.hideFirstColumnHoverPreview\(\);/);
+  assert.match(source, /function createFirstColumnHoverPreview\(\) \{\s*const preview = document\.createElement\("div"\);/);
+});
+
+test("cell and row-header text use row-height-centered baselines", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /this\.ctx\.textBaseline = "middle";\s*this\.ctx\.fillText\(label, x, y \+ height \/ 2\)/);
+  assert.match(source, /ctx\.textBaseline = "middle";\s*this\.fillText\(value, x \+ 8, y \+ height \/ 2, width - 12\)/);
+  assert.equal(source.includes("y + Math.round(17 * this.zoom)"), false);
+});
+
+test("Find Next includes the current cell once when the query changes", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /search:\s*\{\s*lastQuery: ""\s*\}/);
+  assert.match(source, /els\.searchInput\.addEventListener\("input", \(\) => \{\s*state\.search\.lastQuery = "";/);
+  assert.match(source, /const includeStart = query !== state\.search\.lastQuery;/);
+  assert.match(source, /findInTable\(activeDoc\(\), query, state\.selection\.focus, \{ includeStart \}\)/);
+  assert.match(source, /state\.search\.lastQuery = query;/);
+});
+
+test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(source, /if \(event\.ctrlKey && key === "b"\) return prevent\(event, toggleSidebar\);/);
+  assert.match(source, /if \(event\.ctrlKey && key === "l"\) return prevent\(event, toggleProblemsPanel\);/);
+  assert.match(source, /if \(event\.ctrlKey && key === "h"\) return prevent\(event, resetRowHeights\);/);
+  assert.match(source, /function resetRowHeights\(\)\s*\{\s*if \(!hasOpenDocument\(\)\) return;\s*activeDoc\(\)\.resetRowHeights\(\);\s*grid\.layout\(\);\s*renderChrome\(\);/);
+  assert.match(source, /\["reset-row-heights", "Reset Row Heights"\]/);
+  assert.match(readme, /`Ctrl\+B`: toggle Explorer panel/);
+  assert.match(readme, /`Ctrl\+L`: toggle Problems panel/);
+  assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
+});
+
 test("quick typing edit commits on arrow navigation while explicit edit keeps caret behavior", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.startEdit\(event\.key, true, "quick"\)/);
@@ -973,20 +1176,20 @@ test("quick typing edit commits on arrow navigation while explicit edit keeps ca
   assert.equal(source.includes("this.editor.select();"), false);
 });
 
-test("version metadata is bumped to TXTeditor 0.32", () => {
+test("version metadata is bumped to TXTeditor 0.33", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.32.0");
-  assert.equal(lock.version, "0.32.0");
-  assert.equal(lock.packages[""].version, "0.32.0");
-  assert.match(pkg.description, /TXTeditor 0\.32/);
-  assert.match(cargoToml, /version = "0\.32\.0"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.32/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.32\.0"/);
-  assert.equal(tauri.version, "0.32.0");
-  assert.match(readme, /TXTeditor 0\.32 is/);
+  assert.equal(pkg.version, "0.33.0");
+  assert.equal(lock.version, "0.33.0");
+  assert.equal(lock.packages[""].version, "0.33.0");
+  assert.match(pkg.description, /TXTeditor 0\.33/);
+  assert.match(cargoToml, /version = "0\.33\.0"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.33/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.33\.0"/);
+  assert.equal(tauri.version, "0.33.0");
+  assert.match(readme, /TXTeditor 0\.33 is/);
 });

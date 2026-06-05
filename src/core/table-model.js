@@ -180,6 +180,13 @@ export class TableDocument {
     this.dirty = true;
   }
 
+  resetRowHeights() {
+    const changed = this.hasCustomRowHeights || this.rowHeights.some((height) => height !== this.defaultRowHeight);
+    this.rowHeights = Array.from({ length: this.rowCount }, () => this.defaultRowHeight);
+    this.hasCustomRowHeights = false;
+    return changed;
+  }
+
   setFreeze(mode) {
     this.freezeFirstRow = mode === "row" || mode === "both";
     this.freezeFirstColumn = mode === "column" || mode === "both";
