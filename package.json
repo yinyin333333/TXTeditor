@@ -14,7 +14,7 @@
     "fixture": "node scripts/generate-fixture.js",
     "fixture:20k": "node scripts/generate-fixture.js 20000",
     "fixture:200k": "node scripts/generate-fixture.js 200000",
-    "test": "node --test",
+    "test": "node --test tests/core.test.js",
     "lint:compare": "node scripts/lint-compare.js",
     "perf": "node scripts/perf-test.js 20000",
     "perf:20k": "node scripts/perf-test.js 20000",
