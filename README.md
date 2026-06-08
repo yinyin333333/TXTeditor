@@ -1,6 +1,6 @@
 # TXTeditor
 
-TXTeditor 0.32 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
+TXTeditor 0.4 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
 
 TXTeditor is a personal project. I am not an experienced programmer, and most of the implementation was built with the help of OpenAI Codex. The app may contain bugs, incomplete behavior, or rough edges, but I am sharing it in case it is useful to others.
 
