@@ -1016,9 +1016,11 @@ test("lint controls live in the bottom Problems panel, not the main toolbar", ()
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const toolbar = html.match(/<section class="toolbar">([\s\S]*?)<\/section>/)?.[1] ?? "";
   const problems = html.match(/<section id="problemsPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
-  assert.equal(toolbar.includes("toggle-lint"), false);
-  assert.equal(problems.includes("toggle-lint"), true);
-  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
+  for (const command of ["toggle-lint", "open-settings"]) {
+    assert.equal(toolbar.includes(command), false);
+    assert.equal(problems.includes(command), true);
+  }
+  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT", "toggle-lint-rules", "lintProfileSelect"]) {
     assert.equal(html.includes(removed), false);
   }
   assert.equal(problems.includes("problemsResizer"), true);
@@ -1061,8 +1063,7 @@ test("app source has real Explorer and Problems toggles with persisted resize st
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled;/);
-  assert.match(source, /state\.problemsVisible/);
-  assert.match(source, /state\.lint\.enabled/);
+  assert.match(source, /if \(!state\.lint\.enabled\) return;/);
 });
 
 test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
