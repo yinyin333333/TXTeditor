@@ -112,6 +112,95 @@ export function encodeText(text, encoding = "utf-8") {
   return new TextEncoder().encode(text);
 }
 
+export async function getConfig() {
+  if (!isTauriRuntime()) return {};
+  const api = await tauriApi();
+  return api.invoke("get_config");
+}
+
+export async function saveConfig(config) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("save_config", { config });
+}
+
+export async function pickFilePath() {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("pick_file_path");
+}
+
+export async function pickFolderPath() {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  const result = await api.invoke("open_folder_dialog");
+  return result ?? null;
+}
+
+export async function lspStart(workspacePath) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_start", { workspacePath });
+}
+
+export async function lspOpenFile(uri, text) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_open_file", { uri, text });
+}
+
+export async function lspUpdateFile(uri, version, text) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_update_file", { uri, version, text });
+}
+
+export async function lspCloseFile(uri) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_close_file", { uri });
+}
+
+export async function lspGetDiagnostics(uri) {
+  if (!isTauriRuntime()) return [];
+  const api = await tauriApi();
+  return api.invoke("lsp_get_diagnostics", { uri });
+}
+
+export async function lspHover(uri, line, character) {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("lsp_hover", { uri, line, character });
+}
+
+export async function lspDefinition(uri, line, character) {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("lsp_definition", { uri, line, character });
+}
+
+export async function closeWindow() {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("close_window");
+}
+
+export async function lspListen(callback) {
+  if (!isTauriRuntime()) return () => {};
+  const api = await tauriApi();
+  if (!api.listen) return () => {};
+  const unlisten = await api.listen("lsp-diagnostics-changed", (event) => callback(event.payload));
+  return unlisten;
+}
+
+export async function lspLogListen(callback) {
+  if (!isTauriRuntime()) return () => {};
+  const api = await tauriApi();
+  if (!api.listen) return () => {};
+  const unlisten = await api.listen("lsp-log", (event) => callback(event.payload));
+  return unlisten;
+}
+
 export function downloadText(name, text) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
