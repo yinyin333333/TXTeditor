@@ -140,7 +140,13 @@ export async function pickFolderPath() {
 export async function lspStart(workspacePath) {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
-  await api.invoke("lsp_start", { workspacePath });
+  return api.invoke("lsp_start", { workspacePath });
+}
+
+export async function lspStop() {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_stop");
 }
 
 export async function lspOpenFile(uri, text) {
@@ -189,8 +195,12 @@ export async function lspListen(callback) {
   if (!isTauriRuntime()) return () => {};
   const api = await tauriApi();
   if (!api.listen) return () => {};
-  const unlisten = await api.listen("lsp-diagnostics-changed", (event) => callback(event.payload));
-  return unlisten;
+  const unlistenChanged = await api.listen("lsp-diagnostics-changed", (event) => callback(event.payload));
+  const unlistenSnapshot = await api.listen("lsp-diagnostics-initial-snapshot", (event) => callback(event.payload));
+  return () => {
+    unlistenChanged?.();
+    unlistenSnapshot?.();
+  };
 }
 
 export async function lspLogListen(callback) {

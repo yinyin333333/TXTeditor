@@ -27,6 +27,8 @@
   --selectionBg: rgba(0, 88, 156, .70);
   --selectionBorder: #5eb1ff;
   --activeCellBorder: #5eb1ff;
+  --activeHeaderBg: var(--selectionBg);
+  --activeHeaderText: var(--grid-text-selected);
   --hoverBg: #2a2d2e;
   --menuBg: #252526;
   --menuHoverBg: #2f3640;
@@ -81,6 +83,8 @@
   --grid-selection: var(--selectionBg);
   --grid-selection-frozen: rgba(0, 105, 185, .76);
   --grid-active: var(--activeCellBorder);
+  --grid-active-header-bg: var(--activeHeaderBg);
+  --grid-active-header-text: var(--activeHeaderText);
   --grid-row-text: var(--rowIndexText);
   --grid-text: var(--cellText);
   --grid-text-selected: #ffffff;
@@ -120,6 +124,8 @@
   --selectionBg: rgba(0, 96, 170, .34);
   --selectionBorder: #005fb8;
   --activeCellBorder: #005fb8;
+  --activeHeaderBg: var(--selectionBg);
+  --activeHeaderText: var(--grid-text-selected);
   --hoverBg: #e6edf5;
   --menuBg: #ffffff;
   --menuHoverBg: #e7f0fa;
@@ -448,9 +454,6 @@ button.active {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.tab-title-error { color: #f14c4c; }
-.tab-title-warning { color: #cca700; }
 
 .tab-close {
   width: 18px;
@@ -903,6 +906,18 @@ button.active {
   opacity: .72;
 }
 
+.path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-row button {
+  height: 32px;
+  padding: 0 12px;
+}
+
 .lint-rules-panel {
   display: grid;
   gap: 10px;
@@ -1233,28 +1248,45 @@ details:not([open]) .problem-file-header::before {
   width: min(520px, calc(100vw - 32px));
 }
 
+.settings-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.settings-title-row h2 {
+  margin: 0;
+}
+
+.settings-close-btn {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  background: var(--button-bg);
+}
+
+.settings-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-section:first-of-type {
+  border-top: none;
+  padding-top: 4px;
+}
+
 .settings-label {
   display: block;
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.settings-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.settings-row .modal-input {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.settings-debug-row {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line-soft);
+  margin: 2px 0 -4px;
 }
 
 .settings-checkbox-label {
@@ -1265,59 +1297,35 @@ details:not([open]) .problem-file-header::before {
   cursor: pointer;
 }
 
-.settings-browse-btn {
-  white-space: nowrap;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 6px;
-  background: var(--button-bg);
+.settings-font-select {
+  margin-bottom: 0;
+}
+
+.settings-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.settings-segmented button {
+  height: 30px;
+  min-width: 70px;
   border: 1px solid var(--button-border);
-}
-
-.settings-hint {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0 0 18px;
-}
-
-.settings-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 16px;
-}
-
-.settings-tab {
-  padding: 7px 18px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  cursor: pointer;
-  margin-bottom: -1px;
   border-radius: 0;
-  user-select: none;
+  background: var(--button-bg);
 }
 
-.settings-tab:hover {
-  color: var(--text);
+.settings-segmented button:first-child {
+  border-radius: 6px 0 0 6px;
 }
 
-.settings-tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
+.settings-segmented button:last-child {
+  border-left: none;
+  border-radius: 0 6px 6px 0;
 }
 
-.settings-tab-panel {
-  padding-top: 2px;
-}
-
-.settings-tab-panel.hidden {
-  display: none;
-}
-
-.settings-version-select {
-  height: 34px;
-  padding: 0 10px;
-  margin-bottom: 14px;
+.settings-segmented button.active {
+  color: var(--text-strong);
+  background: var(--buttonActiveBg);
+  border-color: var(--accent);
 }

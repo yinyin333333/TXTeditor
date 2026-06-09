@@ -1,7 +1,7 @@
 {
   "name": "txteditor",
-  "version": "0.33.0",
-  "description": "TXTeditor 0.33 - fast tabular text editing for large files",
+  "version": "0.4.0",
+  "description": "TXTeditor 0.4 - fast tabular text editing for large files",
   "author": "yinyin333333",
   "license": "GPL-3.0-or-later",
   "private": true,
@@ -15,7 +15,6 @@
     "fixture:20k": "node scripts/generate-fixture.js 20000",
     "fixture:200k": "node scripts/generate-fixture.js 200000",
     "test": "node --test tests/core.test.js",
-    "lint:compare": "node scripts/lint-compare.js",
     "perf": "node scripts/perf-test.js 20000",
     "perf:20k": "node scripts/perf-test.js 20000",
     "perf:200k": "node scripts/perf-test.js 200000",

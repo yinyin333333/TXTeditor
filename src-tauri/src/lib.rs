@@ -7,9 +7,12 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tokio::sync::oneshot;
+
+const INITIAL_DIAGNOSTICS_IDLE_MS: u64 = 150;
 
 // ── app configuration ──────────────────────────────────────────────────────
 
@@ -74,27 +77,90 @@ async fn pick_file_path(app: tauri::AppHandle) -> Result<Option<String>, String>
 struct LspDiagnostic {
     row: u32,
     col: u32,
+    character: u32,
+    end_character: u32,
     severity: String,
     message: String,
     code: Option<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct LspDiagnosticsChangedPayload {
+    session_id: u64,
+    uri: String,
+    diagnostics: Vec<LspDiagnostic>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct LspDiagnosticsSnapshotPayload {
+    session_id: u64,
+    entries: Vec<LspDiagnosticsChangedPayload>,
+    publish_count: u64,
+    expected_file_count: usize,
+    file_count: usize,
+    diagnostic_count: usize,
+    elapsed_ms: u128,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct LspStartResult {
+    session_id: u64,
+    process_start_ms: u128,
+    initialize_ms: u128,
+    initialized_ms: u128,
+    expected_file_count: usize,
+}
+
+#[derive(Debug)]
+struct InitialDiagnosticsBuffer {
+    active: bool,
+    generation: u64,
+    started_at: Option<Instant>,
+    publish_count: u64,
+    expected_file_count: usize,
+    entries: HashMap<String, Vec<LspDiagnostic>>,
+}
+
+impl InitialDiagnosticsBuffer {
+    fn new(expected_file_count: usize) -> Self {
+        Self {
+            active: true,
+            generation: 0,
+            started_at: None,
+            publish_count: 0,
+            expected_file_count,
+            entries: HashMap::new(),
+        }
+    }
+}
+
 struct LspProcess {
+    session_id: u64,
     stdin: Mutex<ChildStdin>,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Option<Value>>>>,
     diagnostics: Mutex<HashMap<String, Vec<LspDiagnostic>>>,
     file_lines: Mutex<HashMap<String, Vec<String>>>,
+    initial_diagnostics: Mutex<InitialDiagnosticsBuffer>,
+    debug_logging: bool,
 }
 
 struct LspManager {
     process: Mutex<Option<Arc<LspProcess>>>,
     child: Mutex<Option<std::process::Child>>,
+    next_session_id: AtomicU64,
 }
 
 impl LspManager {
     fn new() -> Self {
-        Self { process: Mutex::new(None), child: Mutex::new(None) }
+        Self {
+            process: Mutex::new(None),
+            child: Mutex::new(None),
+            next_session_id: AtomicU64::new(1),
+        }
     }
 }
 
@@ -159,7 +225,7 @@ fn find_vector_lsp_binary() -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "vector-lsp binary not found. Set a path in Settings or build it in ../vector-lsp. Tried: {}",
+        "vector-lsp binary not found. Set a path in Lint Options or build it in ../vector-lsp. Tried: {}",
         candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
     ))
 }
@@ -170,6 +236,94 @@ fn count_tabs_before(line: &str, char_offset: usize) -> usize {
         .chars()
         .filter(|&c| c == '\t')
         .count()
+}
+
+fn path_from_uri(uri: &str) -> &str {
+    uri.strip_prefix("file:///")
+        .or_else(|| uri.strip_prefix("file://"))
+        .unwrap_or(uri)
+}
+
+fn cached_file_lines(proc: &LspProcess, uri: &str) -> Vec<String> {
+    if let Some(lines) = proc.file_lines.lock().unwrap().get(uri).cloned() {
+        return lines;
+    }
+    let lines: Vec<String> = fs::read_to_string(path_from_uri(uri))
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect();
+    proc.file_lines.lock().unwrap().insert(uri.to_string(), lines.clone());
+    lines
+}
+
+fn count_workspace_diagnostic_files(workspace_path: &str) -> usize {
+    fs::read_dir(workspace_path)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        })
+        .count()
+}
+
+fn emit_initial_diagnostics_snapshot(
+    proc: &Arc<LspProcess>,
+    app: &tauri::AppHandle,
+    generation: u64,
+) -> bool {
+    let payload = {
+        let mut buffer = proc.initial_diagnostics.lock().unwrap();
+        if !buffer.active || buffer.generation != generation {
+            return false;
+        }
+        buffer.active = false;
+        let elapsed_ms = buffer.started_at.map(|t| t.elapsed().as_millis()).unwrap_or_default();
+        let publish_count = buffer.publish_count;
+        let expected_file_count = buffer.expected_file_count;
+        let entries_map = std::mem::take(&mut buffer.entries);
+        buffer.publish_count = 0;
+        let mut entries: Vec<LspDiagnosticsChangedPayload> = entries_map
+            .into_iter()
+            .map(|(uri, diagnostics)| LspDiagnosticsChangedPayload {
+                session_id: proc.session_id,
+                uri,
+                diagnostics,
+            })
+            .collect();
+        entries.sort_by(|a, b| a.uri.cmp(&b.uri));
+        let diagnostic_count: usize = entries.iter().map(|entry| entry.diagnostics.len()).sum();
+        LspDiagnosticsSnapshotPayload {
+            session_id: proc.session_id,
+            expected_file_count,
+            file_count: entries.len(),
+            diagnostic_count,
+            entries,
+            publish_count,
+            elapsed_ms,
+        }
+    };
+    let _ = app.emit("lsp-diagnostics-initial-snapshot", payload);
+    true
+}
+
+fn schedule_initial_diagnostics_snapshot(
+    proc: Arc<LspProcess>,
+    app: tauri::AppHandle,
+    generation: u64,
+    delay: Duration,
+) {
+    std::thread::spawn(move || {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+        emit_initial_diagnostics_snapshot(&proc, &app, generation);
+    });
 }
 
 fn run_lsp_reader(
@@ -193,7 +347,9 @@ fn run_lsp_reader(
         match msg.get("method").and_then(|m| m.as_str()) {
             Some("window/logMessage") => {
                 let text = msg["params"]["message"].as_str().unwrap_or("").to_string();
-                let _ = app.emit("lsp-log", &text);
+                if proc.debug_logging {
+                    let _ = app.emit("lsp-log", &text);
+                }
                 continue;
             }
             Some("textDocument/publishDiagnostics") => {}
@@ -204,20 +360,14 @@ fn run_lsp_reader(
         let uri = uri.to_string();
         let raw = params.get("diagnostics").and_then(|d| d.as_array()).cloned().unwrap_or_default();
 
-        let lines = proc.file_lines.lock().unwrap().get(&uri).cloned().unwrap_or_else(|| {
-            let path = uri.strip_prefix("file:///")
-                .or_else(|| uri.strip_prefix("file://"))
-                .unwrap_or(&uri);
-            std::fs::read_to_string(path)
-                .unwrap_or_default()
-                .lines()
-                .map(String::from)
-                .collect()
-        });
-
-        let diagnostics: Vec<LspDiagnostic> = raw.iter().filter_map(|d| {
+        let diagnostics: Vec<LspDiagnostic> = if raw.is_empty() {
+            Vec::new()
+        } else {
+            let lines = cached_file_lines(&proc, &uri);
+            raw.iter().filter_map(|d| {
             let line = d["range"]["start"]["line"].as_u64()? as u32;
             let character = d["range"]["start"]["character"].as_u64()? as usize;
+            let end_character = d["range"]["end"]["character"].as_u64().unwrap_or(character as u64) as u32;
             let col = lines.get(line as usize)
                 .map(|l| count_tabs_before(l, character) as u32)
                 .unwrap_or(0);
@@ -229,11 +379,52 @@ fn run_lsp_reader(
             let message = d["message"].as_str().unwrap_or("").to_string();
             let code = d["code"].as_str().map(String::from)
                 .or_else(|| d["code"].as_u64().map(|n| n.to_string()));
-            Some(LspDiagnostic { row: line, col, severity, message, code })
-        }).collect();
+            Some(LspDiagnostic {
+                row: line,
+                col,
+                character: character as u32,
+                end_character,
+                severity,
+                message,
+                code,
+            })
+            }).collect()
+        };
 
-        proc.diagnostics.lock().unwrap().insert(uri.clone(), diagnostics);
-        let _ = app.emit("lsp-diagnostics-changed", &uri);
+        proc.diagnostics.lock().unwrap().insert(uri.clone(), diagnostics.clone());
+
+        let mut buffered_generation: Option<u64> = None;
+        let mut initial_snapshot_ready = false;
+        {
+            let mut buffer = proc.initial_diagnostics.lock().unwrap();
+            if buffer.active {
+                if buffer.started_at.is_none() {
+                    buffer.started_at = Some(Instant::now());
+                }
+                buffer.generation += 1;
+                buffer.publish_count += 1;
+                buffer.entries.insert(uri.clone(), diagnostics.clone());
+                initial_snapshot_ready = buffer.expected_file_count > 0
+                    && buffer.entries.len() >= buffer.expected_file_count;
+                buffered_generation = Some(buffer.generation);
+            }
+        }
+
+        if let Some(generation) = buffered_generation {
+            let delay = if initial_snapshot_ready {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(INITIAL_DIAGNOSTICS_IDLE_MS)
+            };
+            schedule_initial_diagnostics_snapshot(Arc::clone(&proc), app.clone(), generation, delay);
+            continue;
+        }
+
+        let _ = app.emit("lsp-diagnostics-changed", LspDiagnosticsChangedPayload {
+            session_id: proc.session_id,
+            uri,
+            diagnostics,
+        });
     }
 }
 
@@ -247,7 +438,8 @@ async fn lsp_start(
     state: tauri::State<'_, LspManager>,
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<LspStartResult, String> {
+    let start_at = Instant::now();
     // Kill previous child process if one is running.
     {
         let mut child_lock = state.child.lock().unwrap();
@@ -256,6 +448,7 @@ async fn lsp_start(
         }
     }
 
+    let expected_file_count = count_workspace_diagnostic_files(&workspace_path);
     let (binary, lint_mode, schema_version, schema_path, plugin_path, debug_logging) = {
         let config = config_state.config.lock().unwrap();
         let binary = match config.vector_lsp_path.as_deref().filter(|p| !p.is_empty()) {
@@ -304,10 +497,12 @@ async fn lsp_start(
     }
     let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to start vector-lsp: {e}"))?;
+    let process_start_ms = start_at.elapsed().as_millis();
 
     let mut stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
+    let session_id = state.next_session_id.fetch_add(1, Ordering::SeqCst);
 
     let root_uri = path_to_uri(&workspace_path);
     send_lsp_msg(&mut stdin, &json!({
@@ -323,19 +518,24 @@ async fn lsp_start(
 
     let mut reader = BufReader::new(stdout);
     read_lsp_msg(&mut reader); // consume initialize response
+    let initialize_ms = start_at.elapsed().as_millis();
 
     send_lsp_msg(&mut stdin, &json!({
         "jsonrpc": "2.0",
         "method": "initialized",
         "params": {}
     }))?;
+    let initialized_ms = start_at.elapsed().as_millis();
 
     let proc = Arc::new(LspProcess {
+        session_id,
         stdin: Mutex::new(stdin),
         next_id: AtomicU64::new(100),
         pending: Mutex::new(HashMap::new()),
         diagnostics: Mutex::new(HashMap::new()),
         file_lines: Mutex::new(HashMap::new()),
+        initial_diagnostics: Mutex::new(InitialDiagnosticsBuffer::new(expected_file_count)),
+        debug_logging,
     });
 
     *state.process.lock().unwrap() = Some(Arc::clone(&proc));
@@ -351,13 +551,30 @@ async fn lsp_start(
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap_or(0) > 0 {
             let trimmed = line.trim().to_string();
-            if !trimmed.is_empty() {
+            if debug_logging && !trimmed.is_empty() {
                 let _ = app_stderr.emit("lsp-log", &trimmed);
             }
             line.clear();
         }
     });
 
+    Ok(LspStartResult {
+        session_id,
+        process_start_ms,
+        initialize_ms,
+        initialized_ms,
+        expected_file_count,
+    })
+}
+
+#[tauri::command]
+fn lsp_stop(state: tauri::State<'_, LspManager>) -> Result<(), String> {
+    *state.process.lock().unwrap() = None;
+    let mut child_lock = state.child.lock().unwrap();
+    if let Some(mut child) = child_lock.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     Ok(())
 }
 
@@ -773,6 +990,7 @@ pub fn run() {
             save_config,
             pick_file_path,
             lsp_start,
+            lsp_stop,
             lsp_open_file,
             lsp_update_file,
             lsp_close_file,

@@ -21,6 +21,8 @@ const GRID_COLORS = {
   gridFrozen: "#505863",
   rowHeader: "#252526",
   rowHeaderFrozen: "#30343b",
+  activeHeader: "#34475d",
+  activeHeaderText: "#ffffff",
   selection: "#264f78",
   selectionFrozen: "#2d5d86",
   active: "#3794ff",
@@ -51,6 +53,8 @@ const GRID_CSS_VARS = {
   gridFrozen: "--grid-line-frozen",
   rowHeader: "--grid-row-header-bg",
   rowHeaderFrozen: "--grid-row-header-frozen-bg",
+  activeHeader: "--grid-active-header-bg",
+  activeHeaderText: "--grid-active-header-text",
   selection: "--grid-selection",
   selectionFrozen: "--grid-selection-frozen",
   active: "--grid-active",
@@ -101,6 +105,7 @@ export class CanvasGrid {
     this.editing = false;
     this.editMode = null;
     this.colorizeColumns = false;
+    this.vectorLspHoverEnabled = false;
     this.diagnosticsByCell = new Map();
     this.raf = 0;
     this.renderStats = {
@@ -166,6 +171,25 @@ export class CanvasGrid {
   setColorizeColumns(enabled) {
     this.colorizeColumns = Boolean(enabled);
     this.draw();
+  }
+
+  setVectorLspHoverEnabled(enabled) {
+    this.vectorLspHoverEnabled = Boolean(enabled);
+    if (!this.vectorLspHoverEnabled) {
+      this.clearLspHover();
+    } else {
+      this.hideFirstColumnHoverPreview();
+    }
+  }
+
+  clearLspHover() {
+    this._lspHoverByCell.clear();
+    this._hoveredCell = null;
+    if (this._hoverDebounceTimer !== null) {
+      clearTimeout(this._hoverDebounceTimer);
+      this._hoverDebounceTimer = null;
+    }
+    this._tooltip.style.display = "none";
   }
 
   setDiagnostics(diagnosticsByCell) {
@@ -474,11 +498,14 @@ export class CanvasGrid {
 
   drawRowHeader(row, y, height, options = {}) {
     const selected = this.selection.hasFullRow(row, this.doc.columnCount);
-    this.ctx.fillStyle = selected ? GRID_COLORS.selection : options.frozenRow ? GRID_COLORS.rowHeaderFrozen : GRID_COLORS.rowHeader;
+    const activeHeader = this.selection.focus.row === row;
+    this.ctx.fillStyle = selected ? GRID_COLORS.selection
+      : activeHeader ? GRID_COLORS.activeHeader
+        : options.frozenRow ? GRID_COLORS.rowHeaderFrozen : GRID_COLORS.rowHeader;
     this.ctx.fillRect(0, y, this.rowHeaderWidth, height);
     this.ctx.strokeStyle = GRID_COLORS.grid;
     this.ctx.strokeRect(0, y, this.rowHeaderWidth, height);
-    this.ctx.fillStyle = selected ? GRID_COLORS.textSelected : GRID_COLORS.rowText;
+    this.ctx.fillStyle = selected ? GRID_COLORS.textSelected : activeHeader ? GRID_COLORS.activeHeaderText : GRID_COLORS.rowText;
     this.ctx.font = this.font(400);
     const label = String(row + 1);
     const x = Math.max(6, this.rowHeaderWidth - this.ctx.measureText(label).width - 8);
@@ -491,9 +518,10 @@ export class CanvasGrid {
     const active = this.selection.focus.row === row && this.selection.focus.column === column;
     const ctx = this.ctx;
     const firstColumnLabel = column === 0 && row > 0;
+    const activeColumnHeaderCell = row === 0 && this.selection.focus.column === column;
     ctx.font = this.font(row === 0 || firstColumnLabel ? 600 : 400);
     const frozen = options.frozenRow || options.frozenColumn;
-    const baseBackground = cellBackground(row, selected, frozen, firstColumnLabel);
+    const baseBackground = cellBackground(row, selected, frozen, firstColumnLabel, activeColumnHeaderCell);
     ctx.fillStyle = baseBackground;
     ctx.fillRect(x, y, width, height);
     ctx.strokeStyle = frozen ? GRID_COLORS.gridFrozen : GRID_COLORS.grid;
@@ -507,7 +535,7 @@ export class CanvasGrid {
     }
     const value = this.doc.getCell(row, column);
     if (shouldDrawCellText(row, column, this.editingCell())) {
-      ctx.fillStyle = cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
+      ctx.fillStyle = cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel, activeColumnHeaderCell);
       ctx.textBaseline = "middle";
       this.fillText(value, x + 8, y + height / 2, width - 12);
     }
@@ -743,6 +771,12 @@ export class CanvasGrid {
       this.draw();
       return;
     }
+    if (!this.vectorLspHoverEnabled) {
+      this._updateTooltip(event, { kind: "empty" });
+      this.updateFirstColumnHoverPreview(hit, event);
+      return;
+    }
+    this.hideFirstColumnHoverPreview();
     if (!this.resizing) this._updateTooltip(event, hit);
   }
 
@@ -780,6 +814,7 @@ export class CanvasGrid {
   }
 
   _scheduleHoverRequest(row, col) {
+    if (!this.vectorLspHoverEnabled) return;
     this._pendingHoverRow = row;
     this._pendingHoverCol = col;
     if (this._hoverDebounceTimer !== null) clearTimeout(this._hoverDebounceTimer);
@@ -794,7 +829,7 @@ export class CanvasGrid {
   _renderTooltip(row, col, clientX, clientY) {
     const value = this.doc.getCell(row, col);
     const diags = this.diagnosticsByCell.get(`${row}:${col}`) ?? [];
-    const hoverText = this._lspHoverByCell.get(`${row}:${col}`) ?? null;
+    const hoverText = this.vectorLspHoverEnabled ? this._lspHoverByCell.get(`${row}:${col}`) ?? null : null;
     if (!value && !diags.length && !hoverText) {
       this._tooltip.style.display = "none";
       return;
@@ -828,6 +863,7 @@ export class CanvasGrid {
   }
 
   setLspHover(row, col, text) {
+    if (!this.vectorLspHoverEnabled) return;
     const key = `${row}:${col}`;
     if (text) this._lspHoverByCell.set(key, text);
     else this._lspHoverByCell.delete(key);
@@ -1074,10 +1110,10 @@ export class CanvasGrid {
   styleEditorForCell(row, column) {
     const frozen = (this.doc.freezeFirstRow && row === 0) || (this.doc.freezeFirstColumn && column === 0);
     const firstColumnLabel = column === 0 && row > 0;
-    const unselectedBackground = cellBackground(row, false, frozen, firstColumnLabel);
-    const selectedBackground = cellBackground(row, true, frozen, firstColumnLabel);
+    const unselectedBackground = cellBackground(row, false, frozen, firstColumnLabel, false);
+    const selectedBackground = cellBackground(row, true, frozen, firstColumnLabel, false);
     this.editor.style.backgroundColor = opaqueColor(selectedBackground, unselectedBackground);
-    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), true, this.colorizeColumns, firstColumnLabel);
+    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), true, this.colorizeColumns, firstColumnLabel, false);
     this.editor.style.fontFamily = this.gridFontFamily;
     this.editor.style.fontWeight = row === 0 || firstColumnLabel ? "600" : "400";
   }
@@ -1169,16 +1205,18 @@ function arrowNavigationDelta(key) {
   return { rowDelta: 0, columnDelta: 0 };
 }
 
-function cellBackground(row, selected, frozen, firstColumnLabel) {
+function cellBackground(row, selected, frozen, firstColumnLabel, activeHeaderCell = false) {
   if (selected) return frozen ? GRID_COLORS.selectionFrozen : GRID_COLORS.selection;
+  if (activeHeaderCell) return GRID_COLORS.activeHeader;
   if (frozen) return row === 0 ? GRID_COLORS.frozenHeader : firstColumnLabel ? GRID_COLORS.firstColumnFrozen : GRID_COLORS.frozen;
   if (row === 0) return GRID_COLORS.header;
   if (firstColumnLabel) return GRID_COLORS.firstColumn;
   return row % 2 ? GRID_COLORS.rowOdd : GRID_COLORS.rowEven;
 }
 
-function cellTextColor(row, column, value, selected, colorizeColumns, firstColumnLabel = false) {
+function cellTextColor(row, column, value, selected, colorizeColumns, firstColumnLabel = false, activeHeaderCell = false) {
   if (selected) return GRID_COLORS.textSelected;
+  if (activeHeaderCell) return GRID_COLORS.activeHeaderText;
   if (row === 0) return GRID_COLORS.textHeader;
   const text = String(value).trim();
   if (text === "") return GRID_COLORS.textEmpty;
