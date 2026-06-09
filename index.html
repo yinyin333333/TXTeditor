@@ -44,27 +44,24 @@
           <div id="scrollSurface" class="scroll-surface"></div>
           <input id="cellEditor" class="cell-editor" autocomplete="off" spellcheck="false" />
           <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
+          <div id="overviewRuler" class="overview-ruler"></div>
         </section>
       </main>
 
       <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems">
         <div id="problemsResizer" class="problems-resizer" aria-hidden="true"></div>
         <header class="problems-header">
-          <div class="problems-title">
-            <strong>Problems</strong>
-            <span id="lintSummary" class="lint-summary">No problems</span>
+          <div class="bottom-tabs">
+            <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
+            <button class="bottom-tab" data-bottom-tab="log">Log</button>
           </div>
           <div class="lint-controls">
             <button class="toggle-button" data-command="toggle-lint">Lint</button>
-            <select id="lintProfileSelect" class="profile-select" title="D2R lint profile">
-              <option value="RotW">RotW</option>
-              <option value="2.4">2.4</option>
-            </select>
-            <button data-command="toggle-lint-rules">Rules</button>
+            <button data-command="open-settings" title="Lint options">Lint Options</button>
           </div>
         </header>
-        <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules"></div>
         <div id="problemsList" class="problems-list"></div>
+        <div id="logList" class="log-list hidden"></div>
       </section>
     </div>
 

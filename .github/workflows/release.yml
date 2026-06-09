@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — build and upload artifacts but skip creating a GitHub Release"
+        type: boolean
+        default: true
+      version:
+        description: "Version string for dry-run artifact names (e.g. v0.32.0-test)"
+        type: string
+        default: "v0.0.0-dry-run"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout TXTeditor
+        uses: actions/checkout@v4
+
+      - name: Checkout vector-lsp
+        uses: actions/checkout@v4
+        with:
+          repository: eezstreet/vector-lsp
+          path: vector-lsp
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            $v = "${{ github.ref_name }}"
+          } else {
+            $v = "${{ inputs.version }}"
+            if ([string]::IsNullOrWhiteSpace($v)) { $v = "v0.0.0-dry-run" }
+          }
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+          echo "Resolved version: $v"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            vector-lsp -> target
+          cache-on-failure: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build vector-lsp
+        working-directory: vector-lsp
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      # Writes a CI-only Tauri config that bundles vector-lsp.exe and contrib/
+      # into the NSIS installer as resources. Paths are relative to src-tauri/.
+      # This file is not committed and does not affect local dev builds.
+      - name: Write Tauri resource config
+        shell: pwsh
+        run: |
+          @'
+          {
+            "bundle": {
+              "resources": {
+                "../vector-lsp/target/x86_64-pc-windows-msvc/release/vector-lsp.exe": "vector-lsp.exe",
+                "../vector-lsp/contrib": "contrib"
+              }
+            }
+          }
+          '@ | Out-File "src-tauri/tauri.ci.json" -Encoding utf8NoBOM
+
+      - name: Build TXTeditor (Tauri + bundled vector-lsp)
+        run: npm run tauri -- build --config src-tauri/tauri.ci.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Stage release artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $vlspExe = "vector-lsp\target\x86_64-pc-windows-msvc\release\vector-lsp.exe"
+
+          # ── Portable zip ────────────────────────────────────────────────────
+          $portableDir = New-Item -ItemType Directory -Force "staging\portable"
+          Copy-Item "src-tauri\target\release\TXTeditor.exe" $portableDir
+          Copy-Item $vlspExe $portableDir
+          if (Test-Path "vector-lsp\contrib") {
+            Copy-Item "vector-lsp\contrib" "$portableDir\contrib" -Recurse
+          }
+          $portableZip = "TXTeditor-${version}-windows-x64-portable.zip"
+          Compress-Archive -Path "$portableDir\*" -DestinationPath $portableZip -CompressionLevel Optimal
+
+          # ── NSIS installer (vector-lsp already bundled via tauri.ci.json) ──
+          $installer = Get-ChildItem "src-tauri\target\release\bundle\nsis" -Filter "*.exe" -ErrorAction Stop |
+                       Select-Object -First 1
+          $installerDest = "TXTeditor-${version}-windows-x64-setup.exe"
+          Copy-Item $installer.FullName $installerDest
+
+          echo "PORTABLE_ZIP=$portableZip" >> $env:GITHUB_OUTPUT
+          echo "INSTALLER=$installerDest" >> $env:GITHUB_OUTPUT
+
+          echo "=== Portable zip contents ==="
+          Get-ChildItem $portableDir -Recurse | Select-Object -ExpandProperty FullName
+          echo "=== Installer ==="
+          echo $installerDest
+
+      - name: Upload portable zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifacts.outputs.PORTABLE_ZIP }}
+          path: ${{ steps.artifacts.outputs.PORTABLE_ZIP }}
+          retention-days: 14
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifacts.outputs.INSTALLER }}
+          path: ${{ steps.artifacts.outputs.INSTALLER }}
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "TXTeditor ${{ steps.version.outputs.VERSION }}"
+          generate_release_notes: true
+          files: |
+            ${{ steps.artifacts.outputs.INSTALLER }}
+            ${{ steps.artifacts.outputs.PORTABLE_ZIP }}
+          body: |
+            ## Downloads
+
+            | File | Description |
+            |------|-------------|
+            | `TXTeditor-*-setup.exe` | Installer — run it, everything is included |
+            | `TXTeditor-*-portable.zip` | Portable — extract and run `TXTeditor.exe` |

@@ -18,6 +18,8 @@ import {
   hiddenColumnsCommand,
   hiddenRowsCommand,
   incrementFillSelectedCellsCommand,
+  incrementFillRangesCommand,
+  incrementFillCommand,
   insertColumnCommand,
   insertRowCommand,
   pasteTextToRangesCommand,
@@ -26,23 +28,32 @@ import {
   resizeRowCommand
 } from "./core/operations.js";
 import {
+  closeWindow,
   downloadText,
+  getConfig,
   isTauriRuntime,
   listenForNativeDrops,
+  lspCloseFile,
+  lspGetDiagnostics,
+  lspHover,
+  lspDefinition,
+  lspListen,
+  lspLogListen,
+  lspOpenFile,
+  lspStart,
+  lspUpdateFile,
   openFilesNative,
   openNativePaths,
   openWorkspaceNative,
+  pickFilePath,
+  pickFolderPath,
   readFileAsDocument,
+  saveConfig,
   saveDocumentNative
 } from "./core/io.js";
 import {
-  createDefaultLintSettings,
   diagnosticsForDocument,
-  groupDiagnosticsByCell,
-  lintRuleGroupsForProfile,
-  lintProfileOptions,
-  normalizeLintSettings,
-  runLint
+  groupDiagnosticsByCell
 } from "./core/lint-engine.js";
 import { CanvasGrid } from "./ui/canvas-grid.js";
 
@@ -94,10 +105,16 @@ const FONT_OPTIONS = [
 const savedTheme = localStorage.getItem("txteditor.theme") === "light" ? "light" : "dark";
 const savedGridFont = normaliseGridFont(localStorage.getItem("txteditor.gridFont"));
 const savedColorize = localStorage.getItem("txteditor.colorize") === "on";
-const savedLintSettings = normalizeLintSettings(readJsonStorage("txteditor.lint.settings", createDefaultLintSettings()));
+const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
 const MIN_SIDEBAR_WIDTH = 260;
 const savedSidebarWidth = clamp(Number(localStorage.getItem("txteditor.sidebarWidth")) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, 520);
 const savedProblemsHeight = clamp(Number(localStorage.getItem("txteditor.problemsHeight")) || 260, 150, 520);
+const savedFreeze = readJsonStorage("txteditor.freeze", {});
+const collapsedProblemFiles = new Set();
+const collapsedFileGroups = new Set();
+const lspHoverCache = new Map();
+const lspHoverPending = new Set();
+let lspHoverCurrentKey = null;
 document.documentElement.dataset.theme = savedTheme;
 document.documentElement.style.setProperty("--grid-font", savedGridFont);
 document.documentElement.style.setProperty("--sidebar-width", `${savedSidebarWidth}px`);
@@ -108,12 +125,6 @@ const state = {
   active: 0,
   selection: new SelectionModel(),
   workspace: null,
-  workspaceDocs: [],
-  workspaceLoad: {
-    status: "not-started",
-    files: [],
-    error: ""
-  },
   search: {
     lastQuery: ""
   },
@@ -121,21 +132,24 @@ const state = {
   sidebarWidth: savedSidebarWidth,
   problemsVisible: localStorage.getItem("txteditor.problems") === "visible",
   problemsHeight: savedProblemsHeight,
+  freezeRow: savedFreeze.row ?? false,
+  freezeColumn: savedFreeze.column ?? false,
   contextHit: null,
   contextMenuActiveGroup: "",
   theme: savedTheme,
   gridFont: savedGridFont,
   colorizeColumns: savedColorize,
   lint: {
-    settings: savedLintSettings,
+    enabled: savedLintEnabled,
     diagnostics: [],
-    timer: 0,
-    version: 0,
-    running: false,
-    status: "",
-    rulesOpen: false,
-    lastRunAt: 0
-  }
+    status: ""
+  },
+  lsp: {
+    started: false
+  },
+  config: {},
+  bottomTab: "problems",
+  lspLogs: []
 };
 
 const els = {
@@ -145,6 +159,7 @@ const els = {
   problemsPanel: document.getElementById("problemsPanel"),
   problemsResizer: document.getElementById("problemsResizer"),
   problemsList: document.getElementById("problemsList"),
+  logList: document.getElementById("logList"),
   host: document.getElementById("gridHost"),
   canvas: document.getElementById("gridCanvas"),
   frozenCanvas: document.getElementById("frozenCanvas"),
@@ -155,8 +170,6 @@ const els = {
   fileList: document.getElementById("fileList"),
   fileInput: document.getElementById("hiddenFileInput"),
   fontSelect: document.getElementById("fontSelect"),
-  lintProfileSelect: document.getElementById("lintProfileSelect"),
-  lintRulesPanel: document.getElementById("lintRulesPanel"),
   lintSummary: document.getElementById("lintSummary"),
   searchPanel: document.getElementById("searchPanel"),
   searchInput: document.getElementById("searchInput"),
@@ -167,7 +180,8 @@ const els = {
   toast: document.getElementById("toast"),
   contextMenu: document.getElementById("contextMenu"),
   closeDialog: document.getElementById("closeDialog"),
-  closeDialogText: document.getElementById("closeDialogText")
+  closeDialogText: document.getElementById("closeDialogText"),
+  overviewRuler: document.getElementById("overviewRuler")
 };
 
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
@@ -208,7 +222,6 @@ const commandLabelsBase = [
   ["toggle-freeze-column", "Freeze First Column"],
   ["toggle-colorize", "Colorize Columns"],
   ["toggle-lint", "Toggle Lint"],
-  ["toggle-lint-rules", "Lint Rules"],
   ["show-explorer", "Show Explorer"],
   ["show-problems", "Show Problems"],
   ["zoom-in", "Zoom In"],
@@ -218,7 +231,8 @@ const commandLabelsBase = [
   ["resize-selected-fit", "Resize Selected To Fit"],
   ["reset-row-heights", "Reset Row Heights"],
   ["toggle-sidebar", "Toggle Explorer"],
-  ["toggle-theme", "Toggle Light/Dark Mode"]
+  ["toggle-theme", "Toggle Light/Dark Mode"],
+  ["open-settings", "Lint Options"]
 ];
 
 const commandLabels = [
@@ -244,7 +258,9 @@ const grid = new CanvasGrid({
   onEdit: applyEdits,
   onStatus: null,
   onContextMenu: showContextMenu,
-  onResizeCommand: commitResize
+  onResizeCommand: commitResize,
+  onAutoFitColumn: (column) => autoFitColumns([column]).catch(showError),
+  onHoverRequest: (row, column) => requestLspHover(row, column).catch(() => {})
 });
 
 grid.setFontFamily(state.gridFont);
@@ -252,7 +268,11 @@ grid.setColorizeColumns(state.colorizeColumns);
 populateFontSelect();
 renderChrome();
 wireEvents();
+wireCloseHandler().catch(() => {});
+loadConfig().catch(() => {});
 listenForNativeDrops((paths) => openDroppedNativePaths(paths)).catch(showError);
+lspListen(handleLspDiagnosticsChanged).catch(showError);
+lspLogListen((msg) => appendLspLog(msg)).catch(() => {});
 
 function activeDoc() {
   return state.docs[state.active] ?? EMPTY_DOC;
@@ -274,7 +294,7 @@ function execute(command) {
   command.redo(activeDoc());
   activeUndo().push(command);
   grid.layout();
-  scheduleLintForChange(doc);
+  lspUpdateDoc(doc).catch(() => {});
   renderChrome();
 }
 
@@ -286,6 +306,8 @@ function wireEvents() {
   document.addEventListener("click", (event) => {
     const command = event.target.closest("[data-command]")?.dataset.command;
     if (command) Promise.resolve(commands[command]?.()).catch(showError);
+    const bottomTab = event.target.closest("[data-bottom-tab]")?.dataset.bottomTab;
+    if (bottomTab) switchBottomTab(bottomTab);
     if (!event.target.closest(".context-menu")) hideContextMenu();
   });
   els.closeDialog.addEventListener("click", (event) => {
@@ -302,7 +324,7 @@ function wireEvents() {
     if (tab) closeTab(Number(tab.dataset.tab)).catch(showError);
   });
   document.addEventListener("keydown", handleGlobalKeydown);
-  window.addEventListener("resize", () => positionContextMenu());
+  window.addEventListener("resize", () => { positionContextMenu(); updateOverviewRuler(); });
   window.addEventListener("dragover", (event) => event.preventDefault());
   window.addEventListener("drop", async (event) => {
     event.preventDefault();
@@ -316,11 +338,6 @@ function wireEvents() {
     els.fileInput.value = "";
   });
   els.fontSelect.addEventListener("change", () => changeGridFont(els.fontSelect.value));
-  els.lintProfileSelect?.addEventListener("change", () => setLintProfile(els.lintProfileSelect.value));
-  els.lintRulesPanel?.addEventListener("change", (event) => {
-    const input = event.target.closest("[data-lint-rule]");
-    if (input) setLintRuleEnabled(input.dataset.lintRule, input.checked);
-  });
   wirePaneResizers();
   els.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -346,6 +363,35 @@ function wireEvents() {
       els.palette.classList.add("hidden");
     }
     if (event.key === "Escape") els.palette.classList.add("hidden");
+  });
+}
+
+async function wireCloseHandler() {
+  if (!isTauriRuntime()) return;
+  const tauri = window.__TAURI__;
+  if (!tauri?.event?.listen) return;
+  await tauri.event.listen("app-close-requested", async () => {
+    const unsaved = state.docs.filter((d) => d.dirty);
+    if (!unsaved.length) {
+      closeWindow().catch(() => {});
+      return;
+    }
+    for (const doc of [...unsaved]) {
+      const index = state.docs.indexOf(doc);
+      if (index >= 0) {
+        state.active = index;
+        applyFreezeToDoc(activeDoc());
+        grid.setDocument(activeDoc());
+        renderChrome();
+      }
+      const choice = await askCloseChoice(doc);
+      if (choice === "cancel") return;
+      if (choice === "save") {
+        const saved = await saveFile().catch(() => false);
+        if (!saved || doc.dirty) return;
+      }
+    }
+    closeWindow().catch(() => {});
   });
 }
 
@@ -411,6 +457,7 @@ async function addDocument(doc) {
   doc.zoom = 1;
   state.docs.push(doc);
   state.active = state.docs.length - 1;
+  applyFreezeToDoc(doc);
   grid.setDocument(doc);
   if (!doc.initialColumnFitApplied) {
     grid.autoFitInitialColumns();
@@ -418,7 +465,8 @@ async function addDocument(doc) {
     grid.layout();
   }
   renderChrome();
-  if (lintActive()) scheduleLintFull("open-document");
+  scrollProblemsToActiveFile();
+  lspOpenDoc(doc).catch(() => {});
 }
 
 async function openFile() {
@@ -460,11 +508,10 @@ async function openFolder() {
       showError("Open Folder is available in the desktop app.");
       return;
     }
-    state.workspace = await openWorkspaceNative();
-    state.workspaceDocs = [];
-    state.workspaceLoad = { status: "not-started", files: workspaceFileStatesForExplorer(), error: "" };
-    cancelLintJobs({ clearDiagnostics: true });
-    if (lintActive()) scheduleLintFull("open-workspace", 0);
+    const workspace = await openWorkspaceNative();
+    if (!workspace) return;
+    state.workspace = workspace;
+    lspStartWorkspace(workspace.path).catch(showError);
     renderChrome();
   } catch (error) {
     showError(error);
@@ -545,7 +592,7 @@ async function loadFixture(size) {
 function undo() {
   if (activeUndo().undo(activeDoc())) {
     grid.layout();
-    scheduleLintForChange(activeDoc());
+    lspUpdateDoc(activeDoc()).catch(() => {});
     renderChrome();
   }
 }
@@ -553,7 +600,7 @@ function undo() {
 function redo() {
   if (activeUndo().redo(activeDoc())) {
     grid.layout();
-    scheduleLintForChange(activeDoc());
+    lspUpdateDoc(activeDoc()).catch(() => {});
     renderChrome();
   }
 }
@@ -585,7 +632,7 @@ function findNext() {
 }
 
 function runCommand(id) {
-  const alwaysAvailable = new Set(["open-file", "open-folder", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
+  const alwaysAvailable = new Set(["open-file", "open-folder", "open-settings", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-lint", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
   if (!hasOpenDocument() && !alwaysAvailable.has(id)) return showError("Open a file before using that command.");
   const doc = activeDoc();
   const rect = state.selection.rect;
@@ -625,7 +672,6 @@ function runCommand(id) {
   if (id === "toggle-freeze-column") return toggleFreeze("column");
   if (id === "toggle-colorize") return toggleColorize();
   if (id === "toggle-lint") return toggleLint();
-  if (id === "toggle-lint-rules") return toggleLintRules();
   if (id === "show-explorer") return toggleExplorerPane();
   if (id === "show-problems") return toggleProblemsPanel();
   if (id === "zoom-in") return zoomBy(0.1);
@@ -636,6 +682,8 @@ function runCommand(id) {
   if (id === "reset-row-heights") return resetRowHeights();
   if (id === "toggle-sidebar") return toggleSidebar();
   if (id === "toggle-theme") return toggleTheme();
+  if (id === "open-settings") return showSettings();
+  if (id === "go-to-definition") return goToDefinition();
 }
 
 async function copySelection() {
@@ -785,9 +833,10 @@ function askText({ title, message, defaultValue = "", inputMode = "text", valida
 
 function toggleFreeze(kind) {
   if (!hasOpenDocument()) return;
-  const doc = activeDoc();
-  if (kind === "row") doc.freezeFirstRow = !doc.freezeFirstRow;
-  if (kind === "column") doc.freezeFirstColumn = !doc.freezeFirstColumn;
+  if (kind === "row") state.freezeRow = !state.freezeRow;
+  if (kind === "column") state.freezeColumn = !state.freezeColumn;
+  localStorage.setItem("txteditor.freeze", JSON.stringify({ row: state.freezeRow, column: state.freezeColumn }));
+  applyFreezeToDoc(activeDoc());
   grid.layout();
   renderChrome();
 }
@@ -856,36 +905,12 @@ function changeGridFont(value) {
 }
 
 function toggleLint() {
-  state.lint.settings.enabled = !state.lint.settings.enabled;
-  if (!state.lint.settings.enabled) {
-    cancelLintJobs({ clearDiagnostics: true });
-  } else {
-    if (state.problemsVisible) scheduleLintFull("lint-enabled", 0);
+  state.lint.enabled = !state.lint.enabled;
+  if (!state.lint.enabled) {
+    state.lint.diagnostics = [];
+    updateGridDiagnostics();
   }
   saveLintSettings();
-  renderChrome();
-}
-
-function toggleLintRules() {
-  state.lint.rulesOpen = !state.lint.rulesOpen;
-  renderChrome();
-}
-
-function setLintProfile(profile) {
-  state.lint.settings.profile = lintProfileOptions().includes(profile) ? profile : "RotW";
-  state.lint.diagnostics = [];
-  updateGridDiagnostics();
-  saveLintSettings();
-  if (lintActive()) scheduleLintFull("profile-changed", 0);
-  renderChrome();
-}
-
-function setLintRuleEnabled(ruleId, enabled) {
-  const rule = currentProfileRules()[ruleId];
-  if (!rule) return;
-  rule.enabled = Boolean(enabled);
-  saveLintSettings();
-  if (lintActive()) scheduleLintFull("settings-changed", 120);
   renderChrome();
 }
 
@@ -902,14 +927,34 @@ async function toggleProblemsPanel() {
   const gridHadFocus = document.activeElement === els.host;
   state.problemsVisible = !state.problemsVisible;
   localStorage.setItem("txteditor.problems", state.problemsVisible ? "visible" : "hidden");
-  if (state.problemsVisible && state.lint.settings.enabled) {
-    scheduleLintFull("problems-opened", 0);
-  } else if (!state.problemsVisible) {
-    cancelLintJobs({ clearDiagnostics: false });
-  }
   renderChrome();
   grid.layout();
   if (!state.problemsVisible && gridHadFocus) els.host.focus();
+}
+
+function switchBottomTab(tab) {
+  state.bottomTab = tab;
+  renderChrome();
+  if (tab === "log" && els.logList) {
+    els.logList.innerHTML = state.lspLogs
+      .map((msg) => `<div class="log-entry">${escapeHtml(msg)}</div>`)
+      .join("");
+    els.logList.scrollTop = els.logList.scrollHeight;
+  }
+}
+
+const MAX_LOG_ENTRIES = 500;
+
+function appendLspLog(msg) {
+  state.lspLogs.push(msg);
+  if (state.lspLogs.length > MAX_LOG_ENTRIES) state.lspLogs.shift();
+  if (state.bottomTab === "log" && els.logList) {
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    entry.textContent = msg;
+    els.logList.appendChild(entry);
+    els.logList.scrollTop = els.logList.scrollHeight;
+  }
 }
 
 function setSidebarWidth(width) {
@@ -958,138 +1003,268 @@ function wirePaneResizers() {
   });
 }
 
-function scheduleLintForChange(doc) {
-  if (!lintActive()) return;
-  scheduleLintFull(docHasDiagnostics(doc) ? "diagnostic-file-edited" : "file-edited", 360);
+// ── LSP integration ────────────────────────────────────────────────────────
+
+function docToUri(doc) {
+  if (!doc?.path) return null;
+  const normalized = doc.path.replace(/\\/g, "/");
+  const base = normalized.startsWith("/") ? `file://${normalized}` : `file:///${normalized}`;
+  try { return new URL(base).href; } catch { return base; }
 }
 
-function scheduleLintFull(reason = "change", delay = 420) {
-  if (!lintActive()) return;
-  clearTimeout(state.lint.timer);
-  const version = ++state.lint.version;
-  state.lint.timer = setTimeout(() => runLintNow(reason, version), delay);
+function uriToFileKey(uri) {
+  return lintPathKey(decodeURIComponent(uri.replace(/^file:\/\/\//, "").replace(/^file:\/\//, "/")));
 }
 
-async function runLintNow(reason = "lint", version = ++state.lint.version) {
-  clearTimeout(state.lint.timer);
-  state.lint.timer = 0;
-  if (!lintActive() || version !== state.lint.version) return;
-  state.lint.running = true;
-  state.lint.status = state.workspace?.files?.length ? "Indexing workspace..." : `Linting ${state.lint.settings.profile}...`;
+function pathFromUri(uri) {
+  if (uri.startsWith("file:///")) return decodeURIComponent(uri.slice(8));
+  if (uri.startsWith("file://")) return decodeURIComponent(uri.slice(7));
+  return null;
+}
+
+function fileNameFromUri(uri) {
+  return decodeURIComponent(uri.split("/").pop() || uri);
+}
+
+async function lspStartWorkspace(workspacePath) {
+  lspHoverCache.clear();
+  lspHoverPending.clear();
+  lspHoverCurrentKey = null;
+  state.lspLogs = [];
+  if (els.logList) els.logList.innerHTML = "";
+  state.lint.status = "Connecting to linter...";
   renderChrome();
-  try {
-    await ensureWorkspaceIndexed(version);
-    if (!lintActive() || version !== state.lint.version) return;
-    state.lint.status = `Linting ${state.lint.settings.profile}...`;
-    renderChrome();
-    await yieldToUi();
-    const diagnostics = runLint(activeLintDocuments(), state.lint.settings);
-    if (version !== state.lint.version) return;
-    state.lint.diagnostics = diagnostics;
-    state.lint.lastRunAt = Date.now();
-    updateGridDiagnostics();
-  } finally {
-    if (version === state.lint.version) {
-      state.lint.running = false;
-      state.lint.status = "";
-      renderChrome();
-    }
+  await lspStart(workspacePath);
+  state.lsp.started = true;
+  state.lsp.openFileCount = 0;
+  const docsWithPaths = state.docs.filter((d) => docToUri(d));
+  for (const doc of docsWithPaths) {
+    const uri = docToUri(doc);
+    doc._lspVersion = 1;
+    await lspOpenFile(uri, doc.toText()).catch(() => {});
+    state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
   }
+  state.lint.status = "";
+  renderChrome();
 }
 
-function activeLintDocuments() {
-  return [...state.docs, ...state.workspaceDocs];
+async function lspOpenDoc(doc) {
+  if (!state.lsp.started) return;
+  const uri = docToUri(doc);
+  if (!uri) return;
+  doc._lspVersion = 1;
+  await lspOpenFile(uri, doc.toText());
+  state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
+  renderChrome();
 }
 
-function currentProfileRules() {
-  return state.lint.settings.profiles?.[state.lint.settings.profile]?.rules ?? {};
+async function lspUpdateDoc(doc) {
+  if (!state.lsp.started) return;
+  const uri = docToUri(doc);
+  if (!uri) return;
+  doc._lspVersion = ((doc._lspVersion ?? 0) + 1);
+  await lspUpdateFile(uri, doc._lspVersion, doc.toText());
+}
+
+async function lspCloseDoc(doc) {
+  if (!state.lsp.started) return;
+  const uri = docToUri(doc);
+  if (!uri) return;
+  await lspCloseFile(uri);
+  // Clear hover cache for this file
+  for (const key of [...lspHoverCache.keys()]) {
+    if (key.startsWith(`${uri}:`)) lspHoverCache.delete(key);
+  }
+  // Clear diagnostics for this file
+  const fileKey = uriToFileKey(uri);
+  state.lint.diagnostics = state.lint.diagnostics.filter((d) => d.fileKey !== fileKey);
+  updateGridDiagnostics();
+}
+
+async function handleLspDiagnosticsChanged(uri) {
+  if (!state.lint.enabled) return;
+  const rawDiags = await lspGetDiagnostics(uri).catch(() => []);
+  const fileKey = uriToFileKey(uri);
+  const doc = state.docs.find((d) => docToUri(d) === uri);
+  const fileName = doc?.name ?? fileNameFromUri(uri);
+  const filePath = doc?.path ?? pathFromUri(uri);
+
+  const displayDiags = rawDiags.map((d, i) => ({
+    id: `lsp:${uri}:${d.row}:${d.col}:${i}`,
+    fileKey,
+    fileName,
+    filePath,
+    rowIndex: d.row,
+    columnIndex: d.col,
+    severity: d.severity,
+    message: d.message,
+    ruleId: d.code ?? "",
+    locationLabel: `Row ${d.row + 1}, Col ${d.col + 1}`
+  }));
+
+  state.lint.diagnostics = [
+    ...state.lint.diagnostics.filter((d) => d.fileKey !== fileKey),
+    ...displayDiags
+  ];
+
+  updateGridDiagnostics();
+  renderChrome();
 }
 
 function lintActive() {
-  return state.problemsVisible && state.lint.settings.enabled;
+  return state.problemsVisible && state.lint.enabled;
 }
 
-function cancelLintJobs({ clearDiagnostics = false } = {}) {
-  clearTimeout(state.lint.timer);
-  state.lint.timer = 0;
-  state.lint.version += 1;
-  state.lint.running = false;
-  state.lint.status = "";
-  if (clearDiagnostics) {
-    state.lint.diagnostics = [];
-    updateGridDiagnostics();
+function computeCharOffset(doc, row, col) {
+  let offset = 0;
+  for (let c = 0; c < col; c++) {
+    offset += doc.getCell(row, c).length + 1;
   }
+  return offset;
 }
 
-async function ensureWorkspaceIndexed(version) {
-  if (!state.workspace?.files?.length) return;
-  if (state.workspaceLoad.status === "ready" && state.workspaceDocs.length) return;
-  const explorerFiles = workspaceTxtFiles();
-  state.workspaceLoad = { status: "loading", files: workspaceFileStatesForExplorer(), error: "" };
-  state.workspaceDocs = [];
-  renderChrome();
-  const docs = [];
-  const fileStates = [];
-  for (let index = 0; index < explorerFiles.length; index += 1) {
-    if (!lintActive() || version !== state.lint.version) return;
-    const file = explorerFiles[index];
-    try {
-      const [doc] = await openNativePaths([file.path], TableDocument);
-      if (doc) {
-        docs.push(doc);
-        fileStates.push({
-          filePath: file.path,
-          fileName: file.name,
-          listedInExplorer: true,
-          loadedForIndex: true,
-          parsedForLint: true,
-          parseError: ""
-        });
+async function requestLspHover(row, col) {
+  if (!state.lsp.started) return;
+  const doc = activeDoc();
+  const uri = docToUri(doc);
+  if (!uri) return;
+  const key = `${uri}:${row}:${col}`;
+  lspHoverCurrentKey = key;
+  if (lspHoverCache.has(key)) {
+    const cached = lspHoverCache.get(key);
+    if (cached != null) grid.setLspHover(row, col, cached);
+    return;
+  }
+  if (lspHoverPending.has(key)) return;
+  lspHoverPending.add(key);
+  try {
+    const charOffset = computeCharOffset(doc, row, col);
+    let text = await lspHover(uri, row, charOffset);
+    lspHoverCache.set(key, text || null);
+    if (text && lspHoverCurrentKey === key) {
+      const cellValue = doc.getCell(row, col);
+      if (cellValue && text.startsWith(cellValue)) {
+        text = text.slice(cellValue.length).replace(/^\s*\n?/, "");
       }
-    } catch (error) {
-      fileStates.push({
-        filePath: file.path,
-        fileName: file.name,
-        listedInExplorer: true,
-        loadedForIndex: true,
-        parsedForLint: false,
-        parseError: error instanceof Error ? error.message : String(error)
-      });
+      grid.setLspHover(row, col, text);
     }
-    if (index % 20 === 19) await yieldToUi();
+  } catch {
+    lspHoverCache.set(key, null);
+  } finally {
+    lspHoverPending.delete(key);
   }
-  if (!lintActive() || version !== state.lint.version) return;
-  state.workspaceDocs = mergeOpenWorkspaceDocs(docs);
-  state.workspaceLoad = { status: "ready", files: fileStates, error: "" };
-  renderChrome();
 }
 
-function workspaceTxtFiles() {
-  return (state.workspace?.files ?? []).filter((file) => isTextLikePath(file.path || file.name));
-}
-
-function workspaceFileStatesForExplorer() {
-  return workspaceTxtFiles().map((file) => ({
-    filePath: file.path,
-    fileName: file.name,
-    listedInExplorer: true,
-    loadedForIndex: false,
-    parsedForLint: false,
-    parseError: ""
-  }));
-}
-
-function mergeOpenWorkspaceDocs(docs) {
-  const openByKey = new Map(state.docs.map((doc) => [lintDocKey(doc), doc]));
-  return docs.map((doc) => openByKey.get(lintDocKey(doc)) ?? doc);
-}
-
-function yieldToUi() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
+// ── diagnostics helpers ────────────────────────────────────────────────────
 
 function updateGridDiagnostics() {
   grid.setDiagnostics(groupDiagnosticsByCell(diagnosticsForDocument(state.lint.diagnostics, activeDoc())));
+  updateOverviewRuler();
+}
+
+function severityOrder(severity) {
+  return severity === "error" ? 2 : severity === "warning" ? 1 : 0;
+}
+
+function docDiagnosticSeverity(doc) {
+  const diags = diagnosticsForDocument(state.lint.diagnostics, doc);
+  if (diags.some((d) => d.severity === "error")) return "error";
+  if (diags.some((d) => d.severity === "warning")) return "warning";
+  return null;
+}
+
+function updateOverviewRuler() {
+  const ruler = els.overviewRuler;
+  if (!ruler) return;
+  const hostRect = els.host.getBoundingClientRect();
+  ruler.style.top = `${hostRect.top}px`;
+  ruler.style.height = `${hostRect.height}px`;
+  ruler.style.right = "0px";
+  const doc = activeDoc();
+  const diags = diagnosticsForDocument(state.lint.diagnostics, doc);
+  const rowCount = doc.rowCount;
+  if (!diags.length || !rowCount) {
+    ruler.innerHTML = "";
+    return;
+  }
+  const seenRows = new Map();
+  for (const diag of diags) {
+    const existing = seenRows.get(diag.rowIndex);
+    if (!existing || severityOrder(diag.severity) > severityOrder(existing)) {
+      seenRows.set(diag.rowIndex, diag.severity);
+    }
+  }
+  ruler.innerHTML = [...seenRows.entries()].map(([row, severity]) => {
+    const pct = (row + 0.5) / rowCount * 100;
+    return `<div class="ruler-mark ruler-mark-${severity}" style="top:${pct}%"></div>`;
+  }).join("");
+}
+
+function applyFreezeToDoc(doc) {
+  doc.freezeFirstRow = state.freezeRow;
+  doc.freezeFirstColumn = state.freezeColumn;
+}
+
+function scrollProblemsToActiveFile() {
+  if (!state.problemsVisible || !els.problemsList) return;
+  const doc = activeDoc();
+  if (!doc?.name) return;
+  const target = els.problemsList.querySelector(`details[data-file-name="${CSS.escape(doc.name)}"]`);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function cellHasReference(row, col) {
+  if (!state.lsp.started) return false;
+  return Boolean(docToUri(activeDoc()));
+}
+
+function charOffsetToColumn(doc, row, charOffset) {
+  let offset = 0;
+  for (let col = 0; col < doc.columnCount; col++) {
+    if (offset >= charOffset) return col;
+    offset += doc.getCell(row, col).length + 1;
+  }
+  return Math.max(0, doc.columnCount - 1);
+}
+
+async function goToDefinition() {
+  if (!state.lsp.started) return;
+  const doc = activeDoc();
+  const uri = docToUri(doc);
+  if (!uri) return;
+  const hit = state.contextHit;
+  const row = hit?.row ?? state.selection.focus.row;
+  const col = hit?.column ?? state.selection.focus.column;
+  const charOffset = computeCharOffset(doc, row, col);
+  const result = await lspDefinition(uri, row, charOffset).catch(() => null);
+  if (!result) {
+    showToast("No definition found.");
+    return;
+  }
+  const targetPath = pathFromUri(result.uri);
+  if (!targetPath) return;
+  let index = state.docs.findIndex((d) => d.path === targetPath);
+  if (index < 0 && isTauriRuntime()) {
+    const newDocs = await openNativePaths([targetPath], TableDocument).catch(() => []);
+    if (newDocs.length) {
+      await addDocument(newDocs[0]);
+      index = state.active;
+    }
+  }
+  if (index >= 0 && index !== state.active) {
+    state.active = index;
+    applyFreezeToDoc(activeDoc());
+    grid.setDocument(activeDoc());
+    updateGridDiagnostics();
+  }
+  const targetDoc = activeDoc();
+  const targetRow = clamp(result.line, 0, Math.max(0, targetDoc.rowCount - 1));
+  const targetCol = clamp(charOffsetToColumn(targetDoc, targetRow, result.character), 0, Math.max(0, targetDoc.columnCount - 1));
+  state.selection.set(targetRow, targetCol);
+  grid.scrollCellIntoView(targetRow, targetCol);
+  grid.draw();
+  renderChrome();
+  els.host.focus();
 }
 
 function docHasDiagnostics(doc) {
@@ -1100,17 +1275,11 @@ async function goToDiagnostic(id) {
   const diagnostic = state.lint.diagnostics.find((item) => item.id === id);
   if (!diagnostic) return;
   let index = state.docs.findIndex((doc) => lintDocKey(doc) === diagnostic.fileKey);
-  if (index < 0) {
-    const workspaceDoc = state.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);
-    if (workspaceDoc) {
-      await addDocument(workspaceDoc);
+  if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
+    const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
+    if (doc) {
+      await addDocument(doc);
       index = state.active;
-    } else if (diagnostic.filePath && isTauriRuntime()) {
-      const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
-      if (doc) {
-        await addDocument(doc);
-        index = state.active;
-      }
     }
   }
   if (index >= 0) state.active = index;
@@ -1128,8 +1297,136 @@ async function goToDiagnostic(id) {
   els.host.focus();
 }
 
+async function loadConfig() {
+  const config = await getConfig().catch(() => ({}));
+  state.config = config ?? {};
+}
+
+async function showSettings() {
+  const config = await getConfig().catch(() => ({}));
+  const mode = config.lintMode ?? "basic";
+  const schemaVersion = config.schemaVersion ?? "3.2";
+  const VERSIONS = ["3.2", "3.1", "2.4", "1.13"];
+  const versionOptions = VERSIONS.map((v) =>
+    `<option value="${escapeHtml(v)}"${schemaVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
+  ).join("");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal settings-modal">
+      <h2>Lint Options</h2>
+      <div class="settings-tabs">
+        <button class="settings-tab${mode === "basic" ? " active" : ""}" data-settings-tab="basic">Basic</button>
+        <button class="settings-tab${mode === "advanced" ? " active" : ""}" data-settings-tab="advanced">Advanced</button>
+      </div>
+      <div id="settingsBasicSection" class="settings-tab-panel${mode !== "basic" ? " hidden" : ""}">
+        <label class="settings-label">Schema Version</label>
+        <select class="modal-input settings-version-select" id="settingsSchemaVersion">${versionOptions}</select>
+      </div>
+      <div id="settingsAdvancedSection" class="settings-tab-panel${mode !== "advanced" ? " hidden" : ""}">
+        <label class="settings-label">Plugin Folder</label>
+        <div class="settings-row">
+          <input class="modal-input" id="settingsPluginPath"
+            value="${escapeHtml(config.pluginPath ?? "")}"
+            placeholder="Path to plugins directory" />
+          ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowsePluginBtn">Browse…</button>` : ""}
+        </div>
+        <label class="settings-label">Schema Folder</label>
+        <div class="settings-row">
+          <input class="modal-input" id="settingsSchemaPath"
+            value="${escapeHtml(config.schemaPath ?? "")}"
+            placeholder="Path to schema directory" />
+          ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseSchemaBtn">Browse…</button>` : ""}
+        </div>
+        <label class="settings-label">Linter (vector-lsp) Path</label>
+        <div class="settings-row">
+          <input class="modal-input" id="settingsLspPath"
+            value="${escapeHtml(config.vectorLspPath ?? "")}"
+            placeholder="Path to vector-lsp executable (auto-detect if blank)" />
+          ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">Browse…</button>` : ""}
+        </div>
+      </div>
+      <div class="settings-debug-row">
+        <label class="settings-checkbox-label">
+          <input type="checkbox" id="settingsDebugLogging"${config.debugLogging ? " checked" : ""} />
+          Enable debug logging (shows in Log panel)
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button data-settings-choice="save">Save</button>
+        <button data-settings-choice="cancel">Cancel</button>
+        ${state.lsp.started ? `<button data-settings-choice="restart-lsp" style="margin-left:auto">Restart LSP</button>` : ""}
+      </div>
+    </div>`;
+  document.body.append(backdrop);
+
+  const basicSection = backdrop.querySelector("#settingsBasicSection");
+  const advancedSection = backdrop.querySelector("#settingsAdvancedSection");
+  const tabs = backdrop.querySelectorAll(".settings-tab");
+  const lspInput = backdrop.querySelector("#settingsLspPath");
+  const schemaInput = backdrop.querySelector("#settingsSchemaPath");
+  const pluginInput = backdrop.querySelector("#settingsPluginPath");
+  const versionSelect = backdrop.querySelector("#settingsSchemaVersion");
+
+  tabs.forEach((tab) => tab.addEventListener("click", () => {
+    const isBasic = tab.dataset.settingsTab === "basic";
+    tabs.forEach((t) => t.classList.toggle("active", t === tab));
+    basicSection.classList.toggle("hidden", !isBasic);
+    advancedSection.classList.toggle("hidden", isBasic);
+  }));
+
+  backdrop.querySelector("#settingsBrowsePluginBtn")?.addEventListener("click", async () => {
+    const picked = await pickFolderPath().catch(() => null);
+    if (picked) pluginInput.value = picked;
+  });
+
+  backdrop.querySelector("#settingsBrowseSchemaBtn")?.addEventListener("click", async () => {
+    const picked = await pickFolderPath().catch(() => null);
+    if (picked) schemaInput.value = picked;
+  });
+
+  backdrop.querySelector("#settingsBrowseLspBtn")?.addEventListener("click", async () => {
+    const picked = await pickFilePath().catch(() => null);
+    if (picked) lspInput.value = picked;
+  });
+
+  return new Promise((resolve) => {
+    const finish = () => { backdrop.remove(); els.host.focus(); resolve(); };
+    backdrop.addEventListener("click", async (event) => {
+      const choice = event.target.closest("[data-settings-choice]")?.dataset.settingsChoice;
+      if (choice === "save") {
+        const selectedMode = backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? "basic";
+        const debugLoggingEl = backdrop.querySelector("#settingsDebugLogging");
+        const updated = {
+          ...config,
+          lintMode: selectedMode,
+          schemaVersion: versionSelect?.value || "3.2",
+          pluginPath: pluginInput?.value.trim() || undefined,
+          schemaPath: schemaInput?.value.trim() || undefined,
+          vectorLspPath: lspInput?.value.trim() || undefined,
+          debugLogging: debugLoggingEl?.checked ?? false
+        };
+        await saveConfig(updated).catch((err) => showError(`Failed to save lint options: ${err}`));
+        state.config = updated;
+        finish();
+        if (state.workspace) {
+          state.lint.diagnostics = [];
+          updateGridDiagnostics();
+          lspStartWorkspace(state.workspace.path).catch(showError);
+        }
+      }
+      if (choice === "cancel") finish();
+      if (choice === "restart-lsp") {
+        finish();
+        if (state.workspace) lspStartWorkspace(state.workspace.path).catch(showError);
+      }
+    });
+  });
+}
+
 function saveLintSettings() {
-  localStorage.setItem("txteditor.lint.settings", JSON.stringify(state.lint.settings));
+  localStorage.setItem("txteditor.lint.settings", JSON.stringify({ enabled: state.lint.enabled }));
 }
 
 function normaliseGridFont(value) {
@@ -1175,38 +1472,22 @@ async function autoFitColumns(columns) {
   const doc = activeDoc();
   const targets = [...new Set(columns)].filter((column) => column >= 0 && column < doc.columnCount && !doc.hiddenColumns.has(column));
   if (!targets.length) return;
-  showToast(`Resizing ${targets.length} column${targets.length === 1 ? "" : "s"} to fit...`);
-  const before = targets.map((column) => doc.columnWidths[column]);
-  const after = [];
-  for (const column of targets) after.push(await grid.measureColumnFitWidth(column));
-  const command = makeCustomCommand("Resize Column(s) to Fit", {
-    empty: targets.every((column, index) => before[index] === after[index]),
-    redo(target) {
-      targets.forEach((column, index) => target.setColumnWidth(column, after[index]));
-    },
-    undo(target) {
-      targets.forEach((column, index) => target.setColumnWidth(column, before[index]));
-    }
-  });
-  execute(command);
-  showToast("Resize to fit complete.");
+  const wasDirty = doc.dirty;
+  const widths = await Promise.all(targets.map((col) => grid.measureColumnFitWidth(col, { yieldEvery: 0 })));
+  targets.forEach((col, i) => doc.setColumnWidth(col, widths[i]));
+  doc.dirty = wasDirty;
+  grid.layout();
+  renderChrome();
 }
 
 function autoFitRows(rows) {
   const doc = activeDoc();
   const targets = [...new Set(rows)].filter((row) => row >= 0 && row < doc.rowCount && !doc.hiddenRows.has(row));
-  const before = targets.map((row) => doc.rowHeights[row]);
-  const after = targets.map(() => doc.defaultRowHeight);
-  const command = makeCustomCommand("Resize Row(s) to Fit", {
-    empty: targets.every((row, index) => before[index] === after[index]),
-    redo(target) {
-      targets.forEach((row, index) => target.setRowHeight(row, after[index]));
-    },
-    undo(target) {
-      targets.forEach((row, index) => target.setRowHeight(row, before[index]));
-    }
-  });
-  execute(command);
+  const wasDirty = doc.dirty;
+  for (const row of targets) doc.setRowHeight(row, doc.defaultRowHeight);
+  doc.dirty = wasDirty;
+  grid.layout();
+  renderChrome();
 }
 
 function cloneRows() {
@@ -1224,11 +1505,6 @@ function cloneRows() {
 
 function commitResize(resize) {
   if (!resize || resize.before === resize.current) return;
-  const command = resize.kind === "column"
-    ? resizeColumnCommand(resize.index, resize.before, resize.current)
-    : resizeRowCommand(resize.index, resize.before, resize.current);
-  activeUndo().push(command);
-  activeDoc().dirty = true;
   renderChrome();
 }
 
@@ -1260,7 +1536,10 @@ function showContextMenu({ x, y, hit }) {
   state.contextHit = hit;
   state.contextMenuActiveGroup = "";
   const canUnhide = activeDoc().hiddenRows.size > 0 || activeDoc().hiddenColumns.size > 0;
+  const focusRow = hit?.row ?? state.selection.focus.row;
+  const focusCol = hit?.column ?? state.selection.focus.column;
   const entries = [
+    { id: "go-to-definition", label: "Go To Definition", disabled: !cellHasReference(focusRow, focusCol) },
     { type: "submenu", label: "Column Operations", items: colItems() },
     { type: "submenu", label: "Row Operations", items: rowItems() },
     { id: "resize-fit", label: "Resize To Fit" },
@@ -1396,6 +1675,11 @@ function renderChrome() {
   els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
   els.shell.classList.toggle("problems-open", state.problemsVisible);
   els.problemsPanel?.classList.toggle("hidden", !state.problemsVisible);
+  for (const btn of document.querySelectorAll("[data-bottom-tab]")) {
+    btn.classList.toggle("active", btn.dataset.bottomTab === state.bottomTab);
+  }
+  if (els.problemsList) els.problemsList.classList.toggle("hidden", state.bottomTab !== "problems");
+  if (els.logList) els.logList.classList.toggle("hidden", state.bottomTab !== "log");
   els.emptyState.classList.toggle("hidden", hasOpenDocument());
   updateGridDiagnostics();
   for (const button of document.querySelectorAll("[data-command='show-explorer']")) {
@@ -1415,52 +1699,59 @@ function renderChrome() {
     button.title = state.lint.diagnostics.length ? `Problems (${state.lint.diagnostics.length})` : "Problems";
   }
   for (const button of document.querySelectorAll("[data-command='toggle-freeze-row']")) {
-    button.classList.toggle("active", hasOpenDocument() && activeDoc().freezeFirstRow);
+    button.classList.toggle("active", state.freezeRow);
   }
   for (const button of document.querySelectorAll("[data-command='toggle-freeze-column']")) {
-    button.classList.toggle("active", hasOpenDocument() && activeDoc().freezeFirstColumn);
+    button.classList.toggle("active", state.freezeColumn);
   }
   for (const button of document.querySelectorAll("[data-command='toggle-colorize']")) {
     button.classList.toggle("active", state.colorizeColumns);
   }
   for (const button of document.querySelectorAll("[data-command='toggle-lint']")) {
-    button.classList.toggle("active", state.lint.settings.enabled);
-    button.textContent = state.lint.settings.enabled ? "Lint: On" : "Lint: Off";
-  }
-  for (const button of document.querySelectorAll("[data-command='toggle-lint-rules']")) {
-    button.classList.toggle("active", state.lint.rulesOpen);
+    button.classList.toggle("active", state.lint.enabled);
+    button.textContent = state.lint.enabled ? "Lint: On" : "Lint: Off";
   }
   for (const button of document.querySelectorAll("[data-command='toggle-theme']")) {
     button.textContent = state.theme === "dark" ? "Light Mode" : "Dark Mode";
     button.classList.remove("active");
   }
-  if (els.lintProfileSelect) els.lintProfileSelect.value = state.lint.settings.profile;
   if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
-  if (els.lintRulesPanel) {
-    els.lintRulesPanel.classList.toggle("hidden", !state.lint.rulesOpen);
-    els.lintRulesPanel.innerHTML = renderLintRulesPanel();
-  }
   if (els.fontSelect) {
     const hasOption = [...els.fontSelect.options].some((option) => option.value === state.gridFont);
     if (!hasOption) populateFontSelect();
     els.fontSelect.value = state.gridFont;
   }
   els.tabs.innerHTML = state.docs
-    .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}"><span class="tab-title">${escapeHtml(doc.name)}${doc.dirty ? "*" : ""}</span><span class="tab-close" data-close-tab="${index}" title="Close">x</span></button>`)
+    .map((doc, index) => {
+      const sev = docDiagnosticSeverity(doc);
+      const titleClass = sev ? `tab-title tab-title-${sev}` : "tab-title";
+      return `<button class="${index === state.active ? "active" : ""}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}${doc.dirty ? "*" : ""}</span><span class="tab-close" data-close-tab="${index}" title="Close">x</span></button>`;
+    })
     .join("");
-  const workspaceFiles = state.workspace?.files?.map((file) => `<button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button>`).join("") ?? "";
+  const workspaceFiles = renderWorkspaceFileList(state.docs);
   els.fileList.innerHTML = state.docs
     .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
     .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
-  if (els.problemsList) els.problemsList.innerHTML = renderProblemsPanel();
+  if (els.problemsList) {
+    els.problemsList.innerHTML = renderProblemsPanel();
+    for (const details of els.problemsList.querySelectorAll("details[data-file-name]")) {
+      details.addEventListener("toggle", () => {
+        const fn = details.dataset.fileName;
+        if (details.open) collapsedProblemFiles.delete(fn);
+        else collapsedProblemFiles.add(fn);
+      });
+    }
+  }
   for (const button of document.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", (event) => {
       if (event?.target?.closest("[data-close-tab]")) return;
       state.active = Number(button.dataset.tab);
       state.selection.set(0, 0);
+      applyFreezeToDoc(activeDoc());
       grid.setDocument(activeDoc());
       updateGridDiagnostics();
       renderChrome();
+      scrollProblemsToActiveFile();
     });
   }
   for (const button of document.querySelectorAll("[data-close-tab]")) {
@@ -1472,55 +1763,44 @@ function renderChrome() {
   for (const button of document.querySelectorAll("[data-open-path]")) {
     button.addEventListener("click", async () => openDroppedNativePaths([button.dataset.openPath]).catch(showError));
   }
+  for (const details of els.fileList.querySelectorAll("details[data-file-group]")) {
+    details.addEventListener("toggle", () => {
+      const g = details.dataset.fileGroup;
+      if (details.open) collapsedFileGroups.delete(g);
+      else collapsedFileGroups.add(g);
+    });
+  }
   for (const button of document.querySelectorAll("[data-diagnostic-id]")) {
     button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
   }
 }
 
-function renderLintRulesPanel() {
-  return lintRuleGroupsForProfile(state.lint.settings.profile).map((group) => `
-    <section class="lint-rule-group">
-      <h3>${escapeHtml(group.group)}</h3>
-      ${group.rules.map((entry) => {
-        const setting = currentProfileRules()[entry.id];
-        const checked = setting?.enabled ? "checked" : "";
-        const disabled = entry.implemented ? "" : "disabled";
-        const note = entry.note ? `<span class="lint-rule-note">${escapeHtml(entry.note)}</span>` : `<span class="lint-rule-note">${escapeHtml(entry.id)}</span>`;
-        return `
-          <div class="lint-rule">
-            <input id="lint-${escapeHtml(entry.id)}" type="checkbox" data-lint-rule="${escapeHtml(entry.id)}" ${checked} ${disabled} />
-            <label for="lint-${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</label>
-            ${note}
-          </div>`;
-      }).join("")}
-    </section>
-  `).join("");
-}
-
 function renderProblemsPanel() {
-  if (!state.lint.settings.enabled) return `<div class="empty-problems">Lint is off.</div>`;
+  if (!state.lint.enabled) return `<div class="empty-problems">Lint is off.</div>`;
+  if (!state.lsp.started) return `<div class="empty-problems">Open a folder to enable linting.</div>`;
   if (!state.lint.diagnostics.length) return `<div class="empty-problems">No problems.</div>`;
   return groupDiagnosticsByFile(state.lint.diagnostics).map(([fileName, diagnostics]) => `
-    <section class="problem-file-group">
-      <div class="problem-file-header">${escapeHtml(fileName)} (${diagnostics.length})</div>
+    <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsedProblemFiles.has(fileName) ? "" : " open"}>
+      <summary class="problem-file-header">${escapeHtml(fileName)} <span class="problem-file-count">(${diagnostics.length})</span></summary>
       ${diagnostics.map((diagnostic) => `
         <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}">
-          <span class="problem-title">${escapeHtml(diagnostic.locationLabel || diagnostic.rowLabel || diagnostic.fileName)}</span>
+          <span class="problem-location">R${diagnostic.rowIndex + 1}:C${diagnostic.columnIndex + 1}</span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
-          <span class="problem-meta">${escapeHtml(diagnostic.ruleId)} - ${escapeHtml(diagnostic.profile)} - row ${diagnostic.rowIndex + 1}, column ${diagnostic.columnIndex + 1}</span>
+          ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
         </button>
       `).join("")}
-    </section>
+    </details>
   `).join("");
 }
 
 function lintSummaryText() {
-  if (!state.lint.settings.enabled) return "Lint off";
+  if (!state.lint.enabled) return "Lint off";
+  if (!state.lsp.started) return "Open a folder to enable linting";
   if (state.lint.status) return state.lint.status;
-  if (state.workspaceLoad.status === "failed") return `Workspace index failed - ${state.lint.settings.profile}`;
   const counts = diagnosticCounts(state.lint.diagnostics);
-  if (!state.lint.diagnostics.length) return `No problems - ${state.lint.settings.profile}`;
-  return `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info - ${state.lint.settings.profile}`;
+  const fileCount = state.lsp.openFileCount ?? 0;
+  if (!state.lint.diagnostics.length) return `No problems (${fileCount} file${fileCount === 1 ? "" : "s"} linted)`;
+  return `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info (${fileCount} files)`;
 }
 
 function diagnosticCounts(diagnostics) {
@@ -1535,7 +1815,7 @@ function groupDiagnosticsByFile(diagnostics) {
     if (!groups.has(diagnostic.fileName)) groups.set(diagnostic.fileName, []);
     groups.get(diagnostic.fileName).push(diagnostic);
   }
-  return [...groups.entries()];
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
 function problemBadgeForPath(path) {
@@ -1547,7 +1827,7 @@ function problemBadgeForPath(path) {
 }
 
 function lintNotificationsVisible() {
-  return state.problemsVisible && state.lint.settings.enabled && state.lint.diagnostics.length > 0;
+  return state.problemsVisible && state.lint.enabled && state.lint.diagnostics.length > 0;
 }
 
 function lintNotificationCount() {
@@ -1573,6 +1853,7 @@ async function closeTab(index) {
       }
     }
   }
+  lspCloseDoc(doc).catch(() => {});
   state.docs.splice(index, 1);
   if (!state.docs.length) {
     state.active = -1;
@@ -1641,6 +1922,38 @@ function isTextInputTarget(target) {
 
 function isTextLikeFile(file) {
   return isTextLikePath(file.name);
+}
+
+function renderWorkspaceFileList(docs) {
+  if (!state.workspace?.files?.length) return "";
+  const seenKeys = new Set(docs.map((d) => lintPathKey(d.path || "")));
+  const wsKey = lintPathKey(state.workspace.path).replace(/\/$/, "");
+  const rootFiles = [];
+  const subDirMap = new Map();
+  for (const file of state.workspace.files) {
+    const key = lintPathKey(file.path);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    let rel = key.startsWith(wsKey + "/") ? key.slice(wsKey.length + 1) : file.name;
+    const slash = rel.indexOf("/");
+    if (slash < 0) {
+      rootFiles.push(file);
+    } else {
+      const dir = rel.slice(0, slash);
+      if (!subDirMap.has(dir)) subDirMap.set(dir, []);
+      subDirMap.get(dir).push(file);
+    }
+  }
+  const fileBtn = (file) => `<button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button>`;
+  if (subDirMap.size === 0) {
+    return rootFiles.map(fileBtn).join("");
+  }
+  const group = (label, files) => {
+    const open = !collapsedFileGroups.has(label);
+    return `<details class="file-group"${open ? " open" : ""} data-file-group="${escapeHtml(label)}"><summary class="file-group-label">${escapeHtml(label)}</summary><div class="file-group-content">${files.map(fileBtn).join("")}</div></details>`;
+  };
+  return (rootFiles.length ? group("Data Files", rootFiles) : "") +
+    [...subDirMap.entries()].map(([dir, files]) => group(dir, files)).join("");
 }
 
 function isTextLikePath(path) {

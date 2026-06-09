@@ -1016,14 +1016,13 @@ test("lint controls live in the bottom Problems panel, not the main toolbar", ()
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const toolbar = html.match(/<section class="toolbar">([\s\S]*?)<\/section>/)?.[1] ?? "";
   const problems = html.match(/<section id="problemsPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
-  for (const command of ["toggle-lint", "toggle-lint-rules"]) {
+  for (const command of ["toggle-lint", "open-settings"]) {
     assert.equal(toolbar.includes(command), false);
     assert.equal(problems.includes(command), true);
   }
-  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
+  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT", "toggle-lint-rules", "lintProfileSelect"]) {
     assert.equal(html.includes(removed), false);
   }
-  assert.equal(problems.includes("lintProfileSelect"), true);
   assert.equal(problems.includes("problemsResizer"), true);
   assert.equal(html.includes("sidebarResizer"), true);
 });
@@ -1059,16 +1058,12 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.match(source, /txteditor\.sidebarWidth/);
   assert.match(source, /txteditor\.problemsHeight/);
   assert.match(source, /state\.problemsVisible/);
-  assert.match(source, /ensureWorkspaceIndexed/);
-  assert.match(source, /cancelLintJobs/);
 });
 
-test("Problems lint scheduling is gated by the active P panel and lint enabled state", () => {
+test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(source, /function scheduleLintForChange\(doc\)\s*\{\s*if \(!lintActive\(\)\) return;/);
-  assert.match(source, /function scheduleLintFull\(reason = "change", delay = 420\)\s*\{\s*if \(!lintActive\(\)\) return;/);
-  assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.settings\.enabled;/);
-  assert.match(source, /state\.problemsVisible && state\.lint\.settings\.enabled[\s\S]*scheduleLintFull\("problems-opened", 0\)/);
+  assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled;/);
+  assert.match(source, /if \(!state\.lint\.enabled\) return;/);
 });
 
 test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
@@ -1171,7 +1166,7 @@ test("quick typing edit commits on arrow navigation while explicit edit keeps ca
   assert.match(source, /this\.startEdit\(null, false, "explicit"\)/);
   assert.match(source, /this\.editMode === "quick" && isArrowNavigationKey\(event\.key\)/);
   assert.match(source, /this\.commitEdit\(\);\s*this\.moveSelectionBy\(rowDelta, columnDelta\);/);
-  assert.match(source, /this\.host\.addEventListener\("dblclick", \(\) => this\.startEdit\(null, false, "explicit"\)\)/);
+  assert.match(source, /this\.host\.addEventListener\("dblclick", \(event\) => this\.onDblClick\(event\)\)/);
   assert.match(source, /this\.editor\.selectionStart = this\.editor\.value\.length;\s*this\.editor\.selectionEnd = this\.editor\.value\.length;/);
   assert.equal(source.includes("this.editor.select();"), false);
 });
