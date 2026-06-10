@@ -399,6 +399,96 @@ fn lsp_update_file(
     }))
 }
 
+#[derive(Deserialize)]
+struct LspPosition {
+    line: u32,
+    character: u32,
+}
+
+#[derive(Deserialize)]
+struct LspRange {
+    start: LspPosition,
+    end: LspPosition,
+}
+
+#[derive(Deserialize)]
+struct LspContentChange {
+    range: LspRange,
+    text: String,
+}
+
+fn apply_line_change(lines: &mut Vec<String>, range: &LspRange, new_text: &str) {
+    let sl = range.start.line as usize;
+    let sc = range.start.character as usize;
+    let el = range.end.line as usize;
+    let ec = range.end.character as usize;
+
+    let prefix: String = lines
+        .get(sl)
+        .map(|l| l.chars().take(sc).collect())
+        .unwrap_or_default();
+    let suffix: String = lines
+        .get(el)
+        .map(|l| l.chars().skip(ec.min(l.chars().count())).collect())
+        .unwrap_or_default();
+
+    let new_lines: Vec<&str> = new_text.split('\n').collect();
+    let replacement: Vec<String> = match new_lines.as_slice() {
+        [] | [""] => vec![format!("{prefix}{suffix}")],
+        [only] => vec![format!("{prefix}{}{suffix}", only.trim_end_matches('\r'))],
+        [first, rest @ ..] => {
+            let mut v = vec![format!("{prefix}{}", first.trim_end_matches('\r'))];
+            for mid in &rest[..rest.len() - 1] {
+                v.push(mid.trim_end_matches('\r').to_string());
+            }
+            v.push(format!("{}{suffix}", rest.last().unwrap().trim_end_matches('\r')));
+            v
+        }
+    };
+
+    while lines.len() <= el {
+        lines.push(String::new());
+    }
+    lines.splice(sl..=el, replacement);
+}
+
+#[tauri::command]
+fn lsp_update_file_incremental(
+    uri: String,
+    version: u32,
+    changes: Vec<LspContentChange>,
+    state: tauri::State<'_, LspManager>,
+) -> Result<(), String> {
+    let proc = get_lsp_proc(&state)?;
+    {
+        let mut file_lines = proc.file_lines.lock().unwrap();
+        if let Some(lines) = file_lines.get_mut(&uri) {
+            for change in &changes {
+                apply_line_change(lines, &change.range, &change.text);
+            }
+        }
+    }
+    let content_changes: Vec<Value> = changes
+        .iter()
+        .map(|c| json!({
+            "range": {
+                "start": { "line": c.range.start.line, "character": c.range.start.character },
+                "end":   { "line": c.range.end.line,   "character": c.range.end.character }
+            },
+            "text": c.text
+        }))
+        .collect();
+    let mut stdin = proc.stdin.lock().unwrap();
+    send_lsp_msg(&mut stdin, &json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": uri, "version": version },
+            "contentChanges": content_changes
+        }
+    }))
+}
+
 #[tauri::command]
 fn lsp_close_file(
     uri: String,
@@ -775,6 +865,7 @@ pub fn run() {
             lsp_start,
             lsp_open_file,
             lsp_update_file,
+            lsp_update_file_incremental,
             lsp_close_file,
             lsp_get_diagnostics,
             lsp_hover,
