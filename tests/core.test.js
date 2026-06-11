@@ -25,7 +25,7 @@ import {
   resizeColumnCommand,
   resizeRowCommand
 } from "../src/core/operations.js";
-import { movedCell, shouldDrawCellText, shouldShowFirstColumnHover } from "../src/ui/canvas-grid.js";
+import { movedCell, normalizeVectorLspTooltip, shouldDrawCellText, shouldShowFirstColumnHover, VECTOR_LSP_HOVER_DELAY_MS } from "../src/ui/canvas-grid.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle, columnColorIndex } from "../src/ui/grid-geometry.js";
 import {
   LINT_RULES,
@@ -476,6 +476,28 @@ test("first-column hover is gated to real first-column cells with text", () => {
   assert.equal(shouldShowFirstColumnHover({ kind: "column-header", row: 0, column: 0 }, "full-code-value"), false);
   assert.equal(shouldShowFirstColumnHover({ kind: "empty" }, "full-code-value"), false);
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, ""), false);
+});
+
+test("Vector-LSP tooltip removes duplicate value titles only", () => {
+  assert.deepEqual(
+    normalizeVectorLspTooltip("StrClassOnly", "StrClassOnly\r\n\r\nLookup column used by string class filters."),
+    { title: "StrClassOnly", detail: "Lookup column used by string class filters." }
+  );
+  assert.deepEqual(
+    normalizeVectorLspTooltip("StrClassOnly", "Different title\n\nStrClassOnly is referenced in another note."),
+    { title: "StrClassOnly", detail: "Different title\n\nStrClassOnly is referenced in another note." }
+  );
+  assert.deepEqual(
+    normalizeVectorLspTooltip("", "StrClassOnly\n\nLookup column used by string class filters."),
+    { title: "StrClassOnly", detail: "Lookup column used by string class filters." }
+  );
+});
+
+test("Vector-LSP hover delay is the requested fast path", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.equal(VECTOR_LSP_HOVER_DELAY_MS, 10);
+  assert.match(source, /export const VECTOR_LSP_HOVER_DELAY_MS = 10;/);
+  assert.match(source, /}, VECTOR_LSP_HOVER_DELAY_MS\);/);
 });
 
 test("frozen pane dividers are bounded to visible table content", () => {
@@ -1012,7 +1034,7 @@ test("workspace file states keep parse errors visible instead of silently ignori
   assert.equal(state.parseError, "Unable to parse");
 });
 
-test("lint controls live in the bottom Problems panel, not the main toolbar", () => {
+test("settings UI lives in Settings while lint controls stay in the bottom Problems panel", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const toolbar = html.match(/<section class="toolbar">([\s\S]*?)<\/section>/)?.[1] ?? "";
   const problems = html.match(/<section id="problemsPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
@@ -1020,6 +1042,10 @@ test("lint controls live in the bottom Problems panel, not the main toolbar", ()
     assert.equal(toolbar.includes(command), false);
     assert.equal(problems.includes(command), true);
   }
+  assert.equal(toolbar.includes("open-app-settings"), true);
+  assert.equal(toolbar.includes("toggle-colorize"), false);
+  assert.equal(toolbar.includes("fontSelect"), false);
+  assert.equal(toolbar.includes("toggle-theme"), false);
   for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT", "toggle-lint-rules", "lintProfileSelect"]) {
     assert.equal(html.includes(removed), false);
   }
@@ -1064,6 +1090,8 @@ test("Problems lint panel is gated by the active P panel and lint enabled state"
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled;/);
   assert.match(source, /if \(!state\.lint\.enabled\) return;/);
+  assert.match(source, /const diagnosticsByCell = lintActive\(\)\s*\?\s*groupDiagnosticsByCell/);
+  assert.match(source, /const diags = lintActive\(\) \? diagnosticsForDocument/);
 });
 
 test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
@@ -1079,15 +1107,131 @@ test("context menu uses one explicit active submenu and exposes Clone Row only",
   assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
 });
 
+test("row context menu orders Clone Row after hide and delete without changing commands", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const rowItems = source.match(/function rowItems\(\)\s*\{[\s\S]*?return \[([\s\S]*?)\];\s*\}/)?.[1] ?? "";
+  const ids = [...rowItems.matchAll(/id: "([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(ids, ["add-row", "insert-row", "hide-row", "delete-row", "clone-row"]);
+  assert.match(rowItems, /\{ id: "clone-row", label: "Clone Row", disabled: rowsForContextOperation\(\)/);
+});
+
+test("context menu suspends default and Vector-LSP hover until it closes", () => {
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(app, /contextMenuOpen: false/);
+  assert.match(app, /function showContextMenu\(\{ x, y, hit \}\)[\s\S]*setContextMenuOpen\(true\)/);
+  assert.match(app, /function hideContextMenu\(\)[\s\S]*setContextMenuOpen\(false\)/);
+  assert.match(app, /function setContextMenuOpen\(open\)\s*\{\s*state\.contextMenuOpen = Boolean\(open\);\s*if \(state\.contextMenuOpen\) invalidateLspHover\(false\);\s*grid\.setHoverSuspended\(state\.contextMenuOpen\);/);
+  assert.match(app, /async function requestLspHover\(row, col\)\s*\{\s*if \(state\.contextMenuOpen\) return;/);
+  assert.match(app, /onHoverInvalidated: \(\) => invalidateLspHover\(false\)/);
+  assert.match(app, /let lspHoverGeneration = 0;/);
+  assert.match(app, /if \(generation !== lspHoverGeneration \|\| lspHoverCurrentKey !== key \|\| !state\.vectorLspHover \|\| state\.contextMenuOpen\) return;/);
+  assert.match(grid, /setHoverSuspended\(suspended\)/);
+  assert.match(grid, /clearHoverState\(\)/);
+  assert.match(grid, /return !this\.hoverSuspended && !this\.resizing && !this\.dragging;/);
+  assert.match(grid, /if \(!this\.isHoverAllowed\(\) \|\| hit\.kind !== "cell" \|\| this\.dragging\)/);
+  assert.match(grid, /if \(!this\.isHoverAllowed\(\)\) return;\s*if \(!this\.vectorLspHoverEnabled\) return;/);
+  assert.match(grid, /setLspHover\(row, col, text\) \{\s*if \(!this\.isHoverAllowed\(\)\) return;\s*if \(this\._hoveredCell\?\.row !== row \|\| this\._hoveredCell\?\.col !== col\) return;\s*const key = `\$\{row\}:\$\{col\}`;/);
+  assert.match(grid, /if \(!this\.isHoverAllowed\(\)\) \{\s*this\.hideFirstColumnHoverPreview\(\);/);
+});
+
 test("Explorer problem badges are visible only while Problems lint notifications are active", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(source, /function lintNotificationsVisible\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.settings\.enabled && state\.lint\.diagnostics\.length > 0;/);
+  assert.match(source, /function lintNotificationsVisible\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled && state\.lint\.diagnostics\.length > 0;/);
   assert.match(source, /function lintNotificationCount\(\)\s*\{\s*return lintNotificationsVisible\(\) \? state\.lint\.diagnostics\.length : 0;/);
   assert.match(source, /function problemBadgeForPath\(path\)\s*\{\s*if \(!lintNotificationsVisible\(\)\) return "";/);
   assert.match(source, /button\.dataset\.badge = String\(count\)/);
   assert.match(source, /delete button\.dataset\.badge/);
   assert.match(css, /\.activity-button\[data-badge\]::after/);
+});
+
+test("Settings modal exposes immediate visual settings without save cancel apply", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";
+  assert.match(source, /function showAppSettings\(\)/);
+  assert.match(appSettings, /Colorize columns/);
+  assert.match(appSettings, /Vector-LSP Hover/);
+  assert.match(appSettings, /data-settings-theme="dark">Dark/);
+  assert.match(appSettings, /data-settings-theme="light">Light/);
+  assert.match(appSettings, /colorizeInput\.addEventListener\("change", \(\) => \{ setColorizeColumns/);
+  assert.match(appSettings, /hoverInput\.addEventListener\("change", \(\) => \{ setVectorLspHover/);
+  assert.match(appSettings, /fontInput\.addEventListener\("change", \(\) => \{ changeGridFont/);
+  assert.match(appSettings, /button\.addEventListener\("click", \(\) => \{ setTheme/);
+  assert.equal(appSettings.includes("data-settings-close"), true);
+  assert.equal(appSettings.includes('data-settings-choice="save"'), false);
+  assert.equal(appSettings.includes('data-settings-choice="cancel"'), false);
+  assert.equal(appSettings.includes('data-settings-choice="apply"'), false);
+  assert.match(css, /\.settings-segmented/);
+});
+
+test("Vector-LSP hover can be disabled without clearing baseline hover behavior", () => {
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(app, /const savedVectorLspHover = localStorage\.getItem\("txteditor\.vectorLspHover"\) !== "off";/);
+  assert.match(app, /async function requestLspHover\(row, col\)\s*\{\s*if \(state\.contextMenuOpen\) return;\s*if \(!state\.vectorLspHover\) return;/);
+  assert.match(grid, /setVectorLspHoverEnabled\(enabled\)/);
+  assert.match(grid, /if \(!this\.vectorLspHoverEnabled\) return;/);
+  assert.match(grid, /if \(!this\.vectorLspHoverEnabled\) \{\s*this\._hoveredCell = null;\s*this\.clearLspHovers\(\);\s*this\.showLegacyHoverPreview\(hit, event, value\);\s*return;/);
+  assert.match(grid, /showLegacyHoverPreview\(hit, event, value\)/);
+  assert.match(grid, /if \(shouldShowFirstColumnHover\(hit, value\)\) \{\s*this\.updateFirstColumnHoverPreview\(hit, event\);/);
+  assert.match(grid, /export function shouldShowFirstColumnHover/);
+});
+
+test("resize interactions clear hover state and block stale hover results", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /if \(resize\) \{\s*this\.clearHoverState\(\);/);
+  assert.match(source, /if \(this\.resizing\) \{\s*this\.clearHoverState\(\);/);
+  assert.match(source, /return !this\.hoverSuspended && !this\.resizing && !this\.dragging;/);
+  assert.match(source, /setLspHover\(row, col, text\) \{\s*if \(!this\.isHoverAllowed\(\)\) return;/);
+});
+
+test("header and Vector-LSP hover clear immediately on pointer leave", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /this\.host\.addEventListener\("mouseleave", \(event\) => this\.onMouseLeave\(event\)\);/);
+  assert.match(source, /this\.host\.addEventListener\("pointerleave", \(event\) => this\.onMouseLeave\(event\)\);/);
+  assert.match(source, /onMouseLeave\(event\) \{\s*this\.clearHoverState\(\);/);
+  assert.match(source, /clearHoverState\(\) \{[\s\S]*clearTimeout\(this\._hoverDebounceTimer\);[\s\S]*this\.onHoverInvalidated\?\.\(\);/);
+  assert.match(source, /this\.host\.addEventListener\("scroll", \(\) => \{[\s\S]*this\.clearHoverState\(\);[\s\S]*this\.requestRender\("scroll"\);/);
+});
+
+test("Vector-LSP tooltip owns leftmost hover and legacy preview is fallback only", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /if \(hoverText\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
+  assert.match(source, /else \{\s*this\.hideVectorTooltip\(\);\s*this\.showLegacyHoverPreview\(hit, event, value\);/);
+  assert.match(source, /if \(text\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
+  assert.match(source, /else \{\s*this\.hideVectorTooltip\(\);\s*this\.showLegacyHoverPreview/);
+  assert.match(source, /if \(this\._hoveredCell\?\.row !== row \|\| this\._hoveredCell\?\.col !== col\) return;/);
+});
+
+test("Problems panel rendering is skipped while hidden and cached while unchanged", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /version: 0/);
+  assert.match(source, /function setLintDiagnostics\(diagnostics\)\s*\{\s*state\.lint\.diagnostics = diagnostics;\s*state\.lint\.version \+= 1;/);
+  assert.match(source, /function renderProblemsPanelIfNeeded\(\)\s*\{\s*const started = perfNow\(\);\s*if \(!els\.problemsList \|\| !state\.problemsVisible \|\| state\.bottomTab !== "problems"\) \{\s*recordUiPerf\("render-problems-panel", started, \{ skipped: true \}\);\s*return;/);
+  assert.match(source, /if \(els\.problemsList\.dataset\.renderKey === key\) \{\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);\s*return;/);
+  assert.match(source, /function problemsPanelRenderKey\(\)/);
+});
+
+test("UI performance instrumentation records row and lint display work", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /window\.__txteditorPerf = uiPerfSamples;/);
+  assert.match(source, /recordUiPerf\("row-command"/);
+  assert.match(source, /recordUiPerf\("update-grid-diagnostics"/);
+  assert.match(source, /recordUiPerf\("update-overview-ruler"/);
+  assert.match(source, /recordUiPerf\("render-problems-panel"/);
+  assert.match(source, /recordUiPerf\("render-chrome"/);
+});
+
+test("active cell highlights both the first-row header and left row header", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /const activeHeader = this\.selection\.focus\.row === row;/);
+  assert.match(source, /const activeColumnHeader = row === 0 && this\.selection\.focus\.column === column;/);
+  assert.match(source, /GRID_COLORS\.activeHeader/);
+  assert.match(css, /--grid-active-header-bg: var\(--activeHeaderBg\);/);
+  assert.match(css, /--grid-active-header-text: var\(--activeHeaderText\);/);
 });
 
 test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
@@ -1124,10 +1268,10 @@ test("canvas drag row resizing opts into custom row-height layout", () => {
 test("first-column hover preview is single and clears on grid context changes", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.hoverPreview = createFirstColumnHoverPreview\(\);/);
-  assert.match(source, /this\.host\.addEventListener\("mouseleave", \(\) => this\.hideFirstColumnHoverPreview\(\)\);/);
+  assert.match(source, /this\.host\.addEventListener\("mouseleave", \(event\) => this\.onMouseLeave\(event\)\);/);
   assert.match(source, /setDocument\(doc\) \{\s*this\.hideFirstColumnHoverPreview\(\);/);
-  assert.match(source, /this\.hideFirstColumnHoverPreview\(\);\s*this\.requestRender\("scroll"\);/);
-  assert.match(source, /onContext\(event\) \{\s*event\.preventDefault\(\);\s*this\.hideFirstColumnHoverPreview\(\);/);
+  assert.match(source, /this\.clearHoverState\(\);\s*this\.requestRender\("scroll"\);/);
+  assert.match(source, /onContext\(event\) \{\s*event\.preventDefault\(\);\s*this\.clearHoverState\(\);/);
   assert.match(source, /function createFirstColumnHoverPreview\(\) \{\s*const preview = document\.createElement\("div"\);/);
 });
 
@@ -1171,20 +1315,20 @@ test("quick typing edit commits on arrow navigation while explicit edit keeps ca
   assert.equal(source.includes("this.editor.select();"), false);
 });
 
-test("version metadata is bumped to TXTeditor 0.33", () => {
+test("version metadata is kept at TXTeditor 0.4", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.33.0");
-  assert.equal(lock.version, "0.33.0");
-  assert.equal(lock.packages[""].version, "0.33.0");
-  assert.match(pkg.description, /TXTeditor 0\.33/);
-  assert.match(cargoToml, /version = "0\.33\.0"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.33/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.33\.0"/);
-  assert.equal(tauri.version, "0.33.0");
-  assert.match(readme, /TXTeditor 0\.33 is/);
+  assert.equal(pkg.version, "0.4.0");
+  assert.equal(lock.version, "0.4.0");
+  assert.equal(lock.packages[""].version, "0.4.0");
+  assert.match(pkg.description, /TXTeditor 0\.4/);
+  assert.match(cargoToml, /version = "0\.4\.0"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.4/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.0"/);
+  assert.equal(tauri.version, "0.4.0");
+  assert.match(readme, /TXTeditor 0\.4 is/);
 });

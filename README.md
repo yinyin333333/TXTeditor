@@ -1,6 +1,6 @@
 # TXTeditor
 
-TXTeditor 0.33 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
+TXTeditor 0.4 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
 
 TXTeditor is a personal project. I am not an experienced programmer, and most of the implementation was built with the help of OpenAI Codex. The app may contain bugs, incomplete behavior, or rough edges, but I am sharing it in case it is useful to others.
 
@@ -25,6 +25,8 @@ TXTeditor is not affiliated with, endorsed by, or connected to Blizzard Entertai
 TXTeditor includes RotW and 2.4 lint profiles. These rules are based on the behavior of [d2rlint](https://github.com/eezstreet/d2rlint), the original D2R linting tool made by eezstreet, and are integrated into TXTeditor's live Problems panel.
 
 The RotW-oriented lint behavior has been checked against the project's current d2rlint-compatible fixture/oracle workflow. Other data sets, mod variants, or future rule changes may still expose bugs or differences.
+
+Version 0.4 integrates [vector-lsp](https://github.com/eezstreet/vector-lsp) created by eezstreet, which will replace the existing linting system.
 
 ## Build
 

@@ -19,6 +19,8 @@
   --firstColumnText: #e0e6ed;
   --firstColumnBorder: #4f5c6a;
   --firstColumnFrozenBg: #303d4b;
+  --activeHeaderBg: #315f8f;
+  --activeHeaderText: #ffffff;
   --cellText: #d7dce2;
   --cellTextMuted: #7f8893;
   --frozenBg: #293541;
@@ -72,6 +74,8 @@
   --grid-first-column-text: var(--firstColumnText);
   --grid-first-column-border: var(--firstColumnBorder);
   --grid-first-column-frozen-bg: var(--firstColumnFrozenBg);
+  --grid-active-header-bg: var(--activeHeaderBg);
+  --grid-active-header-text: var(--activeHeaderText);
   --grid-frozen-bg: var(--frozenBg);
   --grid-frozen-header-bg: var(--frozenCornerBg);
   --grid-line: var(--gridLine);
@@ -112,6 +116,8 @@
   --firstColumnText: #22364b;
   --firstColumnBorder: #b5c6d8;
   --firstColumnFrozenBg: #d9e8f6;
+  --activeHeaderBg: #cfe4f8;
+  --activeHeaderText: #0f3558;
   --cellText: #1f2933;
   --cellTextMuted: #8a96a3;
   --frozenBg: #e2edf8;
@@ -165,6 +171,8 @@
   --grid-first-column-text: var(--firstColumnText);
   --grid-first-column-border: var(--firstColumnBorder);
   --grid-first-column-frozen-bg: var(--firstColumnFrozenBg);
+  --grid-active-header-bg: var(--activeHeaderBg);
+  --grid-active-header-text: var(--activeHeaderText);
   --grid-frozen-bg: var(--frozenBg);
   --grid-frozen-header-bg: var(--frozenCornerBg);
   --grid-line: var(--gridLine);
@@ -1233,6 +1241,12 @@ details:not([open]) .problem-file-header::before {
   width: min(520px, calc(100vw - 32px));
 }
 
+.settings-stack {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+
 .settings-label {
   display: block;
   font-size: 12px;
@@ -1320,4 +1334,34 @@ details:not([open]) .problem-file-header::before {
   height: 34px;
   padding: 0 10px;
   margin-bottom: 14px;
+}
+
+.settings-font-select {
+  margin-bottom: 0;
+}
+
+.settings-segmented {
+  display: inline-flex;
+  width: fit-content;
+  overflow: hidden;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+}
+
+.settings-segmented button {
+  min-width: 72px;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--button-bg);
+}
+
+.settings-segmented button + button {
+  border-left: 1px solid var(--button-border);
+}
+
+.settings-segmented button.active {
+  color: var(--text-strong);
+  background: var(--selection);
 }

@@ -56,6 +56,15 @@ import {
   diagnosticsForDocument,
   groupDiagnosticsByCell
 } from "./core/lint-engine.js";
+import {
+  cancelVectorHoverSample,
+  finishVectorHoverSample,
+  makeVectorHoverTarget,
+  markVectorHoverRequested,
+  markVectorHoverRetry,
+  shouldAcceptVectorHoverResult,
+  startVectorHoverSample
+} from "./core/vector-hover.js";
 import { CanvasGrid } from "./ui/canvas-grid.js";
 
 const DEFAULT_GRID_FONT = "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace";
@@ -106,6 +115,7 @@ const FONT_OPTIONS = [
 const savedTheme = localStorage.getItem("txteditor.theme") === "light" ? "light" : "dark";
 const savedGridFont = normaliseGridFont(localStorage.getItem("txteditor.gridFont"));
 const savedColorize = localStorage.getItem("txteditor.colorize") === "on";
+const savedVectorLspHover = localStorage.getItem("txteditor.vectorLspHover") !== "off";
 const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
 const MIN_SIDEBAR_WIDTH = 260;
 const savedSidebarWidth = clamp(Number(localStorage.getItem("txteditor.sidebarWidth")) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, 520);
@@ -114,8 +124,30 @@ const savedFreeze = readJsonStorage("txteditor.freeze", {});
 const collapsedProblemFiles = new Set();
 const collapsedFileGroups = new Set();
 const lspHoverCache = new Map();
-const lspHoverPending = new Set();
-let lspHoverCurrentKey = null;
+const lspHoverSemanticCache = new Map();
+const lspHoverPending = new Map();
+const hoverPerfSamples = [];
+const hoverPrewarmSamples = [];
+const hoverQueueSamples = [];
+const lspReadiness = {
+  byUri: {},
+  events: []
+};
+const lspTraffic = {
+  totals: {},
+  byUri: {},
+  events: []
+};
+let lspHoverCurrentTarget = null;
+let lspHoverQueued = null;
+let lspHoverActiveUserRequest = null;
+let lspHoverLatestQueuedRequest = null;
+let lspHoverGeneration = 0;
+let diagnosticCellSetCache = null;
+let hoverPrewarmTimer = null;
+let hoverPrewarmGeneration = 0;
+let hoverPrewarmActive = 0;
+let hoverPrewarmQueue = [];
 document.documentElement.dataset.theme = savedTheme;
 document.documentElement.style.setProperty("--grid-font", savedGridFont);
 document.documentElement.style.setProperty("--sidebar-width", `${savedSidebarWidth}px`);
@@ -137,13 +169,16 @@ const state = {
   freezeColumn: savedFreeze.column ?? false,
   contextHit: null,
   contextMenuActiveGroup: "",
+  contextMenuOpen: false,
   theme: savedTheme,
   gridFont: savedGridFont,
   colorizeColumns: savedColorize,
+  vectorLspHover: savedVectorLspHover,
   lint: {
     enabled: savedLintEnabled,
     diagnostics: [],
-    status: ""
+    status: "",
+    version: 0
   },
   lsp: {
     started: false
@@ -186,6 +221,13 @@ const els = {
 };
 
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
+const uiPerfSamples = [];
+window.__txteditorPerf = uiPerfSamples;
+window.__txteditorPerf.hoverSamples = hoverPerfSamples;
+window.__txteditorPerf.hoverPrewarmSamples = hoverPrewarmSamples;
+window.__txteditorPerf.hoverQueueSamples = hoverQueueSamples;
+window.__txteditorPerf.lspTraffic = lspTraffic;
+window.__txteditorPerf.lspReadiness = lspReadiness;
 
 const commandLabelsBase = [
   ["open-file", "Open File"],
@@ -222,6 +264,7 @@ const commandLabelsBase = [
   ["toggle-freeze-row", "Freeze First Row"],
   ["toggle-freeze-column", "Freeze First Column"],
   ["toggle-colorize", "Colorize Columns"],
+  ["toggle-vector-lsp-hover", "Vector-LSP Hover"],
   ["toggle-lint", "Toggle Lint"],
   ["show-explorer", "Show Explorer"],
   ["show-problems", "Show Problems"],
@@ -233,6 +276,7 @@ const commandLabelsBase = [
   ["reset-row-heights", "Reset Row Heights"],
   ["toggle-sidebar", "Toggle Explorer"],
   ["toggle-theme", "Toggle Light/Dark Mode"],
+  ["open-app-settings", "Settings"],
   ["open-settings", "Lint Options"]
 ];
 
@@ -261,11 +305,14 @@ const grid = new CanvasGrid({
   onContextMenu: showContextMenu,
   onResizeCommand: commitResize,
   onAutoFitColumn: (column) => autoFitColumns([column]).catch(showError),
-  onHoverRequest: (row, column) => requestLspHover(row, column).catch(() => {})
+  onHoverRequest: (row, column, meta) => requestLspHover(row, column, meta).catch(() => {}),
+  onHoverInvalidated: () => clearVisibleLspHover("grid-hover-cleared"),
+  onViewportChanged: (reason) => scheduleHoverPrewarm(reason)
 });
 
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
+grid.setVectorLspHoverEnabled(state.vectorLspHover);
 populateFontSelect();
 renderChrome();
 wireEvents();
@@ -288,14 +335,33 @@ function activeUndo() {
   return activeDoc().undo;
 }
 
+function perfNow() {
+  return typeof performance === "undefined" ? 0 : performance.now();
+}
+
+function recordUiPerf(name, started, details = {}) {
+  if (typeof performance === "undefined") return;
+  uiPerfSamples.push({
+    name,
+    ms: Math.round((performance.now() - started) * 100) / 100,
+    diagnostics: state.lint.diagnostics.length,
+    problemsVisible: state.problemsVisible,
+    bottomTab: state.bottomTab,
+    ...details
+  });
+  if (uiPerfSamples.length > 200) uiPerfSamples.shift();
+}
+
 function execute(command, changedRows = null) {
   if (!hasOpenDocument()) return showError("Open a file before editing.");
   if (!command || command.isEmpty) return;
+  const started = perfNow();
   const doc = activeDoc();
   command.redo(activeDoc());
   activeUndo().push(command);
   grid.layout();
   lspUpdateDoc(doc, changedRows).catch(() => {});
+  recordUiPerf("row-command", started, { changedRows: changedRows?.length ?? 0 });
   renderChrome();
 }
 
@@ -338,7 +404,7 @@ function wireEvents() {
     for (const file of files) await addDocument(await readFileAsDocument(file, TableDocument));
     els.fileInput.value = "";
   });
-  els.fontSelect.addEventListener("change", () => changeGridFont(els.fontSelect.value));
+  els.fontSelect?.addEventListener("change", () => changeGridFont(els.fontSelect.value));
   wirePaneResizers();
   els.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -468,6 +534,7 @@ async function addDocument(doc) {
   renderChrome();
   scrollProblemsToActiveFile();
   lspOpenDoc(doc).catch(() => {});
+  scheduleHoverPrewarm("document-opened");
 }
 
 async function openFile() {
@@ -633,7 +700,7 @@ function findNext() {
 }
 
 function runCommand(id) {
-  const alwaysAvailable = new Set(["open-file", "open-folder", "open-settings", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-lint", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
+  const alwaysAvailable = new Set(["open-file", "open-folder", "open-settings", "open-app-settings", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-vector-lsp-hover", "toggle-lint", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
   if (!hasOpenDocument() && !alwaysAvailable.has(id)) return showError("Open a file before using that command.");
   const doc = activeDoc();
   const rect = state.selection.rect;
@@ -672,6 +739,7 @@ function runCommand(id) {
   if (id === "toggle-freeze-row") return toggleFreeze("row");
   if (id === "toggle-freeze-column") return toggleFreeze("column");
   if (id === "toggle-colorize") return toggleColorize();
+  if (id === "toggle-vector-lsp-hover") return toggleVectorLspHover();
   if (id === "toggle-lint") return toggleLint();
   if (id === "show-explorer") return toggleExplorerPane();
   if (id === "show-problems") return toggleProblemsPanel();
@@ -683,6 +751,7 @@ function runCommand(id) {
   if (id === "reset-row-heights") return resetRowHeights();
   if (id === "toggle-sidebar") return toggleSidebar();
   if (id === "toggle-theme") return toggleTheme();
+  if (id === "open-app-settings") return showAppSettings();
   if (id === "open-settings") return showSettings();
   if (id === "go-to-definition") return goToDefinition();
 }
@@ -882,7 +951,11 @@ function resetRowHeights() {
 }
 
 function toggleTheme() {
-  state.theme = state.theme === "dark" ? "light" : "dark";
+  setTheme(state.theme === "dark" ? "light" : "dark");
+}
+
+function setTheme(theme) {
+  state.theme = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = state.theme;
   localStorage.setItem("txteditor.theme", state.theme);
   grid.syncTheme();
@@ -891,10 +964,119 @@ function toggleTheme() {
 }
 
 function toggleColorize() {
-  state.colorizeColumns = !state.colorizeColumns;
+  setColorizeColumns(!state.colorizeColumns);
+}
+
+function setColorizeColumns(enabled) {
+  state.colorizeColumns = Boolean(enabled);
   localStorage.setItem("txteditor.colorize", state.colorizeColumns ? "on" : "off");
   grid.setColorizeColumns(state.colorizeColumns);
   renderChrome();
+}
+
+function toggleVectorLspHover() {
+  setVectorLspHover(!state.vectorLspHover);
+}
+
+function setVectorLspHover(enabled) {
+  state.vectorLspHover = Boolean(enabled);
+  localStorage.setItem("txteditor.vectorLspHover", state.vectorLspHover ? "on" : "off");
+  invalidateLspHover(!state.vectorLspHover, state.vectorLspHover ? "hover-enabled" : "hover-disabled");
+  grid.setVectorLspHoverEnabled(state.vectorLspHover);
+  renderChrome();
+}
+
+function invalidateLspHover(clearCache = false, reason = "hover-invalidated") {
+  lspHoverGeneration += 1;
+  cancelHoverPrewarm(reason);
+  if (lspHoverQueued?.sample) cancelVectorHoverSample(lspHoverQueued.sample, reason, perfNow);
+  if (lspHoverLatestQueuedRequest?.sample) cancelVectorHoverSample(lspHoverLatestQueuedRequest.sample, reason, perfNow);
+  for (const pending of lspHoverPending.values()) {
+    for (const waiter of pending.waiters ?? []) cancelVectorHoverSample(waiter.sample, reason, perfNow);
+  }
+  lspHoverCurrentTarget = null;
+  lspHoverQueued = null;
+  lspHoverActiveUserRequest = null;
+  lspHoverLatestQueuedRequest = null;
+  lspHoverPending.clear();
+  if (clearCache) lspHoverCache.clear();
+  grid.clearLspHovers();
+}
+
+function clearVisibleLspHover(reason = "hover-cleared") {
+  cancelHoverPrewarm(reason);
+  if (lspHoverQueued?.sample) cancelVectorHoverSample(lspHoverQueued.sample, reason, perfNow);
+  if (lspHoverLatestQueuedRequest?.sample) cancelVectorHoverSample(lspHoverLatestQueuedRequest.sample, reason, perfNow);
+  for (const pending of lspHoverPending.values()) {
+    for (const waiter of pending.waiters ?? []) cancelVectorHoverSample(waiter.sample, reason, perfNow);
+  }
+  lspHoverCurrentTarget = null;
+  lspHoverQueued = null;
+  lspHoverLatestQueuedRequest = null;
+  recordHoverQueueEvent({ reason, visibleClear: true, inFlight: lspHoverPending.size });
+}
+
+function recordHoverSample(sample) {
+  if (!sample) return sample;
+  hoverPerfSamples.push(sample);
+  if (hoverPerfSamples.length > 2000) hoverPerfSamples.shift();
+  return sample;
+}
+
+function recordHoverQueueEvent(event) {
+  hoverQueueSamples.push({
+    timestamp: perfNow(),
+    active: Boolean(lspHoverActiveUserRequest),
+    queued: Boolean(lspHoverLatestQueuedRequest),
+    inFlight: lspHoverPending.size,
+    ...event
+  });
+  if (hoverQueueSamples.length > 2000) hoverQueueSamples.shift();
+}
+
+function recordLspTraffic(uri, kind, details = {}) {
+  const key = uri || "(unknown)";
+  lspTraffic.totals[kind] = (lspTraffic.totals[kind] ?? 0) + 1;
+  const perUri = lspTraffic.byUri[key] ?? {
+    lsp_open_file: 0,
+    lsp_update_file: 0,
+    lsp_update_file_incremental: 0,
+    lsp_get_diagnostics: 0,
+    lsp_hover: 0,
+    diagnostics_changed: 0,
+    lsp_close_file: 0,
+    hover_cache_hit: 0,
+    hover_cache_miss: 0,
+    hover_semantic_cache_hit: 0,
+    hover_header_cache_hit: 0,
+    hover_diagnostic_local_only: 0,
+    hover_prewarm_queued: 0,
+    hover_prewarm_canceled: 0
+  };
+  perUri[kind] = (perUri[kind] ?? 0) + 1;
+  lspTraffic.byUri[key] = perUri;
+  lspTraffic.events.push({ timestamp: perfNow(), uri: key, kind, ...details });
+  if (lspTraffic.events.length > 5000) lspTraffic.events.shift();
+}
+
+function recordLspReadiness(uri, eventKind, details = {}) {
+  const key = uri || "(unknown)";
+  const event = { timestamp: perfNow(), uri: key, eventKind, ...details };
+  lspReadiness.events.push(event);
+  if (lspReadiness.events.length > 1000) lspReadiness.events.shift();
+  lspReadiness.byUri[key] = {
+    ...(lspReadiness.byUri[key] ?? {}),
+    [eventKind]: event.timestamp,
+    lastEventKind: eventKind,
+    lastEventAt: event.timestamp,
+    ...details
+  };
+}
+
+function setLintDiagnostics(diagnostics) {
+  state.lint.diagnostics = diagnostics;
+  state.lint.version += 1;
+  diagnosticCellSetCache = null;
 }
 
 function changeGridFont(value) {
@@ -908,7 +1090,7 @@ function changeGridFont(value) {
 function toggleLint() {
   state.lint.enabled = !state.lint.enabled;
   if (!state.lint.enabled) {
-    state.lint.diagnostics = [];
+    setLintDiagnostics([]);
     updateGridDiagnostics();
   }
   saveLintSettings();
@@ -1027,50 +1209,126 @@ function fileNameFromUri(uri) {
   return decodeURIComponent(uri.split("/").pop() || uri);
 }
 
+const HOVER_READY_FALLBACK_MS = 1200;
+
+function clearHoverReadyFallback(doc) {
+  if (doc?._lspHoverReadyTimer != null) {
+    clearTimeout(doc._lspHoverReadyTimer);
+    doc._lspHoverReadyTimer = null;
+  }
+}
+
+function scheduleHoverReadyFallback(doc, uri, reason) {
+  clearHoverReadyFallback(doc);
+  doc._lspHoverReadyTimer = setTimeout(() => {
+    doc._lspHoverReadyTimer = null;
+    if (docToUri(doc) !== uri || doc._lspOpenedUri !== uri) return;
+    markDocHoverReady(doc, uri, reason);
+  }, HOVER_READY_FALLBACK_MS);
+}
+
+function markDocHoverReady(doc, uri, reason) {
+  clearHoverReadyFallback(doc);
+  doc._lspReady = true;
+  doc._lspHoverReady = true;
+  recordLspReadiness(uri, "hoverReady", {
+    fileName: doc?.name,
+    documentVersion: doc?._lspVersion ?? 0,
+    reason
+  });
+  retryQueuedLspHover(`hover-ready:${reason}`);
+  if (doc === activeDoc()) scheduleHoverPrewarm(`hover-ready:${reason}`);
+}
+
 async function lspStartWorkspace(workspacePath) {
-  lspHoverCache.clear();
-  lspHoverPending.clear();
-  lspHoverCurrentKey = null;
+  invalidateLspHover(true, "workspace-start");
   state.lspLogs = [];
   if (els.logList) els.logList.innerHTML = "";
   state.lint.status = "Connecting to linter...";
   renderChrome();
+  state.lsp.started = false;
   await lspStart(workspacePath);
   state.lsp.started = true;
   state.lsp.openFileCount = 0;
   const docsWithPaths = state.docs.filter((d) => docToUri(d));
   for (const doc of docsWithPaths) {
-    const uri = docToUri(doc);
     doc._lspVersion = 1;
-    await lspOpenFile(uri, doc.toText()).catch(() => {});
-    state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
+    doc._lspReady = false;
+    doc._lspOpened = false;
+    doc._lspDiagnosticsReady = false;
+    doc._lspHoverReady = false;
+    doc._lspOpenedUri = null;
+    doc._lspOpenedVersion = null;
+    doc._lspOpenPromise = null;
+    clearHoverReadyFallback(doc);
+    await lspOpenDoc(doc).catch(() => {});
   }
   state.lint.status = "";
   renderChrome();
+  retryQueuedLspHover("workspace-ready");
+  scheduleHoverPrewarm("workspace-ready");
 }
 
 async function lspOpenDoc(doc) {
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
-  doc._lspVersion = 1;
-  await lspOpenFile(uri, doc.toText());
-  state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
-  renderChrome();
+  doc._lspVersion ??= 1;
+  const version = doc._lspVersion;
+  if (doc._lspOpened && doc._lspOpenedUri === uri && doc._lspOpenedVersion === version) return;
+  if (doc._lspOpenPromise) return doc._lspOpenPromise;
+  clearHoverReadyFallback(doc);
+  doc._lspReady = false;
+  doc._lspOpened = false;
+  doc._lspDiagnosticsReady = diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
+  doc._lspHoverReady = doc._lspDiagnosticsReady;
+  doc._lspOpenPromise = (async () => {
+    recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
+    recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
+    await lspOpenFile(uri, doc.toText());
+    doc._lspOpened = true;
+    doc._lspOpenedUri = uri;
+    doc._lspOpenedVersion = version;
+    if (doc._lspDiagnosticsReady) {
+      markDocHoverReady(doc, uri, "existing-diagnostics");
+    } else {
+      scheduleHoverReadyFallback(doc, uri, "diagnostics-fallback");
+    }
+    state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
+    renderChrome();
+    retryQueuedLspHover("file-opened");
+    if (doc === activeDoc()) scheduleHoverPrewarm("file-opened");
+  })().catch((error) => {
+    doc._lspReady = false;
+    doc._lspOpened = false;
+    throw error;
+  }).finally(() => {
+    doc._lspOpenPromise = null;
+  });
+  return doc._lspOpenPromise;
 }
 
 async function lspUpdateDoc(doc, changedRows = null) {
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
+  clearHoverCacheForUri(uri);
   doc._lspVersion = (doc._lspVersion ?? 0) + 1;
+  invalidateLspHover(false, "document-version-changed");
+  doc._lspReady = false;
+  doc._lspDiagnosticsReady = false;
+  doc._lspHoverReady = false;
+  doc._lspOpenedVersion = doc._lspVersion;
+  scheduleHoverReadyFallback(doc, uri, "post-change-diagnostics-fallback");
   if (changedRows && changedRows.length > 0) {
     const changes = changedRows.map((row) => ({
       range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
       text: doc.rows[row]?.join("\t") ?? ""
     }));
+    recordLspTraffic(uri, "lsp_update_file_incremental", { fileName: doc.name, documentVersion: doc._lspVersion, changedRows: changedRows.length });
     await lspUpdateFileIncremental(uri, doc._lspVersion, changes);
   } else {
+    recordLspTraffic(uri, "lsp_update_file", { fileName: doc.name, documentVersion: doc._lspVersion });
     await lspUpdateFile(uri, doc._lspVersion, doc.toText());
   }
 }
@@ -1079,24 +1337,34 @@ async function lspCloseDoc(doc) {
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
+  recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
   await lspCloseFile(uri);
-  // Clear hover cache for this file
-  for (const key of [...lspHoverCache.keys()]) {
-    if (key.startsWith(`${uri}:`)) lspHoverCache.delete(key);
-  }
+  doc._lspReady = false;
+  doc._lspOpened = false;
+  doc._lspDiagnosticsReady = false;
+  doc._lspHoverReady = false;
+  doc._lspOpenedUri = null;
+  doc._lspOpenedVersion = null;
+  doc._lspOpenPromise = null;
+  clearHoverReadyFallback(doc);
+  clearHoverCacheForUri(uri);
+  invalidateLspHover(false, "file-closed");
   // Clear diagnostics for this file
   const fileKey = uriToFileKey(uri);
-  state.lint.diagnostics = state.lint.diagnostics.filter((d) => d.fileKey !== fileKey);
+  setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
   updateGridDiagnostics();
 }
 
 async function handleLspDiagnosticsChanged(uri) {
   if (!state.lint.enabled) return;
+  recordLspTraffic(uri, "diagnostics_changed");
+  recordLspTraffic(uri, "lsp_get_diagnostics");
   const rawDiags = await lspGetDiagnostics(uri).catch(() => []);
   const fileKey = uriToFileKey(uri);
   const doc = state.docs.find((d) => docToUri(d) === uri);
   const fileName = doc?.name ?? fileNameFromUri(uri);
   const filePath = doc?.path ?? pathFromUri(uri);
+  recordLspReadiness(uri, "firstDiagnosticsReceived", { fileName, activeFile: activeDoc()?.name ?? "", diagnosticCount: rawDiags.length });
 
   const displayDiags = rawDiags.map((d, i) => ({
     id: `lsp:${uri}:${d.row}:${d.col}:${i}`,
@@ -1111,13 +1379,18 @@ async function handleLspDiagnosticsChanged(uri) {
     locationLabel: `Row ${d.row + 1}, Col ${d.col + 1}`
   }));
 
-  state.lint.diagnostics = [
+  setLintDiagnostics([
     ...state.lint.diagnostics.filter((d) => d.fileKey !== fileKey),
     ...displayDiags
-  ];
+  ]);
 
   updateGridDiagnostics();
   renderChrome();
+  if (doc) {
+    doc._lspDiagnosticsReady = true;
+    markDocHoverReady(doc, uri, "diagnostics-ready");
+  }
+  if (doc === activeDoc()) scheduleHoverPrewarm("diagnostics-ready");
 }
 
 function lintActive() {
@@ -1132,68 +1405,534 @@ function computeCharOffset(doc, row, col) {
   return offset;
 }
 
-async function requestLspHover(row, col) {
-  if (!state.lsp.started) return;
-  const doc = activeDoc();
+function makeCurrentHoverTarget(doc, row, col) {
   const uri = docToUri(doc);
-  if (!uri) return;
-  const key = `${uri}:${row}:${col}`;
-  lspHoverCurrentKey = key;
-  if (lspHoverCache.has(key)) {
-    const cached = lspHoverCache.get(key);
-    if (cached != null) grid.setLspHover(row, col, cached);
+  if (!uri) return null;
+  const cellValue = doc.getCell(row, col);
+  return makeVectorHoverTarget({
+    uri,
+    fileName: doc.name,
+    row,
+    column: col,
+    columnName: doc.headers?.[col] ?? doc.getCell(0, col) ?? "",
+    cellValue,
+    documentVersion: doc._lspVersion ?? 0,
+    hasDiagnostics: diagnosticCellSetForDoc(doc).has(`${row}:${col}`)
+  });
+}
+
+function isDocReadyForHover(doc) {
+  return Boolean(state.lsp.started && docToUri(doc) && doc._lspOpened && doc._lspHoverReady);
+}
+
+function clearHoverCacheForUri(uri) {
+  for (const key of [...lspHoverCache.keys()]) {
+    if (key.startsWith(`${uri}\u001f`)) lspHoverCache.delete(key);
+  }
+  for (const key of [...lspHoverSemanticCache.keys()]) {
+    if (key.startsWith(`${uri}\u001f`)) lspHoverSemanticCache.delete(key);
+  }
+}
+
+function diagnosticCellSetForDoc(doc) {
+  const uri = docToUri(doc) ?? "";
+  const cacheKey = `${uri}\u001f${state.lint.version}`;
+  if (diagnosticCellSetCache?.key === cacheKey) return diagnosticCellSetCache.set;
+  const set = new Set(diagnosticsForDocument(state.lint.diagnostics, doc).map((d) => `${d.rowIndex}:${d.columnIndex}`));
+  diagnosticCellSetCache = { key: cacheKey, set };
+  return set;
+}
+
+function targetMatchesCurrentDocument(target) {
+  const doc = state.docs.find((candidate) => docToUri(candidate) === target.uri);
+  return Boolean(doc && doc.getCell(target.row, target.column) === target.cellValue);
+}
+
+const HOVER_NO_CONTENT_TTL_MS = 60_000;
+
+function targetHasImmediateTooltip(target) {
+  return Boolean(target?.hasDiagnostics || String(target?.cellValue ?? "").trim());
+}
+
+function makeHoverCacheEntry(target, text) {
+  const hasContent = Boolean(text);
+  return {
+    text: hasContent ? text : null,
+    hasContent,
+    noContent: !hasContent,
+    uri: target.uri,
+    documentVersion: target.documentVersion,
+    semanticKey: makeHoverSemanticCacheKey(target),
+    cachedAt: perfNow()
+  };
+}
+
+function makeHoverSemanticCacheKey(target) {
+  if (!target) return "";
+  const kind = target.targetKind === "diagnostic-cell" ? "cell" : target.targetKind;
+  if (kind === "header") {
+    return `${target.uri}\u001f${target.documentVersion}\u001fheader\u001f${target.column}\u001f${target.columnName}`;
+  }
+  return `${target.uri}\u001f${target.documentVersion}\u001f${kind}\u001f${target.columnName}\u001f${target.cellValue}`;
+}
+
+function isHoverCacheEntryUsable(entry, target) {
+  if (!entry || entry.uri !== target.uri || entry.documentVersion !== target.documentVersion) return false;
+  return !(entry.noContent && perfNow() - entry.cachedAt > HOVER_NO_CONTENT_TTL_MS);
+}
+
+function getHoverCacheEntry(target) {
+  const entry = lspHoverCache.get(target.key);
+  if (!isHoverCacheEntryUsable(entry, target)) {
+    if (entry) lspHoverCache.delete(target.key);
+  } else {
+    return { ...entry, cacheSource: "exact" };
+  }
+  const semanticKey = makeHoverSemanticCacheKey(target);
+  const semanticEntry = lspHoverSemanticCache.get(semanticKey);
+  if (!isHoverCacheEntryUsable(semanticEntry, target)) {
+    if (semanticEntry) lspHoverSemanticCache.delete(semanticKey);
+    return null;
+  }
+  lspHoverCache.set(target.key, semanticEntry);
+  return { ...semanticEntry, cacheSource: target.targetKind === "header" ? "header" : "semantic" };
+}
+
+function setHoverCacheEntry(target, text) {
+  const entry = makeHoverCacheEntry(target, text);
+  lspHoverCache.set(target.key, entry);
+  lspHoverSemanticCache.set(entry.semanticKey, entry);
+  return entry;
+}
+
+function queueLspHover(target, generation, sample) {
+  if (sample) {
+    sample.requestQueuedAt ??= perfNow();
+    sample.prewarmQueueLength = lspHoverQueued ? 1 : 0;
+  }
+  if (lspHoverQueued?.sample && lspHoverQueued.target?.key !== target.key) {
+    cancelVectorHoverSample(lspHoverQueued.sample, "replaced-by-latest-hover", perfNow);
+  }
+  lspHoverQueued = { target, generation, sample };
+  recordHoverQueueEvent({ reason: "queued-until-ready", fileName: target.fileName, row: target.row, column: target.column, targetKind: target.targetKind });
+}
+
+function retryQueuedLspHover(_reason) {
+  if (!lspHoverQueued) return;
+  const { target, generation, sample } = lspHoverQueued;
+  const doc = activeDoc();
+  const currentUri = docToUri(doc);
+  if (target.uri !== currentUri || lspHoverCurrentTarget?.key !== target.key || generation !== lspHoverGeneration) {
+    cancelVectorHoverSample(sample, "target-changed-before-ready", perfNow);
+    lspHoverQueued = null;
     return;
   }
-  if (lspHoverPending.has(key)) return;
-  lspHoverPending.add(key);
-  try {
-    const charOffset = computeCharOffset(doc, row, col);
-    let text = await lspHover(uri, row, charOffset);
-    lspHoverCache.set(key, text || null);
-    if (text && lspHoverCurrentKey === key) {
-      const cellValue = doc.getCell(row, col);
-      if (cellValue && text.startsWith(cellValue)) {
-        text = text.slice(cellValue.length).replace(/^\s*\n?/, "");
-      }
-      grid.setLspHover(row, col, text);
-    }
-  } catch {
-    lspHoverCache.set(key, null);
-  } finally {
-    lspHoverPending.delete(key);
+  if (!isDocReadyForHover(doc)) return;
+  lspHoverQueued = null;
+  markVectorHoverRetry(sample);
+  requestLspHover(target.row, target.column, { target, generation, sample, fromQueue: true }).catch(() => {});
+}
+
+async function requestLspHover(row, col, options = {}) {
+  cancelHoverPrewarm("user-hover");
+  const doc = activeDoc();
+  const target = options.target ?? makeCurrentHoverTarget(doc, row, col);
+  if (!target) return;
+  lspHoverCurrentTarget = target;
+  const generation = options.generation ?? lspHoverGeneration;
+  const ready = isDocReadyForHover(doc);
+  const cacheEntry = getHoverCacheEntry(target);
+  let sample = options.sample ?? recordHoverSample(startVectorHoverSample(target, {
+    now: perfNow,
+    vectorHoverEnabled: state.vectorLspHover,
+    cached: Boolean(cacheEntry),
+    lspReady: ready,
+    pointerEnterAt: options.pointerEnterAt,
+    delayScheduledAt: options.delayScheduledAt,
+    requestQueuedAt: options.requestQueuedAt,
+    prewarmQueueLength: (lspHoverActiveUserRequest ? 1 : 0) + (lspHoverLatestQueuedRequest ? 1 : 0),
+    wasUserInitiated: true
+  }));
+  sample.diagnosticsImmediate = Boolean(target.hasDiagnostics);
+  recordLspReadiness(target.uri, "firstHoverRequested", {
+    fileName: target.fileName,
+    row,
+    column: col,
+    targetKind: target.targetKind,
+    lspReady: ready,
+    cacheState: cacheEntry?.cacheSource ?? "miss"
+  });
+  const acceptance = shouldAcceptVectorHoverResult({
+    target,
+    generation,
+    currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
+    currentGeneration: lspHoverGeneration,
+    vectorHoverEnabled: state.vectorLspHover,
+    contextMenuOpen: state.contextMenuOpen
+  });
+  if (!acceptance.accepted) {
+    cancelVectorHoverSample(sample, acceptance.reason, perfNow);
+    return;
   }
+  if (cacheEntry) {
+    sample.cached = true;
+    sample.semanticCacheHit = cacheEntry.cacheSource === "semantic";
+    sample.headerCacheHit = cacheEntry.cacheSource === "header";
+    sample.cacheState = cacheEntry.noContent ? `${cacheEntry.cacheSource}-no-content-hit` : `${cacheEntry.cacheSource}-hit`;
+    sample.responseAt = perfNow();
+    sample.lspRequestSent = false;
+    recordLspTraffic(target.uri, cacheEntry.cacheSource === "header" ? "hover_header_cache_hit" : cacheEntry.cacheSource === "semantic" ? "hover_semantic_cache_hit" : "hover_cache_hit", {
+      fileName: target.fileName,
+      row,
+      column: col,
+      targetKind: target.targetKind
+    });
+    grid.setLspHover(row, col, cacheEntry.text);
+    finishVectorHoverSample(sample, {
+      now: perfNow,
+      contentReturned: cacheEntry.hasContent,
+      rendered: cacheEntry.hasContent || targetHasImmediateTooltip(target),
+      pointerStillOnTarget: true
+    });
+    if (target.hasDiagnostics && !cacheEntry.hasContent) recordLspTraffic(target.uri, "hover_diagnostic_local_only", { fileName: target.fileName, row, column: col });
+    return;
+  }
+  recordLspTraffic(target.uri, "hover_cache_miss", { fileName: target.fileName, row, column: col, targetKind: target.targetKind });
+  if (!ready) {
+    queueLspHover(target, generation, sample);
+    return;
+  }
+  enqueueUserHoverTarget(target, generation, sample);
+}
+
+function enqueueUserHoverTarget(target, generation, sample) {
+  if (lspHoverPending.has(target.key)) {
+    recordHoverQueueEvent({ reason: "attach-pending", fileName: target.fileName, row: target.row, column: target.column, targetKind: target.targetKind });
+    fetchLspHoverTarget(target, { generation, sample, render: true }).catch(() => {});
+    return;
+  }
+  const queuedAt = perfNow();
+  sample.requestQueuedAt ??= queuedAt;
+  sample.prewarmQueueLength = (lspHoverActiveUserRequest ? 1 : 0) + (lspHoverLatestQueuedRequest ? 1 : 0);
+  const request = { target, generation, sample, queuedAt };
+  if (!lspHoverActiveUserRequest) {
+    dispatchUserHoverRequest(request);
+    return;
+  }
+  if (lspHoverLatestQueuedRequest?.sample) {
+    cancelVectorHoverSample(lspHoverLatestQueuedRequest.sample, "replaced-by-latest-hover", perfNow);
+  }
+  lspHoverLatestQueuedRequest = request;
+  recordHoverQueueEvent({
+    reason: "queued-latest-hover",
+    fileName: target.fileName,
+    row: target.row,
+    column: target.column,
+    targetKind: target.targetKind,
+    replacements: 1
+  });
+}
+
+function dispatchUserHoverRequest(request) {
+  const { target, generation, sample, queuedAt } = request;
+  const acceptance = shouldAcceptVectorHoverResult({
+    target,
+    generation,
+    currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
+    currentGeneration: lspHoverGeneration,
+    vectorHoverEnabled: state.vectorLspHover,
+    contextMenuOpen: state.contextMenuOpen
+  });
+  if (!acceptance.accepted || !targetMatchesCurrentDocument(target)) {
+    cancelVectorHoverSample(sample, acceptance.accepted ? "document-version-changed" : acceptance.reason, perfNow);
+    return;
+  }
+  const cacheEntry = getHoverCacheEntry(target);
+  if (cacheEntry) {
+    sample.cached = true;
+    sample.semanticCacheHit = cacheEntry.cacheSource === "semantic";
+    sample.headerCacheHit = cacheEntry.cacheSource === "header";
+    sample.cacheState = cacheEntry.noContent ? `${cacheEntry.cacheSource}-no-content-hit` : `${cacheEntry.cacheSource}-hit`;
+    sample.lspRequestSent = false;
+    sample.responseAt = perfNow();
+    recordLspTraffic(target.uri, cacheEntry.cacheSource === "header" ? "hover_header_cache_hit" : cacheEntry.cacheSource === "semantic" ? "hover_semantic_cache_hit" : "hover_cache_hit", {
+      fileName: target.fileName,
+      row: target.row,
+      column: target.column,
+      targetKind: target.targetKind
+    });
+    grid.setLspHover(target.row, target.column, cacheEntry.text);
+    finishVectorHoverSample(sample, {
+      now: perfNow,
+      contentReturned: cacheEntry.hasContent,
+      rendered: cacheEntry.hasContent || targetHasImmediateTooltip(target),
+      pointerStillOnTarget: true
+    });
+    if (target.hasDiagnostics && !cacheEntry.hasContent) recordLspTraffic(target.uri, "hover_diagnostic_local_only", { fileName: target.fileName, row: target.row, column: target.column });
+    recordHoverQueueEvent({ reason: "queued-cache-hit", fileName: target.fileName, row: target.row, column: target.column, targetKind: target.targetKind });
+    return;
+  }
+  lspHoverActiveUserRequest = request;
+  sample.queueWaitMs = Math.round((perfNow() - queuedAt) * 100) / 100;
+  sample.lspRequestSent = true;
+  recordHoverQueueEvent({
+    reason: "dispatch-hover",
+    fileName: target.fileName,
+    row: target.row,
+    column: target.column,
+    targetKind: target.targetKind,
+    queueWaitMs: sample.queueWaitMs
+  });
+  fetchLspHoverTarget(target, { generation, sample, render: true })
+    .catch(() => {})
+    .finally(() => {
+      if (lspHoverActiveUserRequest === request) lspHoverActiveUserRequest = null;
+      const next = lspHoverLatestQueuedRequest;
+      lspHoverLatestQueuedRequest = null;
+      if (next) dispatchUserHoverRequest(next);
+    });
+}
+
+async function fetchLspHoverTarget(target, { generation, sample = null, render = false, prewarm = false } = {}) {
+  const pending = lspHoverPending.get(target.key);
+  if (pending) {
+    if (render && sample) {
+      markVectorHoverRequested(sample, () => pending.requestStarted);
+      sample.lspRequestSent = false;
+      sample.attachedToPending = true;
+      pending.waiters.push({ generation, sample });
+    }
+    return pending.promise;
+  }
+  const waiters = render && sample ? [{ generation, sample }] : [];
+  const requestStarted = perfNow();
+  const promise = (async () => {
+    for (const waiter of waiters) markVectorHoverRequested(waiter.sample, () => requestStarted);
+    try {
+      const doc = state.docs.find((candidate) => docToUri(candidate) === target.uri);
+      if (!doc || !targetMatchesCurrentDocument(target)) return null;
+      const charOffset = computeCharOffset(doc, target.row, target.column);
+      recordLspTraffic(target.uri, "lsp_hover", { fileName: target.fileName, row: target.row, column: target.column, targetKind: target.targetKind });
+      const text = await lspHover(target.uri, target.row, charOffset);
+      const responseAt = perfNow();
+      recordLspReadiness(target.uri, "firstHoverResponse", {
+        fileName: target.fileName,
+        row: target.row,
+        column: target.column,
+        targetKind: target.targetKind,
+        lspResponseMs: Math.round((responseAt - requestStarted) * 100) / 100,
+        hasContent: Boolean(text)
+      });
+      const currentPending = lspHoverPending.get(target.key);
+      const currentWaiters = currentPending?.waiters ?? waiters;
+      if (generation !== lspHoverGeneration || !targetMatchesCurrentDocument(target)) {
+        const reason = generation !== lspHoverGeneration ? "generation-changed" : "document-version-changed";
+        for (const waiter of currentWaiters) cancelVectorHoverSample(waiter.sample, reason, perfNow);
+        return null;
+      }
+      const cacheEntry = setHoverCacheEntry(target, text);
+      for (const waiter of currentWaiters) {
+        waiter.sample.responseAt = responseAt;
+        waiter.sample.cacheState = cacheEntry.noContent ? "no-content-stored" : "stored";
+        const resultAcceptance = shouldAcceptVectorHoverResult({
+          target,
+          generation: waiter.generation,
+          currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
+          currentGeneration: lspHoverGeneration,
+          vectorHoverEnabled: state.vectorLspHover,
+          contextMenuOpen: state.contextMenuOpen
+        });
+        if (!resultAcceptance.accepted) {
+          cancelVectorHoverSample(waiter.sample, resultAcceptance.reason, perfNow);
+          continue;
+        }
+        if (text) {
+          grid.setLspHover(target.row, target.column, text);
+          finishVectorHoverSample(waiter.sample, { now: perfNow, contentReturned: true, rendered: true, pointerStillOnTarget: true });
+        } else {
+          grid.setLspHover(target.row, target.column, null);
+          finishVectorHoverSample(waiter.sample, { now: perfNow, contentReturned: false, rendered: targetHasImmediateTooltip(target), pointerStillOnTarget: true });
+        }
+      }
+      if (prewarm) recordHoverPrewarmSample(target, { requestStarted, responseAt, contentReturned: Boolean(text) });
+      return text;
+    } catch {
+      const currentPending = lspHoverPending.get(target.key);
+      for (const waiter of currentPending?.waiters ?? waiters) {
+        const resultAcceptance = shouldAcceptVectorHoverResult({
+          target,
+          generation: waiter.generation,
+          currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
+          currentGeneration: lspHoverGeneration,
+          vectorHoverEnabled: state.vectorLspHover,
+          contextMenuOpen: state.contextMenuOpen
+        });
+        if (resultAcceptance.accepted) cancelVectorHoverSample(waiter.sample, "request-failed", perfNow);
+        else cancelVectorHoverSample(waiter.sample, resultAcceptance.reason, perfNow);
+      }
+      return null;
+    } finally {
+      lspHoverPending.delete(target.key);
+    }
+  })();
+  lspHoverPending.set(target.key, { generation, waiters, promise, requestStarted, prewarm: Boolean(prewarm) });
+  return promise;
+}
+
+const HOVER_PREWARM_ENABLED = false;
+const HOVER_PREWARM_DELAY_MS = 80;
+const HOVER_PREWARM_CONCURRENCY = 2;
+const HOVER_PREWARM_MAX_TARGETS = 90;
+
+function scheduleHoverPrewarm(reason = "schedule") {
+  if (!HOVER_PREWARM_ENABLED) {
+    cancelHoverPrewarm(reason);
+    recordLspTraffic(docToUri(activeDoc()), "hover_prewarm_canceled", { reason, disabled: true, activeFile: activeDoc()?.name ?? "" });
+    recordHoverPrewarmEvent({ reason, skipped: true, disabled: true, queued: 0 });
+    return;
+  }
+  if (hoverPrewarmTimer !== null) clearTimeout(hoverPrewarmTimer);
+  hoverPrewarmTimer = setTimeout(() => {
+    hoverPrewarmTimer = null;
+    startHoverPrewarm(reason);
+  }, HOVER_PREWARM_DELAY_MS);
+}
+
+function cancelHoverPrewarm(reason = "cancel") {
+  hoverPrewarmGeneration += 1;
+  hoverPrewarmQueue = [];
+  hoverPrewarmActive = 0;
+  if (hoverPrewarmTimer !== null) {
+    clearTimeout(hoverPrewarmTimer);
+    hoverPrewarmTimer = null;
+  }
+  recordHoverPrewarmEvent({ reason, canceled: true });
+}
+
+function startHoverPrewarm(reason = "visible") {
+  const doc = activeDoc();
+  if (!state.vectorLspHover || state.contextMenuOpen || !isDocReadyForHover(doc)) return;
+  const targets = buildVisibleHoverPrewarmTargets(doc).filter((target) => !getHoverCacheEntry(target) && !lspHoverPending.has(target.key));
+  if (!targets.length) return;
+  hoverPrewarmGeneration += 1;
+  hoverPrewarmQueue = targets.slice(0, HOVER_PREWARM_MAX_TARGETS);
+  hoverPrewarmActive = 0;
+  recordLspTraffic(uri, "hover_prewarm_queued", { reason, queued: hoverPrewarmQueue.length, fileName: doc.name });
+  recordHoverPrewarmEvent({ reason, queued: hoverPrewarmQueue.length, fileName: doc.name });
+  pumpHoverPrewarm(hoverPrewarmGeneration);
+}
+
+function pumpHoverPrewarm(generation) {
+  if (generation !== hoverPrewarmGeneration) return;
+  while (hoverPrewarmActive < HOVER_PREWARM_CONCURRENCY && hoverPrewarmQueue.length) {
+    const target = hoverPrewarmQueue.shift();
+    hoverPrewarmActive += 1;
+    fetchLspHoverTarget(target, { generation: lspHoverGeneration, prewarm: true })
+      .catch(() => {})
+      .finally(() => {
+        hoverPrewarmActive = Math.max(0, hoverPrewarmActive - 1);
+        pumpHoverPrewarm(generation);
+      });
+  }
+}
+
+function buildVisibleHoverPrewarmTargets(doc) {
+  const uri = docToUri(doc);
+  if (!uri) return [];
+  const rows = grid.visibleRowIndexes?.() ?? [];
+  const columns = grid.visibleColumnIndexes?.() ?? [];
+  const diagCells = diagnosticCellSetForDoc(doc);
+  const targets = [];
+  const seen = new Set();
+  const push = (row, column) => {
+    if (row < 0 || column < 0 || row >= doc.rowCount || column >= doc.columnCount) return;
+    const target = makeVectorHoverTarget({
+      uri,
+      fileName: doc.name,
+      row,
+      column,
+      columnName: doc.headers?.[column] ?? doc.getCell(0, column) ?? "",
+      cellValue: doc.getCell(row, column),
+      documentVersion: doc._lspVersion ?? 0,
+      hasDiagnostics: diagCells.has(`${row}:${column}`)
+    });
+    if (seen.has(target.key)) return;
+    seen.add(target.key);
+    targets.push(target);
+  };
+  for (const column of columns.slice(0, 32)) push(0, column);
+  for (const row of rows.filter((row) => row > 0).slice(0, 32)) push(row, 0);
+  for (const row of rows.filter((row) => row > 0).slice(0, 8)) {
+    for (const column of columns.filter((column) => column > 0).slice(0, 8)) push(row, column);
+  }
+  for (const key of diagCells) {
+    const [row, column] = key.split(":").map(Number);
+    if (rows.includes(row) && columns.includes(column)) push(row, column);
+    if (targets.length >= HOVER_PREWARM_MAX_TARGETS) break;
+  }
+  return targets;
+}
+
+function recordHoverPrewarmEvent(event) {
+  hoverPrewarmSamples.push({
+    timestamp: perfNow(),
+    ...event
+  });
+  if (hoverPrewarmSamples.length > 160) hoverPrewarmSamples.shift();
+}
+
+function recordHoverPrewarmSample(target, { requestStarted, responseAt, contentReturned }) {
+  recordHoverPrewarmEvent({
+    fileName: target.fileName,
+    targetKind: target.targetKind,
+    row: target.row,
+    column: target.column,
+    columnName: target.columnName,
+    cellValue: target.cellValue,
+    documentVersion: target.documentVersion,
+    totalMs: Math.round((responseAt - requestStarted) * 100) / 100,
+    contentReturned: Boolean(contentReturned),
+    cacheState: contentReturned ? "filled" : "empty"
+  });
 }
 
 // ── diagnostics helpers ────────────────────────────────────────────────────
 
 function updateGridDiagnostics() {
-  grid.setDiagnostics(groupDiagnosticsByCell(diagnosticsForDocument(state.lint.diagnostics, activeDoc())));
+  const started = perfNow();
+  const diagnosticsByCell = lintActive()
+    ? groupDiagnosticsByCell(diagnosticsForDocument(state.lint.diagnostics, activeDoc()))
+    : new Map();
+  grid.setDiagnostics(diagnosticsByCell);
   updateOverviewRuler();
+  recordUiPerf("update-grid-diagnostics", started, { cellMarkers: diagnosticsByCell.size });
 }
 
 function severityOrder(severity) {
   return severity === "error" ? 2 : severity === "warning" ? 1 : 0;
 }
 
-function docDiagnosticSeverity(doc) {
-  const diags = diagnosticsForDocument(state.lint.diagnostics, doc);
-  if (diags.some((d) => d.severity === "error")) return "error";
-  if (diags.some((d) => d.severity === "warning")) return "warning";
+function docDiagnosticSeverity(_doc) {
   return null;
 }
 
 function updateOverviewRuler() {
+  const started = perfNow();
   const ruler = els.overviewRuler;
-  if (!ruler) return;
+  if (!ruler) {
+    recordUiPerf("update-overview-ruler", started, { skipped: true });
+    return;
+  }
   const hostRect = els.host.getBoundingClientRect();
   ruler.style.top = `${hostRect.top}px`;
   ruler.style.height = `${hostRect.height}px`;
   ruler.style.right = "0px";
   const doc = activeDoc();
-  const diags = diagnosticsForDocument(state.lint.diagnostics, doc);
+  const diags = lintActive() ? diagnosticsForDocument(state.lint.diagnostics, doc) : [];
   const rowCount = doc.rowCount;
   if (!diags.length || !rowCount) {
     ruler.innerHTML = "";
+    recordUiPerf("update-overview-ruler", started, { marks: 0 });
     return;
   }
   const seenRows = new Map();
@@ -1207,6 +1946,7 @@ function updateOverviewRuler() {
     const pct = (row + 0.5) / rowCount * 100;
     return `<div class="ruler-mark ruler-mark-${severity}" style="top:${pct}%"></div>`;
   }).join("");
+  recordUiPerf("update-overview-ruler", started, { marks: seenRows.size });
 }
 
 function applyFreezeToDoc(doc) {
@@ -1309,6 +2049,64 @@ async function goToDiagnostic(id) {
 async function loadConfig() {
   const config = await getConfig().catch(() => ({}));
   state.config = config ?? {};
+}
+
+function showAppSettings() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const fontOptions = FONT_OPTIONS.map(([label, value]) =>
+    `<option value="${escapeHtml(value)}"${state.gridFont === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+  ).join("");
+  backdrop.innerHTML = `
+    <div class="modal settings-modal">
+      <h2>Settings</h2>
+      <div class="settings-stack">
+        <label class="settings-checkbox-label">
+          <input type="checkbox" id="settingsColorizeColumns"${state.colorizeColumns ? " checked" : ""} />
+          Colorize columns
+        </label>
+        <label class="settings-checkbox-label">
+          <input type="checkbox" id="settingsVectorLspHover"${state.vectorLspHover ? " checked" : ""} />
+          Vector-LSP Hover
+        </label>
+        <label class="settings-label" for="settingsGridFont">Font</label>
+        <select class="modal-input settings-font-select" id="settingsGridFont">${fontOptions}</select>
+        <div class="settings-label">Theme</div>
+        <div class="settings-segmented" role="group" aria-label="Theme">
+          <button class="${state.theme === "dark" ? "active" : ""}" data-settings-theme="dark">Dark</button>
+          <button class="${state.theme === "light" ? "active" : ""}" data-settings-theme="light">Light</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button data-settings-close>Close</button>
+      </div>
+    </div>`;
+  document.body.append(backdrop);
+
+  const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
+  const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
+  const fontInput = backdrop.querySelector("#settingsGridFont");
+  const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
+  const refresh = () => {
+    colorizeInput.checked = state.colorizeColumns;
+    hoverInput.checked = state.vectorLspHover;
+    fontInput.value = state.gridFont;
+    for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
+  };
+  colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
+  hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
+  fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
+  for (const button of themeButtons) {
+    button.addEventListener("click", () => { setTheme(button.dataset.settingsTheme); refresh(); });
+  }
+
+  const close = () => {
+    backdrop.remove();
+    els.host.focus();
+  };
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop || event.target.closest("[data-settings-close]")) close();
+  });
 }
 
 async function showSettings() {
@@ -1420,7 +2218,7 @@ async function showSettings() {
         state.config = updated;
         finish();
         if (state.workspace) {
-          state.lint.diagnostics = [];
+          setLintDiagnostics([]);
           updateGridDiagnostics();
           lspStartWorkspace(state.workspace.path).catch(showError);
         }
@@ -1544,6 +2342,7 @@ function renderPalette() {
 function showContextMenu({ x, y, hit }) {
   state.contextHit = hit;
   state.contextMenuActiveGroup = "";
+  setContextMenuOpen(true);
   const canUnhide = activeDoc().hiddenRows.size > 0 || activeDoc().hiddenColumns.size > 0;
   const focusRow = hit?.row ?? state.selection.focus.row;
   const focusCol = hit?.column ?? state.selection.focus.column;
@@ -1628,7 +2427,14 @@ function positionSubmenu(group) {
 function hideContextMenu() {
   els.contextMenu.classList.add("hidden");
   state.contextMenuActiveGroup = "";
+  setContextMenuOpen(false);
   for (const group of els.contextMenu.querySelectorAll(".menu-group.active")) group.classList.remove("active");
+}
+
+function setContextMenuOpen(open) {
+  state.contextMenuOpen = Boolean(open);
+  if (state.contextMenuOpen) clearVisibleLspHover("context-menu-open");
+  grid.setHoverSuspended(state.contextMenuOpen);
 }
 
 function menuButton(item) {
@@ -1649,9 +2455,9 @@ function rowItems() {
   return [
     { id: "add-row", label: "Add Rows..." },
     { id: "insert-row", label: "Insert Row" },
-    { id: "clone-row", label: "Clone Row", disabled: rowsForContextOperation().filter((row) => row > 0 && row < activeDoc().rowCount).length === 0 },
     { id: "hide-row", label: "Hide Row(s)" },
-    { id: "delete-row", label: "Delete Row(s)" }
+    { id: "delete-row", label: "Delete Row(s)" },
+    { id: "clone-row", label: "Clone Row", disabled: rowsForContextOperation().filter((row) => row > 0 && row < activeDoc().rowCount).length === 0 }
   ];
 }
 
@@ -1681,6 +2487,7 @@ function mathItems() {
 }
 
 function renderChrome() {
+  const started = perfNow();
   els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
   els.shell.classList.toggle("problems-open", state.problemsVisible);
   els.problemsPanel?.classList.toggle("hidden", !state.problemsVisible);
@@ -1741,16 +2548,7 @@ function renderChrome() {
   els.fileList.innerHTML = state.docs
     .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
     .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
-  if (els.problemsList) {
-    els.problemsList.innerHTML = renderProblemsPanel();
-    for (const details of els.problemsList.querySelectorAll("details[data-file-name]")) {
-      details.addEventListener("toggle", () => {
-        const fn = details.dataset.fileName;
-        if (details.open) collapsedProblemFiles.delete(fn);
-        else collapsedProblemFiles.add(fn);
-      });
-    }
-  }
+  renderProblemsPanelIfNeeded();
   for (const button of document.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", (event) => {
       if (event?.target?.closest("[data-close-tab]")) return;
@@ -1761,6 +2559,7 @@ function renderChrome() {
       updateGridDiagnostics();
       renderChrome();
       scrollProblemsToActiveFile();
+      scheduleHoverPrewarm("tab-switch");
     });
   }
   for (const button of document.querySelectorAll("[data-close-tab]")) {
@@ -1779,9 +2578,43 @@ function renderChrome() {
       else collapsedFileGroups.add(g);
     });
   }
-  for (const button of document.querySelectorAll("[data-diagnostic-id]")) {
+  recordUiPerf("render-chrome", started, { docs: state.docs.length });
+}
+
+function renderProblemsPanelIfNeeded() {
+  const started = perfNow();
+  if (!els.problemsList || !state.problemsVisible || state.bottomTab !== "problems") {
+    recordUiPerf("render-problems-panel", started, { skipped: true });
+    return;
+  }
+  const key = problemsPanelRenderKey();
+  if (els.problemsList.dataset.renderKey === key) {
+    recordUiPerf("render-problems-panel", started, { cached: true });
+    return;
+  }
+  els.problemsList.innerHTML = renderProblemsPanel();
+  els.problemsList.dataset.renderKey = key;
+  for (const details of els.problemsList.querySelectorAll("details[data-file-name]")) {
+    details.addEventListener("toggle", () => {
+      const fn = details.dataset.fileName;
+      if (details.open) collapsedProblemFiles.delete(fn);
+      else collapsedProblemFiles.add(fn);
+    });
+  }
+  for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
     button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
   }
+  recordUiPerf("render-problems-panel", started, { rendered: true });
+}
+
+function problemsPanelRenderKey() {
+  return [
+    state.lint.enabled ? "on" : "off",
+    state.lsp.started ? "started" : "stopped",
+    state.lint.status,
+    state.lint.version,
+    [...collapsedProblemFiles].sort().join("\u001f")
+  ].join("\u001e");
 }
 
 function renderProblemsPanel() {

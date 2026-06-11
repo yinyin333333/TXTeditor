@@ -6,6 +6,7 @@ const BASE_ROW_HEADER_MIN = 38;
 const OVERSCAN_ROWS = 12;
 const OVERSCAN_COLUMNS_PX = 900;
 const FIT_PADDING = 24;
+export const VECTOR_LSP_HOVER_DELAY_MS = 0;
 const GRID_COLORS = {
   background: "#1e1e1e",
   rowOdd: "#1f1f1f",
@@ -15,6 +16,8 @@ const GRID_COLORS = {
   firstColumnFrozen: "#303d4b",
   firstColumnText: "#e0e6ed",
   firstColumnBorder: "#4f5c6a",
+  activeHeader: "#315f8f",
+  activeHeaderText: "#ffffff",
   frozen: "#252a31",
   frozenHeader: "#30343b",
   grid: "#3a3d41",
@@ -45,6 +48,8 @@ const GRID_CSS_VARS = {
   firstColumnFrozen: "--grid-first-column-frozen-bg",
   firstColumnText: "--grid-first-column-text",
   firstColumnBorder: "--grid-first-column-border",
+  activeHeader: "--grid-active-header-bg",
+  activeHeaderText: "--grid-active-header-text",
   frozen: "--grid-frozen-bg",
   frozenHeader: "--grid-frozen-header-bg",
   grid: "--grid-line",
@@ -68,7 +73,7 @@ const GRID_CSS_VARS = {
 };
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -84,6 +89,8 @@ export class CanvasGrid {
     this.onResizeCommand = onResizeCommand;
     this.onAutoFitColumn = onAutoFitColumn;
     this.onHoverRequest = onHoverRequest;
+    this.onHoverInvalidated = onHoverInvalidated;
+    this.onViewportChanged = onViewportChanged;
     this._lspHoverByCell = new Map();
     this._hoveredCell = null;
     this._lastTooltipX = 0;
@@ -91,6 +98,10 @@ export class CanvasGrid {
     this._hoverDebounceTimer = null;
     this._pendingHoverRow = -1;
     this._pendingHoverCol = -1;
+    this._pendingHoverPointerAt = 0;
+    this._pendingHoverDelayAt = 0;
+    this._lastHoverRequestRow = -1;
+    this._lastHoverRequestCol = -1;
     this.gridFontFamily = "Consolas, 'Cascadia Mono', monospace";
     this.deviceScale = window.devicePixelRatio || 1;
     this.dragging = false;
@@ -101,6 +112,8 @@ export class CanvasGrid {
     this.editing = false;
     this.editMode = null;
     this.colorizeColumns = false;
+    this.vectorLspHoverEnabled = true;
+    this.hoverSuspended = false;
     this.diagnosticsByCell = new Map();
     this.raf = 0;
     this.renderStats = {
@@ -147,7 +160,8 @@ export class CanvasGrid {
   }
 
   setDocument(doc) {
-    this.hideFirstColumnHoverPreview();
+    if (this._tooltip) this.clearHoverState();
+    else this.hideFirstColumnHoverPreview();
     this.doc = doc;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
@@ -168,6 +182,54 @@ export class CanvasGrid {
     this.draw();
   }
 
+  setVectorLspHoverEnabled(enabled) {
+    this.vectorLspHoverEnabled = Boolean(enabled);
+    if (!this.vectorLspHoverEnabled) this.clearLspHovers();
+    this.requestRender("vector-lsp-hover");
+  }
+
+  setHoverSuspended(suspended) {
+    this.hoverSuspended = Boolean(suspended);
+    if (this.hoverSuspended) this.clearHoverState();
+  }
+
+  isHoverAllowed() {
+    return !this.hoverSuspended && !this.resizing && !this.dragging;
+  }
+
+  clearHoverState() {
+    const hadHover = this._hoveredCell
+      || this._pendingHoverRow !== -1
+      || this._pendingHoverCol !== -1
+      || this._hoverDebounceTimer !== null
+      || !this.hoverPreview.classList.contains("hidden")
+      || this._tooltip.style.display !== "none";
+    this.hideFirstColumnHoverPreview();
+    this.clearLspHovers();
+    this._hoveredCell = null;
+    this._pendingHoverRow = -1;
+    this._pendingHoverCol = -1;
+    this._pendingHoverPointerAt = 0;
+    this._pendingHoverDelayAt = 0;
+    this._lastHoverRequestRow = -1;
+    this._lastHoverRequestCol = -1;
+    if (this._hoverDebounceTimer !== null) {
+      clearTimeout(this._hoverDebounceTimer);
+      this._hoverDebounceTimer = null;
+    }
+    if (hadHover) this.onHoverInvalidated?.();
+  }
+
+  clearLspHovers() {
+    this._lspHoverByCell.clear();
+    this.hideVectorTooltip();
+  }
+
+  hideVectorTooltip() {
+    this._tooltip.style.display = "none";
+    this._tooltip.textContent = "";
+  }
+
   setDiagnostics(diagnosticsByCell) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     this.draw();
@@ -180,15 +242,17 @@ export class CanvasGrid {
         this.doc.scrollLeft = this.scrollLeft;
         this.doc.scrollTop = this.scrollTop;
       }
-      this.hideFirstColumnHoverPreview();
+      this.clearHoverState();
       this.requestRender("scroll");
+      this.onViewportChanged?.("scroll");
     });
     this._tooltip = document.createElement("div");
     this._tooltip.className = "cell-tooltip";
     document.body.appendChild(this._tooltip);
     this.host.addEventListener("mousedown", (event) => this.onMouseDown(event));
     this.host.addEventListener("mousemove", (event) => this.onMouseMove(event));
-    this.host.addEventListener("mouseleave", () => this.hideFirstColumnHoverPreview());
+    this.host.addEventListener("mouseleave", (event) => this.onMouseLeave(event));
+    this.host.addEventListener("pointerleave", (event) => this.onMouseLeave(event));
     this.host.addEventListener("contextmenu", (event) => this.onContext(event));
     this.host.addEventListener("dblclick", (event) => this.onDblClick(event));
     this.host.addEventListener("keydown", (event) => this.onKeyDown(event));
@@ -390,6 +454,14 @@ export class CanvasGrid {
     return rows;
   }
 
+  visibleRowIndexes() {
+    return this.visibleRows().map(({ row }) => row);
+  }
+
+  visibleColumnIndexes() {
+    return this.visibleColumns().map(({ column }) => column);
+  }
+
   requestRender(reason = "change") {
     this.renderStats.reason = reason;
     if (this.raf) return;
@@ -474,11 +546,12 @@ export class CanvasGrid {
 
   drawRowHeader(row, y, height, options = {}) {
     const selected = this.selection.hasFullRow(row, this.doc.columnCount);
-    this.ctx.fillStyle = selected ? GRID_COLORS.selection : options.frozenRow ? GRID_COLORS.rowHeaderFrozen : GRID_COLORS.rowHeader;
+    const activeHeader = this.selection.focus.row === row;
+    this.ctx.fillStyle = selected ? GRID_COLORS.selection : activeHeader ? GRID_COLORS.activeHeader : options.frozenRow ? GRID_COLORS.rowHeaderFrozen : GRID_COLORS.rowHeader;
     this.ctx.fillRect(0, y, this.rowHeaderWidth, height);
     this.ctx.strokeStyle = GRID_COLORS.grid;
     this.ctx.strokeRect(0, y, this.rowHeaderWidth, height);
-    this.ctx.fillStyle = selected ? GRID_COLORS.textSelected : GRID_COLORS.rowText;
+    this.ctx.fillStyle = selected ? GRID_COLORS.textSelected : activeHeader ? GRID_COLORS.activeHeaderText : GRID_COLORS.rowText;
     this.ctx.font = this.font(400);
     const label = String(row + 1);
     const x = Math.max(6, this.rowHeaderWidth - this.ctx.measureText(label).width - 8);
@@ -493,7 +566,8 @@ export class CanvasGrid {
     const firstColumnLabel = column === 0 && row > 0;
     ctx.font = this.font(row === 0 || firstColumnLabel ? 600 : 400);
     const frozen = options.frozenRow || options.frozenColumn;
-    const baseBackground = cellBackground(row, selected, frozen, firstColumnLabel);
+    const activeColumnHeader = row === 0 && this.selection.focus.column === column;
+    const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
     ctx.fillStyle = baseBackground;
     ctx.fillRect(x, y, width, height);
     ctx.strokeStyle = frozen ? GRID_COLORS.gridFrozen : GRID_COLORS.grid;
@@ -507,7 +581,7 @@ export class CanvasGrid {
     }
     const value = this.doc.getCell(row, column);
     if (shouldDrawCellText(row, column, this.editingCell())) {
-      ctx.fillStyle = cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
+      ctx.fillStyle = activeColumnHeader && !selected ? GRID_COLORS.activeHeaderText : cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
       ctx.textBaseline = "middle";
       this.fillText(value, x + 8, y + height / 2, width - 12);
     }
@@ -682,7 +756,7 @@ export class CanvasGrid {
   }
   
   onMouseLeave(event) {
-    this.hideFirstColumnHoverPreview();
+    this.clearHoverState();
   }
 
   onMouseDown(event) {
@@ -693,6 +767,7 @@ export class CanvasGrid {
     const hit = this.hitTest(event);
     const resize = this.resizeHit(hit);
     if (resize) {
+      this.clearHoverState();
       const before = resize.kind === "column" ? this.doc.columnWidths[resize.index] : this.doc.rowHeights[resize.index];
       this.resizing = { ...resize, startX: hit.x, startY: hit.y, before, current: before };
       this.resizeGuide = resize.kind === "column" ? { kind: "column", x: hit.x } : { kind: "row", y: hit.y };
@@ -701,6 +776,7 @@ export class CanvasGrid {
     const toggle = event.ctrlKey || event.metaKey;
     this.applyHitSelection(hit, event.shiftKey, toggle);
     this.dragging = hit.kind === "cell" && !toggle;
+    if (this.dragging) this.clearHoverState();
     this.draw();
   }
 
@@ -716,7 +792,7 @@ export class CanvasGrid {
   onMouseMove(event) {
     const hit = this.hitTest(event);
     if (this.resizing) {
-      this.hideFirstColumnHoverPreview();
+      this.clearHoverState();
       if (this.resizing.kind === "column") {
         const next = Math.max(36, this.resizing.before + (hit.x - this.resizing.startX) / this.zoom);
         this.doc.columnWidths[this.resizing.index] = next;
@@ -734,11 +810,11 @@ export class CanvasGrid {
     const resize = this.resizeHit(hit);
     this.host.style.cursor = resize?.kind === "column" ? "col-resize" : resize?.kind === "row" ? "row-resize" : "default";
     if (resize) {
-      this.hideFirstColumnHoverPreview();
+      this.clearHoverState();
       return;
     }
     if (this.dragging && hit.kind === "cell") {
-      this.hideFirstColumnHoverPreview();
+      this.clearHoverState();
       this.selection.extend(hit.row, hit.column);
       this.draw();
       return;
@@ -767,49 +843,82 @@ export class CanvasGrid {
   }
 
   _updateTooltip(event, hit) {
-    if (hit.kind !== "cell" || this.dragging) {
+    if (!this.isHoverAllowed() || hit.kind !== "cell" || this.dragging) {
       this._hoveredCell = null;
-      this._tooltip.style.display = "none";
+      this.clearHoverState();
+      return;
+    }
+    const value = this.doc.getCell(hit.row, hit.column);
+    if (!this.vectorLspHoverEnabled) {
+      this._hoveredCell = null;
+      this.clearLspHovers();
+      this.showLegacyHoverPreview(hit, event, value);
       return;
     }
     this._hoveredCell = { row: hit.row, col: hit.column };
     this._lastTooltipX = event.clientX;
     this._lastTooltipY = event.clientY;
-    this._renderTooltip(hit.row, hit.column, event.clientX, event.clientY);
+    const key = `${hit.row}:${hit.column}`;
+    const diags = this.diagnosticsByCell.get(key) ?? [];
+    const hoverText = this._lspHoverByCell.get(key) ?? null;
+    const hasLocalValue = String(value ?? "").trim().length > 0;
+    if (hoverText || diags.length || hasLocalValue) {
+      this.hideFirstColumnHoverPreview();
+      this._renderTooltip(hit.row, hit.column, event.clientX, event.clientY);
+    } else {
+      this.hideVectorTooltip();
+      this.showLegacyHoverPreview(hit, event, value);
+    }
     this._scheduleHoverRequest(hit.row, hit.column);
   }
 
   _scheduleHoverRequest(row, col) {
+    if (!this.isHoverAllowed()) return;
+    if (!this.vectorLspHoverEnabled) return;
+    const samePendingTarget = this._pendingHoverRow === row && this._pendingHoverCol === col;
+    const sameRequestedTarget = this._lastHoverRequestRow === row && this._lastHoverRequestCol === col;
+    if (sameRequestedTarget) return;
+    const now = performance.now();
+    if (this._hoverDebounceTimer !== null) clearTimeout(this._hoverDebounceTimer);
+    if (!samePendingTarget) {
+      this._pendingHoverPointerAt = now;
+      this._lastHoverRequestRow = -1;
+      this._lastHoverRequestCol = -1;
+    }
     this._pendingHoverRow = row;
     this._pendingHoverCol = col;
-    if (this._hoverDebounceTimer !== null) clearTimeout(this._hoverDebounceTimer);
-    this._hoverDebounceTimer = setTimeout(() => {
-      this._hoverDebounceTimer = null;
-      if (this._hoveredCell?.row === this._pendingHoverRow && this._hoveredCell?.col === this._pendingHoverCol) {
-        this.onHoverRequest?.(this._pendingHoverRow, this._pendingHoverCol);
-      }
-    }, 150);
+    this._pendingHoverDelayAt = now;
+    if (!this.isHoverAllowed()) return;
+    if (this._hoveredCell?.row !== this._pendingHoverRow || this._hoveredCell?.col !== this._pendingHoverCol) return;
+    this._lastHoverRequestRow = this._pendingHoverRow;
+    this._lastHoverRequestCol = this._pendingHoverCol;
+    this.onHoverRequest?.(this._pendingHoverRow, this._pendingHoverCol, {
+      pointerEnterAt: this._pendingHoverPointerAt,
+      delayScheduledAt: this._pendingHoverDelayAt,
+      requestQueuedAt: performance.now()
+    });
   }
 
   _renderTooltip(row, col, clientX, clientY) {
     const value = this.doc.getCell(row, col);
     const diags = this.diagnosticsByCell.get(`${row}:${col}`) ?? [];
     const hoverText = this._lspHoverByCell.get(`${row}:${col}`) ?? null;
-    if (!value && !diags.length && !hoverText) {
+    const tooltip = normalizeVectorLspTooltip(value, hoverText);
+    if (!tooltip.title && !tooltip.detail && !diags.length) {
       this._tooltip.style.display = "none";
       return;
     }
     this._tooltip.textContent = "";
-    if (value) {
+    if (tooltip.title) {
       const div = document.createElement("div");
       div.className = "cell-tooltip-value";
-      div.textContent = value;
+      div.textContent = tooltip.title;
       this._tooltip.appendChild(div);
     }
-    if (hoverText) {
+    if (tooltip.detail) {
       const div = document.createElement("div");
       div.className = "cell-tooltip-hover";
-      div.textContent = hoverText;
+      div.textContent = tooltip.detail;
       this._tooltip.appendChild(div);
     }
     for (const d of diags) {
@@ -828,18 +937,25 @@ export class CanvasGrid {
   }
 
   setLspHover(row, col, text) {
+    if (!this.isHoverAllowed()) return;
+    if (this._hoveredCell?.row !== row || this._hoveredCell?.col !== col) return;
     const key = `${row}:${col}`;
     if (text) this._lspHoverByCell.set(key, text);
     else this._lspHoverByCell.delete(key);
-    if (this._hoveredCell?.row === row && this._hoveredCell?.col === col) {
+    const diags = this.diagnosticsByCell.get(key) ?? [];
+    const hasLocalValue = String(this.doc.getCell(row, col) ?? "").trim().length > 0;
+    if (text || diags.length || hasLocalValue) {
+      this.hideFirstColumnHoverPreview();
       this._renderTooltip(row, col, this._lastTooltipX, this._lastTooltipY);
+    } else {
+      this.hideVectorTooltip();
+      this.showLegacyHoverPreview({ kind: "cell", row, column: col }, { clientX: this._lastTooltipX, clientY: this._lastTooltipY }, this.doc.getCell(row, col));
     }
   }
 
   onContext(event) {
     event.preventDefault();
-    this.hideFirstColumnHoverPreview();
-    this._tooltip.style.display = "none";
+    this.clearHoverState();
     this.host.focus();
     const hit = this.hitTest(event);
     if (hit.kind === "empty") {
@@ -856,6 +972,10 @@ export class CanvasGrid {
   }
 
   updateFirstColumnHoverPreview(hit, event) {
+    if (!this.isHoverAllowed()) {
+      this.hideFirstColumnHoverPreview();
+      return;
+    }
     const value = hit.kind === "cell" ? this.doc.getCell(hit.row, hit.column) : "";
     if (!shouldShowFirstColumnHover(hit, value)) {
       this.hideFirstColumnHoverPreview();
@@ -875,6 +995,15 @@ export class CanvasGrid {
     if (top + box.height > window.innerHeight - 8) top = Math.max(8, event.clientY - box.height - gap);
     this.hoverPreview.style.left = `${left}px`;
     this.hoverPreview.style.top = `${top}px`;
+  }
+
+  showLegacyHoverPreview(hit, event, value) {
+    this.hideVectorTooltip();
+    if (shouldShowFirstColumnHover(hit, value)) {
+      this.updateFirstColumnHoverPreview(hit, event);
+    } else {
+      this.hideFirstColumnHoverPreview();
+    }
   }
 
   hideFirstColumnHoverPreview() {
@@ -1139,7 +1268,21 @@ export function shouldDrawCellText(row, column, editingCell) {
 }
 
 export function shouldShowFirstColumnHover(hit, value) {
-  return hit?.kind === "cell" && hit.column === 0 && String(value ?? "") !== "";
+  return hit?.kind === "cell" && hit.row > 0 && hit.column === 0 && String(value ?? "") !== "";
+}
+
+export function normalizeVectorLspTooltip(value, hoverText) {
+  const title = String(value ?? "").trim();
+  const rawHover = String(hoverText ?? "").trim();
+  if (!rawHover) return { title, detail: "" };
+  if (!title) return splitHoverText(rawHover);
+  const lines = rawHover.replace(/\r\n?/g, "\n").split("\n");
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  if (lines.length && lines[0].trim() === title) {
+    lines.shift();
+    while (lines.length && lines[0].trim() === "") lines.shift();
+  }
+  return { title, detail: lines.join("\n").trim() };
 }
 
 export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
@@ -1147,6 +1290,13 @@ export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
     row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)),
     column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1))
   };
+}
+
+function splitHoverText(hoverText) {
+  const lines = hoverText.replace(/\r\n?/g, "\n").split("\n");
+  const title = lines.shift()?.trim() ?? "";
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  return { title, detail: lines.join("\n").trim() };
 }
 
 function createFirstColumnHoverPreview() {

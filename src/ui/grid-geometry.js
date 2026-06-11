@@ -19,8 +19,9 @@ export function classifyResizeHandle({ hit, columnRight, rowBottom, zoom = 1 }) 
   if (!hit || hit.kind === "empty") return null;
   const tolerance = Math.max(4, Math.round(5 * zoom));
   if (hit.kind === "column-header" && Math.abs(hit.x - columnRight) <= tolerance) return { kind: "column", index: hit.column };
-  if (hit.kind === "cell" && hit.row === 0 && Math.abs(hit.x - columnRight) <= tolerance) return { kind: "column", index: hit.column };
   if (hit.kind === "row-header" && Math.abs(hit.y - rowBottom) <= tolerance) return { kind: "row", index: hit.row };
+  if (hit.kind === "cell" && Math.abs(hit.x - columnRight) <= tolerance) return { kind: "column", index: hit.column };
+  if (hit.kind === "cell" && Math.abs(hit.y - rowBottom) <= tolerance) return { kind: "row", index: hit.row };
   return null;
 }
 
