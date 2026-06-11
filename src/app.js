@@ -53,8 +53,13 @@ import {
   saveDocumentNative
 } from "./core/io.js";
 import {
+  createDefaultLintSettings,
   diagnosticsForDocument,
-  groupDiagnosticsByCell
+  groupDiagnosticsByCell,
+  lintProfileOptions,
+  lintRuleGroupsForProfile,
+  normalizeLintSettings,
+  runLint
 } from "./core/lint-engine.js";
 import {
   cancelVectorHoverSample,
@@ -117,6 +122,10 @@ const savedGridFont = normaliseGridFont(localStorage.getItem("txteditor.gridFont
 const savedColorize = localStorage.getItem("txteditor.colorize") === "on";
 const savedVectorLspHover = localStorage.getItem("txteditor.vectorLspHover") !== "off";
 const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
+const LINT_ENGINE_VECTOR = "vector-lsp";
+const LINT_ENGINE_LEGACY = "legacy";
+const savedLintEngine = localStorage.getItem("txteditor.lint.engine") === LINT_ENGINE_LEGACY ? LINT_ENGINE_LEGACY : LINT_ENGINE_VECTOR;
+const savedLegacyLintSettings = normalizeLintSettings(readJsonStorage("txteditor.legacyLint.settings", createDefaultLintSettings()));
 const MIN_SIDEBAR_WIDTH = 260;
 const savedSidebarWidth = clamp(Number(localStorage.getItem("txteditor.sidebarWidth")) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, 520);
 const savedProblemsHeight = clamp(Number(localStorage.getItem("txteditor.problemsHeight")) || 260, 150, 520);
@@ -129,6 +138,7 @@ const lspHoverPending = new Map();
 const hoverPerfSamples = [];
 const hoverPrewarmSamples = [];
 const hoverQueueSamples = [];
+const lintEngineEvents = [];
 const lspReadiness = {
   byUri: {},
   events: []
@@ -175,10 +185,26 @@ const state = {
   colorizeColumns: savedColorize,
   vectorLspHover: savedVectorLspHover,
   lint: {
+    engine: savedLintEngine,
     enabled: savedLintEnabled,
     diagnostics: [],
     status: "",
-    version: 0
+    version: 0,
+    legacy: {
+      settings: savedLegacyLintSettings,
+      timer: 0,
+      version: 0,
+      running: false,
+      status: "",
+      rulesOpen: false,
+      lastRunAt: 0,
+      workspaceDocs: [],
+      workspaceLoad: {
+        status: "not-started",
+        files: [],
+        error: ""
+      }
+    }
   },
   lsp: {
     started: false
@@ -206,6 +232,8 @@ const els = {
   fileList: document.getElementById("fileList"),
   fileInput: document.getElementById("hiddenFileInput"),
   fontSelect: document.getElementById("fontSelect"),
+  lintControls: document.getElementById("lintControls"),
+  lintRulesPanel: document.getElementById("lintRulesPanel"),
   lintSummary: document.getElementById("lintSummary"),
   searchPanel: document.getElementById("searchPanel"),
   searchInput: document.getElementById("searchInput"),
@@ -226,6 +254,7 @@ window.__txteditorPerf = uiPerfSamples;
 window.__txteditorPerf.hoverSamples = hoverPerfSamples;
 window.__txteditorPerf.hoverPrewarmSamples = hoverPrewarmSamples;
 window.__txteditorPerf.hoverQueueSamples = hoverQueueSamples;
+window.__txteditorPerf.lintEngineEvents = lintEngineEvents;
 window.__txteditorPerf.lspTraffic = lspTraffic;
 window.__txteditorPerf.lspReadiness = lspReadiness;
 
@@ -266,6 +295,7 @@ const commandLabelsBase = [
   ["toggle-colorize", "Colorize Columns"],
   ["toggle-vector-lsp-hover", "Vector-LSP Hover"],
   ["toggle-lint", "Toggle Lint"],
+  ["toggle-lint-rules", "Lint Rules"],
   ["show-explorer", "Show Explorer"],
   ["show-problems", "Show Problems"],
   ["zoom-in", "Zoom In"],
@@ -312,7 +342,7 @@ const grid = new CanvasGrid({
 
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
-grid.setVectorLspHoverEnabled(state.vectorLspHover);
+grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
 populateFontSelect();
 renderChrome();
 wireEvents();
@@ -352,6 +382,45 @@ function recordUiPerf(name, started, details = {}) {
   if (uiPerfSamples.length > 200) uiPerfSamples.shift();
 }
 
+function recordLintEngineEvent(kind, details = {}) {
+  lintEngineEvents.push({
+    timestamp: perfNow(),
+    engine: state.lint.engine,
+    diagnostics: state.lint.diagnostics.length,
+    ...details,
+    kind
+  });
+  if (lintEngineEvents.length > 2000) lintEngineEvents.shift();
+}
+
+function isVectorLintEngine() {
+  return state.lint.engine === LINT_ENGINE_VECTOR;
+}
+
+function isLegacyLintEngine() {
+  return state.lint.engine === LINT_ENGINE_LEGACY;
+}
+
+function lintActive() {
+  return state.problemsVisible && state.lint.enabled;
+}
+
+function vectorLintEnabled() {
+  return state.lint.enabled && isVectorLintEngine();
+}
+
+function vectorLintDisplayActive() {
+  return lintActive() && isVectorLintEngine();
+}
+
+function legacyLintDisplayActive() {
+  return lintActive() && isLegacyLintEngine();
+}
+
+function effectiveVectorLspHoverEnabled() {
+  return isVectorLintEngine() && state.vectorLspHover;
+}
+
 function execute(command, changedRows = null) {
   if (!hasOpenDocument()) return showError("Open a file before editing.");
   if (!command || command.isEmpty) return;
@@ -360,7 +429,8 @@ function execute(command, changedRows = null) {
   command.redo(activeDoc());
   activeUndo().push(command);
   grid.layout();
-  lspUpdateDoc(doc, changedRows).catch(() => {});
+  if (isVectorLintEngine()) lspUpdateDoc(doc, changedRows).catch(() => {});
+  else scheduleLegacyLintForChange(doc);
   recordUiPerf("row-command", started, { changedRows: changedRows?.length ?? 0 });
   renderChrome();
 }
@@ -533,8 +603,12 @@ async function addDocument(doc) {
   }
   renderChrome();
   scrollProblemsToActiveFile();
-  lspOpenDoc(doc).catch(() => {});
-  scheduleHoverPrewarm("document-opened");
+  if (isVectorLintEngine()) {
+    lspOpenDoc(doc).catch(() => {});
+    scheduleHoverPrewarm("document-opened");
+  } else {
+    scheduleLegacyLintForChange(doc);
+  }
 }
 
 async function openFile() {
@@ -579,7 +653,9 @@ async function openFolder() {
     const workspace = await openWorkspaceNative();
     if (!workspace) return;
     state.workspace = workspace;
-    lspStartWorkspace(workspace.path).catch(showError);
+    resetLegacyWorkspaceIndex();
+    if (isVectorLintEngine()) lspStartWorkspace(workspace.path).catch(showError);
+    else scheduleLegacyLintFull("workspace-opened", 0);
     renderChrome();
   } catch (error) {
     showError(error);
@@ -700,7 +776,7 @@ function findNext() {
 }
 
 function runCommand(id) {
-  const alwaysAvailable = new Set(["open-file", "open-folder", "open-settings", "open-app-settings", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-vector-lsp-hover", "toggle-lint", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
+  const alwaysAvailable = new Set(["open-file", "open-folder", "open-settings", "open-app-settings", "toggle-sidebar", "toggle-theme", "toggle-colorize", "toggle-vector-lsp-hover", "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems", "zoom-in", "zoom-out", "zoom-reset", "load-fixture-20k", "load-fixture-200k"]);
   if (!hasOpenDocument() && !alwaysAvailable.has(id)) return showError("Open a file before using that command.");
   const doc = activeDoc();
   const rect = state.selection.rect;
@@ -741,6 +817,7 @@ function runCommand(id) {
   if (id === "toggle-colorize") return toggleColorize();
   if (id === "toggle-vector-lsp-hover") return toggleVectorLspHover();
   if (id === "toggle-lint") return toggleLint();
+  if (id === "toggle-lint-rules") return toggleLintRules();
   if (id === "show-explorer") return toggleExplorerPane();
   if (id === "show-problems") return toggleProblemsPanel();
   if (id === "zoom-in") return zoomBy(0.1);
@@ -982,7 +1059,30 @@ function setVectorLspHover(enabled) {
   state.vectorLspHover = Boolean(enabled);
   localStorage.setItem("txteditor.vectorLspHover", state.vectorLspHover ? "on" : "off");
   invalidateLspHover(!state.vectorLspHover, state.vectorLspHover ? "hover-enabled" : "hover-disabled");
-  grid.setVectorLspHoverEnabled(state.vectorLspHover);
+  grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+  renderChrome();
+}
+
+function setLintEngine(engine) {
+  const next = engine === LINT_ENGINE_LEGACY ? LINT_ENGINE_LEGACY : LINT_ENGINE_VECTOR;
+  if (state.lint.engine === next) return;
+  const previous = state.lint.engine;
+  state.lint.engine = next;
+  localStorage.setItem("txteditor.lint.engine", state.lint.engine);
+  cancelLegacyLintJobs({ clearDiagnostics: false });
+  invalidateLspHover(next !== LINT_ENGINE_VECTOR, `lint-engine-${next}`);
+  setLintDiagnostics([]);
+  updateGridDiagnostics();
+  grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+  recordLintEngineEvent("engine-switch", { previous, next });
+  if (isLegacyLintEngine()) {
+    scheduleLegacyLintFull("engine-switched-legacy", 0);
+  } else if (state.workspace?.path) {
+    if (state.lsp.started) syncOpenDocsToVectorLsp().catch(showError);
+    else lspStartWorkspace(state.workspace.path).catch(showError);
+  } else if (state.lsp.started) {
+    syncOpenDocsToVectorLsp().catch(showError);
+  }
   renderChrome();
 }
 
@@ -1090,10 +1190,39 @@ function changeGridFont(value) {
 function toggleLint() {
   state.lint.enabled = !state.lint.enabled;
   if (!state.lint.enabled) {
+    cancelLegacyLintJobs({ clearDiagnostics: false });
     setLintDiagnostics([]);
     updateGridDiagnostics();
+  } else if (isLegacyLintEngine() && state.problemsVisible) {
+    scheduleLegacyLintFull("lint-enabled", 0);
+  } else if (isVectorLintEngine() && state.workspace?.path && !state.lsp.started) {
+    lspStartWorkspace(state.workspace.path).catch(showError);
   }
   saveLintSettings();
+  renderChrome();
+}
+
+function toggleLintRules() {
+  if (!isLegacyLintEngine()) return;
+  state.lint.legacy.rulesOpen = !state.lint.legacy.rulesOpen;
+  renderChrome();
+}
+
+function setLegacyLintProfile(profile) {
+  state.lint.legacy.settings.profile = lintProfileOptions().includes(profile) ? profile : "RotW";
+  setLintDiagnostics([]);
+  updateGridDiagnostics();
+  saveLegacyLintSettings();
+  if (legacyLintDisplayActive()) scheduleLegacyLintFull("profile-changed", 0);
+  renderChrome();
+}
+
+function setLegacyLintRuleEnabled(ruleId, enabled) {
+  const rule = currentLegacyProfileRules()[ruleId];
+  if (!rule) return;
+  rule.enabled = Boolean(enabled);
+  saveLegacyLintSettings();
+  if (legacyLintDisplayActive()) scheduleLegacyLintFull("settings-changed", 120);
   renderChrome();
 }
 
@@ -1110,6 +1239,11 @@ async function toggleProblemsPanel() {
   const gridHadFocus = document.activeElement === els.host;
   state.problemsVisible = !state.problemsVisible;
   localStorage.setItem("txteditor.problems", state.problemsVisible ? "visible" : "hidden");
+  if (state.problemsVisible) {
+    if (isLegacyLintEngine() && state.lint.enabled) scheduleLegacyLintFull("problems-opened", 0);
+  } else {
+    cancelLegacyLintJobs({ clearDiagnostics: false });
+  }
   renderChrome();
   grid.layout();
   if (!state.problemsVisible && gridHadFocus) els.host.focus();
@@ -1188,6 +1322,143 @@ function wirePaneResizers() {
 
 // ── LSP integration ────────────────────────────────────────────────────────
 
+function scheduleLegacyLintForChange(doc) {
+  if (!legacyLintDisplayActive()) return;
+  scheduleLegacyLintFull(docHasDiagnostics(doc) ? "diagnostic-file-edited" : "file-edited", 360);
+}
+
+function scheduleLegacyLintFull(reason = "change", delay = 420) {
+  if (!legacyLintDisplayActive()) return;
+  clearTimeout(state.lint.legacy.timer);
+  const version = ++state.lint.legacy.version;
+  state.lint.legacy.timer = setTimeout(() => runLegacyLintNow(reason, version), delay);
+}
+
+async function runLegacyLintNow(reason = "lint", version = ++state.lint.legacy.version) {
+  clearTimeout(state.lint.legacy.timer);
+  state.lint.legacy.timer = 0;
+  if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
+  state.lint.legacy.running = true;
+  state.lint.legacy.status = state.workspace?.files?.length ? "Indexing workspace..." : `Linting ${state.lint.legacy.settings.profile}...`;
+  recordLintEngineEvent("legacy-lint-start", { reason, version, profile: state.lint.legacy.settings.profile });
+  renderChrome();
+  try {
+    await ensureLegacyWorkspaceIndexed(version);
+    if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
+    state.lint.legacy.status = `Linting ${state.lint.legacy.settings.profile}...`;
+    renderChrome();
+    await yieldToUi();
+    const diagnostics = runLint(activeLegacyLintDocuments(), state.lint.legacy.settings);
+    if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) {
+      recordLintEngineEvent("legacy-lint-ignored", { reason, version, diagnostics: diagnostics.length });
+      return;
+    }
+    setLintDiagnostics(diagnostics);
+    state.lint.legacy.lastRunAt = Date.now();
+    recordLintEngineEvent("legacy-lint-finish", { reason, version, diagnostics: diagnostics.length, profile: state.lint.legacy.settings.profile });
+    updateGridDiagnostics();
+  } finally {
+    if (version === state.lint.legacy.version) {
+      state.lint.legacy.running = false;
+      state.lint.legacy.status = "";
+      renderChrome();
+    }
+  }
+}
+
+function activeLegacyLintDocuments() {
+  return [...state.docs, ...state.lint.legacy.workspaceDocs];
+}
+
+function currentLegacyProfileRules() {
+  return state.lint.legacy.settings.profiles?.[state.lint.legacy.settings.profile]?.rules ?? {};
+}
+
+function cancelLegacyLintJobs({ clearDiagnostics = false } = {}) {
+  clearTimeout(state.lint.legacy.timer);
+  state.lint.legacy.timer = 0;
+  state.lint.legacy.version += 1;
+  state.lint.legacy.running = false;
+  state.lint.legacy.status = "";
+  if (clearDiagnostics) {
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+  }
+  recordLintEngineEvent("legacy-lint-cancel", { clearDiagnostics });
+}
+
+function resetLegacyWorkspaceIndex() {
+  state.lint.legacy.workspaceDocs = [];
+  state.lint.legacy.workspaceLoad = { status: "not-started", files: [], error: "" };
+}
+
+async function ensureLegacyWorkspaceIndexed(version) {
+  if (!state.workspace?.files?.length) return;
+  if (state.lint.legacy.workspaceLoad.status === "ready" && state.lint.legacy.workspaceDocs.length) return;
+  const explorerFiles = legacyWorkspaceTxtFiles();
+  state.lint.legacy.workspaceLoad = { status: "loading", files: legacyWorkspaceFileStatesForExplorer(), error: "" };
+  state.lint.legacy.workspaceDocs = [];
+  renderChrome();
+  const docs = [];
+  const fileStates = [];
+  for (let index = 0; index < explorerFiles.length; index += 1) {
+    if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
+    const file = explorerFiles[index];
+    try {
+      const [doc] = await openNativePaths([file.path], TableDocument);
+      if (doc) {
+        docs.push(doc);
+        fileStates.push({
+          filePath: file.path,
+          fileName: file.name,
+          listedInExplorer: true,
+          loadedForIndex: true,
+          parsedForLint: true,
+          parseError: ""
+        });
+      }
+    } catch (error) {
+      fileStates.push({
+        filePath: file.path,
+        fileName: file.name,
+        listedInExplorer: true,
+        loadedForIndex: true,
+        parsedForLint: false,
+        parseError: error instanceof Error ? error.message : String(error)
+      });
+    }
+    if (index % 20 === 19) await yieldToUi();
+  }
+  if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
+  state.lint.legacy.workspaceDocs = mergeOpenLegacyWorkspaceDocs(docs);
+  state.lint.legacy.workspaceLoad = { status: "ready", files: fileStates, error: "" };
+  renderChrome();
+}
+
+function legacyWorkspaceTxtFiles() {
+  return (state.workspace?.files ?? []).filter((file) => isTextLikePath(file.path || file.name));
+}
+
+function legacyWorkspaceFileStatesForExplorer() {
+  return legacyWorkspaceTxtFiles().map((file) => ({
+    filePath: file.path,
+    fileName: file.name,
+    listedInExplorer: true,
+    loadedForIndex: false,
+    parsedForLint: false,
+    parseError: ""
+  }));
+}
+
+function mergeOpenLegacyWorkspaceDocs(docs) {
+  const openByKey = new Map(state.docs.map((doc) => [lintDocKey(doc), doc]));
+  return docs.map((doc) => openByKey.get(lintDocKey(doc)) ?? doc);
+}
+
+function yieldToUi() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function docToUri(doc) {
   if (!doc?.path) return null;
   const normalized = doc.path.replace(/\\/g, "/");
@@ -1241,6 +1512,10 @@ function markDocHoverReady(doc, uri, reason) {
 }
 
 async function lspStartWorkspace(workspacePath) {
+  if (!isVectorLintEngine()) {
+    recordLintEngineEvent("vector-start-skipped", { workspacePath });
+    return;
+  }
   invalidateLspHover(true, "workspace-start");
   state.lspLogs = [];
   if (els.logList) els.logList.innerHTML = "";
@@ -1269,7 +1544,22 @@ async function lspStartWorkspace(workspacePath) {
   scheduleHoverPrewarm("workspace-ready");
 }
 
+async function syncOpenDocsToVectorLsp() {
+  if (!isVectorLintEngine() || !state.lsp.started) return;
+  state.lsp.openFileCount = 0;
+  for (const doc of state.docs.filter((d) => docToUri(d))) {
+    doc._lspVersion ??= 1;
+    await lspOpenDoc(doc).catch(() => {});
+  }
+  recordLintEngineEvent("vector-sync-open-docs", { docs: state.docs.length });
+  renderChrome();
+}
+
 async function lspOpenDoc(doc) {
+  if (!isVectorLintEngine()) {
+    recordLintEngineEvent("vector-open-skipped-legacy", { fileName: doc?.name });
+    return;
+  }
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
@@ -1309,6 +1599,10 @@ async function lspOpenDoc(doc) {
 }
 
 async function lspUpdateDoc(doc, changedRows = null) {
+  if (!isVectorLintEngine()) {
+    recordLintEngineEvent("vector-update-skipped-legacy", { fileName: doc?.name, changedRows: changedRows?.length ?? null });
+    return;
+  }
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
@@ -1334,6 +1628,10 @@ async function lspUpdateDoc(doc, changedRows = null) {
 }
 
 async function lspCloseDoc(doc) {
+  if (!isVectorLintEngine()) {
+    recordLintEngineEvent("vector-close-skipped-legacy", { fileName: doc?.name });
+    return;
+  }
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
@@ -1356,7 +1654,10 @@ async function lspCloseDoc(doc) {
 }
 
 async function handleLspDiagnosticsChanged(uri) {
-  if (!state.lint.enabled) return;
+  if (!state.lint.enabled || !isVectorLintEngine()) {
+    recordLintEngineEvent("vector-diagnostics-ignored", { uri });
+    return;
+  }
   recordLspTraffic(uri, "diagnostics_changed");
   recordLspTraffic(uri, "lsp_get_diagnostics");
   const rawDiags = await lspGetDiagnostics(uri).catch(() => []);
@@ -1393,10 +1694,6 @@ async function handleLspDiagnosticsChanged(uri) {
   if (doc === activeDoc()) scheduleHoverPrewarm("diagnostics-ready");
 }
 
-function lintActive() {
-  return state.problemsVisible && state.lint.enabled;
-}
-
 function computeCharOffset(doc, row, col) {
   let offset = 0;
   for (let c = 0; c < col; c++) {
@@ -1422,7 +1719,7 @@ function makeCurrentHoverTarget(doc, row, col) {
 }
 
 function isDocReadyForHover(doc) {
-  return Boolean(state.lsp.started && docToUri(doc) && doc._lspOpened && doc._lspHoverReady);
+  return Boolean(effectiveVectorLspHoverEnabled() && state.lsp.started && docToUri(doc) && doc._lspOpened && doc._lspHoverReady);
 }
 
 function clearHoverCacheForUri(uri) {
@@ -1534,6 +1831,10 @@ function retryQueuedLspHover(_reason) {
 }
 
 async function requestLspHover(row, col, options = {}) {
+  if (!effectiveVectorLspHoverEnabled()) {
+    recordLintEngineEvent("vector-hover-skipped", { row, column: col });
+    return;
+  }
   cancelHoverPrewarm("user-hover");
   const doc = activeDoc();
   const target = options.target ?? makeCurrentHoverTarget(doc, row, col);
@@ -1544,7 +1845,7 @@ async function requestLspHover(row, col, options = {}) {
   const cacheEntry = getHoverCacheEntry(target);
   let sample = options.sample ?? recordHoverSample(startVectorHoverSample(target, {
     now: perfNow,
-    vectorHoverEnabled: state.vectorLspHover,
+    vectorHoverEnabled: effectiveVectorLspHoverEnabled(),
     cached: Boolean(cacheEntry),
     lspReady: ready,
     pointerEnterAt: options.pointerEnterAt,
@@ -1567,7 +1868,7 @@ async function requestLspHover(row, col, options = {}) {
     generation,
     currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
     currentGeneration: lspHoverGeneration,
-    vectorHoverEnabled: state.vectorLspHover,
+    vectorHoverEnabled: effectiveVectorLspHoverEnabled(),
     contextMenuOpen: state.contextMenuOpen
   });
   if (!acceptance.accepted) {
@@ -1640,7 +1941,7 @@ function dispatchUserHoverRequest(request) {
     generation,
     currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
     currentGeneration: lspHoverGeneration,
-    vectorHoverEnabled: state.vectorLspHover,
+    vectorHoverEnabled: effectiveVectorLspHoverEnabled(),
     contextMenuOpen: state.contextMenuOpen
   });
   if (!acceptance.accepted || !targetMatchesCurrentDocument(target)) {
@@ -1739,7 +2040,7 @@ async function fetchLspHoverTarget(target, { generation, sample = null, render =
           generation: waiter.generation,
           currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
           currentGeneration: lspHoverGeneration,
-          vectorHoverEnabled: state.vectorLspHover,
+          vectorHoverEnabled: effectiveVectorLspHoverEnabled(),
           contextMenuOpen: state.contextMenuOpen
         });
         if (!resultAcceptance.accepted) {
@@ -1764,7 +2065,7 @@ async function fetchLspHoverTarget(target, { generation, sample = null, render =
           generation: waiter.generation,
           currentTargetKey: lspHoverCurrentTarget?.matchKey ?? lspHoverCurrentTarget?.key,
           currentGeneration: lspHoverGeneration,
-          vectorHoverEnabled: state.vectorLspHover,
+          vectorHoverEnabled: effectiveVectorLspHoverEnabled(),
           contextMenuOpen: state.contextMenuOpen
         });
         if (resultAcceptance.accepted) cancelVectorHoverSample(waiter.sample, "request-failed", perfNow);
@@ -1785,6 +2086,11 @@ const HOVER_PREWARM_CONCURRENCY = 2;
 const HOVER_PREWARM_MAX_TARGETS = 90;
 
 function scheduleHoverPrewarm(reason = "schedule") {
+  if (!effectiveVectorLspHoverEnabled()) {
+    cancelHoverPrewarm(reason);
+    recordHoverPrewarmEvent({ reason, skipped: true, disabled: true, engine: state.lint.engine, queued: 0 });
+    return;
+  }
   if (!HOVER_PREWARM_ENABLED) {
     cancelHoverPrewarm(reason);
     recordLspTraffic(docToUri(activeDoc()), "hover_prewarm_canceled", { reason, disabled: true, activeFile: activeDoc()?.name ?? "" });
@@ -1811,7 +2117,7 @@ function cancelHoverPrewarm(reason = "cancel") {
 
 function startHoverPrewarm(reason = "visible") {
   const doc = activeDoc();
-  if (!state.vectorLspHover || state.contextMenuOpen || !isDocReadyForHover(doc)) return;
+  if (!effectiveVectorLspHoverEnabled() || state.contextMenuOpen || !isDocReadyForHover(doc)) return;
   const targets = buildVisibleHoverPrewarmTargets(doc).filter((target) => !getHoverCacheEntry(target) && !lspHoverPending.has(target.key));
   if (!targets.length) return;
   hoverPrewarmGeneration += 1;
@@ -1963,7 +2269,7 @@ function scrollProblemsToActiveFile() {
 }
 
 function cellHasReference(row, col) {
-  if (!state.lsp.started) return false;
+  if (!isVectorLintEngine() || !state.lsp.started) return false;
   return Boolean(docToUri(activeDoc()));
 }
 
@@ -1977,7 +2283,7 @@ function charOffsetToColumn(doc, row, charOffset) {
 }
 
 async function goToDefinition() {
-  if (!state.lsp.started) return;
+  if (!isVectorLintEngine() || !state.lsp.started) return;
   const doc = activeDoc();
   const uri = docToUri(doc);
   if (!uri) return;
@@ -2024,6 +2330,13 @@ async function goToDiagnostic(id) {
   const diagnostic = state.lint.diagnostics.find((item) => item.id === id);
   if (!diagnostic) return;
   let index = state.docs.findIndex((doc) => lintDocKey(doc) === diagnostic.fileKey);
+  if (index < 0 && isLegacyLintEngine()) {
+    const workspaceDoc = state.lint.legacy.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);
+    if (workspaceDoc) {
+      await addDocument(workspaceDoc);
+      index = state.active;
+    }
+  }
   if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
     const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
     if (doc) {
@@ -2065,10 +2378,16 @@ function showAppSettings() {
           <input type="checkbox" id="settingsColorizeColumns"${state.colorizeColumns ? " checked" : ""} />
           Colorize columns
         </label>
+        <div class="settings-label">Lint Engine</div>
+        <div class="settings-segmented" role="group" aria-label="Lint Engine">
+          <button class="${isVectorLintEngine() ? "active" : ""}" data-settings-lint-engine="vector-lsp">Vector-LSP</button>
+          <button class="${isLegacyLintEngine() ? "active" : ""}" data-settings-lint-engine="legacy">Legacy Lint</button>
+        </div>
         <label class="settings-checkbox-label">
-          <input type="checkbox" id="settingsVectorLspHover"${state.vectorLspHover ? " checked" : ""} />
+          <input type="checkbox" id="settingsVectorLspHover"${state.vectorLspHover ? " checked" : ""}${isLegacyLintEngine() ? " disabled" : ""} />
           Vector-LSP Hover
         </label>
+        <div class="settings-hint${isLegacyLintEngine() ? "" : " hidden"}" id="settingsVectorLspHoverHint">Vector-LSP Hover is only available when the Vector-LSP lint engine is selected.</div>
         <label class="settings-label" for="settingsGridFont">Font</label>
         <select class="modal-input settings-font-select" id="settingsGridFont">${fontOptions}</select>
         <div class="settings-label">Theme</div>
@@ -2085,17 +2404,25 @@ function showAppSettings() {
 
   const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
   const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
+  const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
   const fontInput = backdrop.querySelector("#settingsGridFont");
+  const lintEngineButtons = [...backdrop.querySelectorAll("[data-settings-lint-engine]")];
   const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
   const refresh = () => {
     colorizeInput.checked = state.colorizeColumns;
     hoverInput.checked = state.vectorLspHover;
+    hoverInput.disabled = isLegacyLintEngine();
+    hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
     fontInput.value = state.gridFont;
+    for (const button of lintEngineButtons) button.classList.toggle("active", button.dataset.settingsLintEngine === state.lint.engine);
     for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
   };
   colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
   hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
   fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
+  for (const button of lintEngineButtons) {
+    button.addEventListener("click", () => { setLintEngine(button.dataset.settingsLintEngine); refresh(); });
+  }
   for (const button of themeButtons) {
     button.addEventListener("click", () => { setTheme(button.dataset.settingsTheme); refresh(); });
   }
@@ -2110,6 +2437,11 @@ function showAppSettings() {
 }
 
 async function showSettings() {
+  if (isLegacyLintEngine()) {
+    state.lint.legacy.rulesOpen = true;
+    renderChrome();
+    return;
+  }
   const config = await getConfig().catch(() => ({}));
   const mode = config.lintMode ?? "basic";
   const schemaVersion = config.schemaVersion ?? "3.2";
@@ -2234,6 +2566,10 @@ async function showSettings() {
 
 function saveLintSettings() {
   localStorage.setItem("txteditor.lint.settings", JSON.stringify({ enabled: state.lint.enabled }));
+}
+
+function saveLegacyLintSettings() {
+  localStorage.setItem("txteditor.legacyLint.settings", JSON.stringify(state.lint.legacy.settings));
 }
 
 function normaliseGridFont(value) {
@@ -2486,6 +2822,63 @@ function mathItems() {
   ];
 }
 
+function renderLintControls() {
+  if (!els.lintControls) return;
+  const lintButton = `<button class="toggle-button${state.lint.enabled ? " active" : ""}" data-command="toggle-lint">${state.lint.enabled ? "Lint: On" : "Lint: Off"}</button>`;
+  if (isLegacyLintEngine()) {
+    const options = lintProfileOptions().map((profile) =>
+      `<option value="${escapeHtml(profile)}"${state.lint.legacy.settings.profile === profile ? " selected" : ""}>${escapeHtml(profile)}</option>`
+    ).join("");
+    els.lintControls.innerHTML = `
+      ${lintButton}
+      <select id="lintProfileSelect" class="profile-select" title="D2R lint profile">${options}</select>
+      <button data-command="toggle-lint-rules" class="${state.lint.legacy.rulesOpen ? "active" : ""}">Rules</button>
+    `;
+    const select = els.lintControls.querySelector("#lintProfileSelect");
+    select?.addEventListener("change", () => setLegacyLintProfile(select.value));
+    renderLegacyLintRulesPanel();
+    return;
+  }
+  els.lintControls.innerHTML = `
+    ${lintButton}
+    <button data-command="open-settings" title="Lint options">Lint Options</button>
+  `;
+  if (els.lintRulesPanel) {
+    els.lintRulesPanel.classList.add("hidden");
+    els.lintRulesPanel.innerHTML = "";
+  }
+}
+
+function renderLegacyLintRulesPanel() {
+  if (!els.lintRulesPanel) return;
+  if (!isLegacyLintEngine() || !state.lint.legacy.rulesOpen) {
+    els.lintRulesPanel.classList.add("hidden");
+    els.lintRulesPanel.innerHTML = "";
+    return;
+  }
+  els.lintRulesPanel.classList.remove("hidden");
+  els.lintRulesPanel.innerHTML = lintRuleGroupsForProfile(state.lint.legacy.settings.profile).map((group) => `
+    <section class="lint-rule-group">
+      <h3>${escapeHtml(group.group)}</h3>
+      ${group.rules.map((entry) => {
+        const setting = currentLegacyProfileRules()[entry.id];
+        const checked = setting?.enabled ? "checked" : "";
+        const disabled = entry.implemented ? "" : "disabled";
+        const note = entry.note ? `<span class="lint-rule-note">${escapeHtml(entry.note)}</span>` : `<span class="lint-rule-note">${escapeHtml(entry.id)}</span>`;
+        return `
+          <div class="lint-rule">
+            <input id="lint-${escapeHtml(entry.id)}" type="checkbox" data-lint-rule="${escapeHtml(entry.id)}" ${checked} ${disabled} />
+            <label for="lint-${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</label>
+            ${note}
+          </div>`;
+      }).join("")}
+    </section>
+  `).join("");
+  for (const input of els.lintRulesPanel.querySelectorAll("[data-lint-rule]")) {
+    input.addEventListener("change", () => setLegacyLintRuleEnabled(input.dataset.lintRule, input.checked));
+  }
+}
+
 function renderChrome() {
   const started = perfNow();
   els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
@@ -2523,6 +2916,7 @@ function renderChrome() {
   for (const button of document.querySelectorAll("[data-command='toggle-colorize']")) {
     button.classList.toggle("active", state.colorizeColumns);
   }
+  renderLintControls();
   for (const button of document.querySelectorAll("[data-command='toggle-lint']")) {
     button.classList.toggle("active", state.lint.enabled);
     button.textContent = state.lint.enabled ? "Lint: On" : "Lint: Off";
@@ -2609,9 +3003,13 @@ function renderProblemsPanelIfNeeded() {
 
 function problemsPanelRenderKey() {
   return [
+    state.lint.engine,
     state.lint.enabled ? "on" : "off",
     state.lsp.started ? "started" : "stopped",
     state.lint.status,
+    state.lint.legacy.status,
+    state.lint.legacy.rulesOpen ? "rules-open" : "rules-closed",
+    state.lint.legacy.settings.profile,
     state.lint.version,
     [...collapsedProblemFiles].sort().join("\u001f")
   ].join("\u001e");
@@ -2619,7 +3017,7 @@ function problemsPanelRenderKey() {
 
 function renderProblemsPanel() {
   if (!state.lint.enabled) return `<div class="empty-problems">Lint is off.</div>`;
-  if (!state.lsp.started) return `<div class="empty-problems">Open a folder to enable linting.</div>`;
+  if (isVectorLintEngine() && !state.lsp.started) return `<div class="empty-problems">Open a folder to enable linting.</div>`;
   if (!state.lint.diagnostics.length) return `<div class="empty-problems">No problems.</div>`;
   return groupDiagnosticsByFile(state.lint.diagnostics).map(([fileName, diagnostics]) => `
     <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsedProblemFiles.has(fileName) ? "" : " open"}>
@@ -2629,6 +3027,7 @@ function renderProblemsPanel() {
           <span class="problem-location">R${diagnostic.rowIndex + 1}:C${diagnostic.columnIndex + 1}</span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
+          ${diagnostic.profile ? `<span class="problem-rule">${escapeHtml(diagnostic.profile)}</span>` : ""}
         </button>
       `).join("")}
     </details>
@@ -2637,6 +3036,13 @@ function renderProblemsPanel() {
 
 function lintSummaryText() {
   if (!state.lint.enabled) return "Lint off";
+  if (isLegacyLintEngine()) {
+    if (state.lint.legacy.status) return state.lint.legacy.status;
+    if (state.lint.legacy.workspaceLoad.status === "failed") return `Workspace index failed - ${state.lint.legacy.settings.profile}`;
+    const counts = diagnosticCounts(state.lint.diagnostics);
+    if (!state.lint.diagnostics.length) return `No problems - ${state.lint.legacy.settings.profile}`;
+    return `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info - ${state.lint.legacy.settings.profile}`;
+  }
   if (!state.lsp.started) return "Open a folder to enable linting";
   if (state.lint.status) return state.lint.status;
   const counts = diagnosticCounts(state.lint.diagnostics);
@@ -2695,7 +3101,8 @@ async function closeTab(index) {
       }
     }
   }
-  lspCloseDoc(doc).catch(() => {});
+  if (isVectorLintEngine()) lspCloseDoc(doc).catch(() => {});
+  else cancelLegacyLintJobs({ clearDiagnostics: false });
   state.docs.splice(index, 1);
   if (!state.docs.length) {
     state.active = -1;
@@ -2704,6 +3111,7 @@ async function closeTab(index) {
     state.active = clamp(index <= state.active ? state.active - 1 : state.active, 0, state.docs.length - 1);
     grid.setDocument(activeDoc());
   }
+  if (isLegacyLintEngine()) scheduleLegacyLintFull("tab-closed", 0);
   renderChrome();
 }
 

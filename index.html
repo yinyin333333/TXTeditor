@@ -53,11 +53,9 @@
             <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
             <button class="bottom-tab" data-bottom-tab="log">Log</button>
           </div>
-          <div class="lint-controls">
-            <button class="toggle-button" data-command="toggle-lint">Lint</button>
-            <button data-command="open-settings" title="Lint options">Lint Options</button>
-          </div>
+          <div id="lintControls" class="lint-controls"></div>
         </header>
+        <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules"></div>
         <div id="problemsList" class="problems-list"></div>
         <div id="logList" class="log-list hidden"></div>
       </section>

@@ -39,6 +39,14 @@ import {
   runLint
 } from "../src/core/lint-engine.js";
 import { formatD2rlintCompatibleExport, formatTxteditorLintExport } from "../src/core/lint-export.js";
+import {
+  cancelVectorHoverSample,
+  finishVectorHoverSample,
+  makeVectorHoverTarget,
+  markVectorHoverRequested,
+  shouldAcceptVectorHoverResult,
+  startVectorHoverSample
+} from "../src/core/vector-hover.js";
 
 function lintDocs(docs, profile = "RotW") {
   const settings = createDefaultLintSettings();
@@ -471,6 +479,7 @@ test("renderer skips stale text for the active editing cell only", () => {
 
 test("first-column hover is gated to real first-column cells with text", () => {
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, "full-code-value"), true);
+  assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 0, column: 0 }, "full-code-value"), false);
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 1 }, "full-code-value"), false);
   assert.equal(shouldShowFirstColumnHover({ kind: "row-header", row: 2, column: 0 }, "full-code-value"), false);
   assert.equal(shouldShowFirstColumnHover({ kind: "column-header", row: 0, column: 0 }, "full-code-value"), false);
@@ -493,11 +502,245 @@ test("Vector-LSP tooltip removes duplicate value titles only", () => {
   );
 });
 
-test("Vector-LSP hover delay is the requested fast path", () => {
+test("delayed Vector-LSP header and cell hovers are accepted while the target is stable", () => {
+  const header = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 0, column: 0, columnName: "description" });
+  const cell = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 1, column: 18, columnName: "output" });
+  assert.equal(header.targetKind, "header");
+  assert.equal(cell.targetKind, "cell");
+  assert.deepEqual(
+    shouldAcceptVectorHoverResult({
+      target: header,
+      generation: 2,
+      currentTargetKey: header.key,
+      currentGeneration: 2,
+      vectorHoverEnabled: true,
+      contextMenuOpen: false
+    }),
+    { accepted: true, reason: "" }
+  );
+  assert.deepEqual(
+    shouldAcceptVectorHoverResult({
+      target: cell,
+      generation: 3,
+      currentTargetKey: cell.key,
+      currentGeneration: 3,
+      vectorHoverEnabled: true,
+      contextMenuOpen: false
+    }),
+    { accepted: true, reason: "" }
+  );
+});
+
+test("late Vector-LSP result can be accepted by stable target key after version churn", () => {
+  const beforeReady = makeVectorHoverTarget({
+    uri: "file:///cubemain.txt",
+    fileName: "cubemain.txt",
+    row: 1,
+    column: 6,
+    columnName: "op",
+    cellValue: "18",
+    documentVersion: 1
+  });
+  const afterReady = makeVectorHoverTarget({
+    uri: "file:///cubemain.txt",
+    fileName: "cubemain.txt",
+    row: 1,
+    column: 6,
+    columnName: "op",
+    cellValue: "18",
+    documentVersion: 2
+  });
+  assert.notEqual(beforeReady.key, afterReady.key);
+  assert.equal(beforeReady.matchKey, afterReady.matchKey);
+  assert.deepEqual(
+    shouldAcceptVectorHoverResult({
+      target: beforeReady,
+      generation: 1,
+      currentTargetKey: afterReady.matchKey,
+      currentGeneration: 1,
+      vectorHoverEnabled: true,
+      contextMenuOpen: false
+    }),
+    { accepted: true, reason: "" }
+  );
+});
+
+test("Vector-LSP hover target identity includes version value and diagnostics state", () => {
+  const base = makeVectorHoverTarget({
+    uri: "file:///cubemain.txt",
+    fileName: "cubemain.txt",
+    row: 8,
+    column: 4,
+    columnName: "op",
+    cellValue: "useitem",
+    documentVersion: 3
+  });
+  const edited = makeVectorHoverTarget({
+    uri: "file:///cubemain.txt",
+    fileName: "cubemain.txt",
+    row: 8,
+    column: 4,
+    columnName: "op",
+    cellValue: "usetype",
+    documentVersion: 4
+  });
+  const diagnostic = makeVectorHoverTarget({
+    uri: "file:///cubemain.txt",
+    fileName: "cubemain.txt",
+    row: 8,
+    column: 4,
+    columnName: "op",
+    cellValue: "useitem",
+    documentVersion: 3,
+    hasDiagnostics: true
+  });
+  assert.equal(base.targetKind, "cell");
+  assert.equal(diagnostic.targetKind, "diagnostic-cell");
+  assert.notEqual(base.key, edited.key);
+  assert.notEqual(base.key, diagnostic.key);
+});
+
+test("pending Vector-LSP hover results are discarded for leave, target change, disabled hover, and context menu", () => {
+  const first = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 0, column: 0, columnName: "description" });
+  const second = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 0, column: 1, columnName: "enabled" });
+  assert.equal(
+    shouldAcceptVectorHoverResult({
+      target: first,
+      generation: 1,
+      currentTargetKey: first.key,
+      currentGeneration: 2,
+      vectorHoverEnabled: true,
+      contextMenuOpen: false
+    }).reason,
+    "generation-changed"
+  );
+  assert.equal(
+    shouldAcceptVectorHoverResult({
+      target: first,
+      generation: 1,
+      currentTargetKey: second.key,
+      currentGeneration: 1,
+      vectorHoverEnabled: true,
+      contextMenuOpen: false
+    }).reason,
+    "target-changed"
+  );
+  assert.equal(
+    shouldAcceptVectorHoverResult({
+      target: first,
+      generation: 1,
+      currentTargetKey: first.key,
+      currentGeneration: 1,
+      vectorHoverEnabled: false,
+      contextMenuOpen: false
+    }).reason,
+    "hover-disabled"
+  );
+  assert.equal(
+    shouldAcceptVectorHoverResult({
+      target: first,
+      generation: 1,
+      currentTargetKey: first.key,
+      currentGeneration: 1,
+      vectorHoverEnabled: true,
+      contextMenuOpen: true
+    }).reason,
+    "context-menu-open"
+  );
+});
+
+test("Vector-LSP hover samples record queued, requested, rendered, and canceled timings", () => {
+  let tick = 100;
+  const now = () => tick;
+  const target = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 4, column: 0, columnName: "description" });
+  const sample = startVectorHoverSample(target, { now, vectorHoverEnabled: true, cached: false, lspReady: false });
+  assert.equal(sample.targetKind, "leftmost");
+  assert.equal(sample.requestedAt, null);
+  assert.equal(sample.lspReady, false);
+  tick = 130;
+  markVectorHoverRequested(sample, now);
+  assert.equal(sample.requestedAt, 130);
+  assert.equal(sample.lspReady, true);
+  tick = 165;
+  sample.responseAt = now();
+  tick = 170;
+  finishVectorHoverSample(sample, { now, contentReturned: true, rendered: true });
+  assert.equal(sample.contentReturned, true);
+  assert.equal(sample.noContent, false);
+  assert.equal(sample.accepted, true);
+  assert.equal(sample.renderedAt, 170);
+  assert.equal(sample.tooltipRenderedAt, 170);
+  assert.equal(sample.requestSentAt, 130);
+  assert.equal(sample.lspResponseAt, 165);
+  assert.equal(sample.totalMs, 70);
+  assert.equal(sample.lspMs, 35);
+  assert.equal(sample.renderMs, 5);
+
+  const canceled = startVectorHoverSample(target, { now, vectorHoverEnabled: true, cached: false, lspReady: true });
+  tick = 180;
+  cancelVectorHoverSample(canceled, "grid-hover-cleared", now);
+  assert.equal(canceled.canceled, true);
+  assert.equal(canceled.cancelReason, "grid-hover-cleared");
+  assert.equal(canceled.discarded, true);
+  assert.equal(canceled.discardReason, "grid-hover-cleared");
+});
+
+test("accepted Vector-LSP no-content samples are recorded without rendering", () => {
+  let tick = 300;
+  const now = () => tick;
+  const target = makeVectorHoverTarget({ uri: "file:///armor.txt", fileName: "armor.txt", row: 1, column: 4, columnName: "code", cellValue: "cap" });
+  const sample = startVectorHoverSample(target, { now, vectorHoverEnabled: true, cached: false, lspReady: true });
+  tick = 310;
+  markVectorHoverRequested(sample, now);
+  tick = 340;
+  finishVectorHoverSample(sample, { now, contentReturned: false, rendered: false, pointerStillOnTarget: true });
+  assert.equal(sample.accepted, true);
+  assert.equal(sample.noContent, true);
+  assert.equal(sample.contentReturned, false);
+  assert.equal(sample.tooltipRenderedAt, null);
+  assert.equal(sample.totalMs, 40);
+});
+
+test("canceled Vector-LSP hover samples cannot be finished by late responses", () => {
+  let tick = 200;
+  const now = () => tick;
+  const target = makeVectorHoverTarget({ uri: "file:///cubemain.txt", fileName: "cubemain.txt", row: 1, column: 0, columnName: "description", cellValue: "test" });
+  const sample = startVectorHoverSample(target, { now, vectorHoverEnabled: true, cached: false, lspReady: true });
+  tick = 220;
+  cancelVectorHoverSample(sample, "target-changed", now);
+  tick = 260;
+  finishVectorHoverSample(sample, { now, contentReturned: true, rendered: true, pointerStillOnTarget: true });
+  assert.equal(sample.canceled, true);
+  assert.equal(sample.accepted, false);
+  assert.equal(sample.cancelReason, "target-changed");
+  assert.equal(sample.renderedAt, null);
+  assert.equal(sample.totalMs, 20);
+});
+
+test("Vector-LSP hover dispatch has no artificial delay", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
-  assert.equal(VECTOR_LSP_HOVER_DELAY_MS, 10);
-  assert.match(source, /export const VECTOR_LSP_HOVER_DELAY_MS = 10;/);
-  assert.match(source, /}, VECTOR_LSP_HOVER_DELAY_MS\);/);
+  assert.equal(VECTOR_LSP_HOVER_DELAY_MS, 0);
+  assert.match(source, /export const VECTOR_LSP_HOVER_DELAY_MS = 0;/);
+  const scheduler = source.match(/_scheduleHoverRequest\(row, col\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+  assert.doesNotMatch(scheduler, /setTimeout\(/);
+  assert.match(scheduler, /this\.onHoverRequest\?\.\(this\._pendingHoverRow, this\._pendingHoverCol/);
+});
+
+test("hover delay is not restarted by repeated movement inside the same target", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /const samePendingTarget = this\._pendingHoverRow === row && this\._pendingHoverCol === col;/);
+  assert.match(source, /const sameRequestedTarget = this\._lastHoverRequestRow === row && this\._lastHoverRequestCol === col;/);
+  assert.match(source, /if \(sameRequestedTarget\) return;/);
+});
+
+test("prewarm is disabled so background hover cannot block user hover", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /const HOVER_PREWARM_ENABLED = false;/);
+  assert.match(source, /function scheduleHoverPrewarm\(reason = "schedule"\) \{\s*if \(!effectiveVectorLspHoverEnabled\(\)\) \{/);
+  assert.match(source, /if \(!HOVER_PREWARM_ENABLED\) \{/);
+  assert.match(source, /cancelHoverPrewarm\(reason\);\s*recordLspTraffic\(docToUri\(activeDoc\(\)\), "hover_prewarm_canceled", \{ reason, disabled: true, activeFile: activeDoc\(\)\?\.name \?\? "" \}\);\s*recordHoverPrewarmEvent\(\{ reason, skipped: true, disabled: true, queued: 0 \}\);\s*return;/);
+  assert.match(source, /async function requestLspHover\(row, col, options = \{\}\) \{\s*if \(!effectiveVectorLspHoverEnabled\(\)\)/);
+  assert.match(source, /cancelHoverPrewarm\("user-hover"\);/);
 });
 
 test("frozen pane dividers are bounded to visible table content", () => {
@@ -1038,15 +1281,15 @@ test("settings UI lives in Settings while lint controls stay in the bottom Probl
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const toolbar = html.match(/<section class="toolbar">([\s\S]*?)<\/section>/)?.[1] ?? "";
   const problems = html.match(/<section id="problemsPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
-  for (const command of ["toggle-lint", "open-settings"]) {
-    assert.equal(toolbar.includes(command), false);
-    assert.equal(problems.includes(command), true);
-  }
+  assert.equal(toolbar.includes("toggle-lint"), false);
+  assert.equal(toolbar.includes("open-settings"), false);
+  assert.equal(problems.includes("lintControls"), true);
+  assert.equal(problems.includes("lintRulesPanel"), true);
   assert.equal(toolbar.includes("open-app-settings"), true);
   assert.equal(toolbar.includes("toggle-colorize"), false);
   assert.equal(toolbar.includes("fontSelect"), false);
   assert.equal(toolbar.includes("toggle-theme"), false);
-  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT", "toggle-lint-rules", "lintProfileSelect"]) {
+  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
     assert.equal(html.includes(removed), false);
   }
   assert.equal(problems.includes("problemsResizer"), true);
@@ -1089,7 +1332,7 @@ test("app source has real Explorer and Problems toggles with persisted resize st
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled;/);
-  assert.match(source, /if \(!state\.lint\.enabled\) return;/);
+  assert.match(source, /if \(!state\.lint\.enabled \|\| !isVectorLintEngine\(\)\) \{/);
   assert.match(source, /const diagnosticsByCell = lintActive\(\)\s*\?\s*groupDiagnosticsByCell/);
   assert.match(source, /const diags = lintActive\(\) \? diagnosticsForDocument/);
 });
@@ -1121,11 +1364,13 @@ test("context menu suspends default and Vector-LSP hover until it closes", () =>
   assert.match(app, /contextMenuOpen: false/);
   assert.match(app, /function showContextMenu\(\{ x, y, hit \}\)[\s\S]*setContextMenuOpen\(true\)/);
   assert.match(app, /function hideContextMenu\(\)[\s\S]*setContextMenuOpen\(false\)/);
-  assert.match(app, /function setContextMenuOpen\(open\)\s*\{\s*state\.contextMenuOpen = Boolean\(open\);\s*if \(state\.contextMenuOpen\) invalidateLspHover\(false\);\s*grid\.setHoverSuspended\(state\.contextMenuOpen\);/);
-  assert.match(app, /async function requestLspHover\(row, col\)\s*\{\s*if \(state\.contextMenuOpen\) return;/);
-  assert.match(app, /onHoverInvalidated: \(\) => invalidateLspHover\(false\)/);
+  assert.match(app, /function setContextMenuOpen\(open\)\s*\{\s*state\.contextMenuOpen = Boolean\(open\);\s*if \(state\.contextMenuOpen\) clearVisibleLspHover\("context-menu-open"\);\s*grid\.setHoverSuspended\(state\.contextMenuOpen\);/);
+  assert.match(app, /async function requestLspHover\(row, col, options = \{\}\)/);
+  assert.match(app, /onHoverInvalidated: \(\) => clearVisibleLspHover\("grid-hover-cleared"\)/);
+  assert.match(app, /function clearVisibleLspHover\(reason = "hover-cleared"\)[\s\S]*recordHoverQueueEvent\(\{ reason, visibleClear: true, inFlight: lspHoverPending\.size \}\);/);
+  assert.doesNotMatch(app.match(/function clearVisibleLspHover[\s\S]*?function recordHoverSample/)?.[0] ?? "", /lspHoverPending\.clear\(\)/);
   assert.match(app, /let lspHoverGeneration = 0;/);
-  assert.match(app, /if \(generation !== lspHoverGeneration \|\| lspHoverCurrentKey !== key \|\| !state\.vectorLspHover \|\| state\.contextMenuOpen\) return;/);
+  assert.match(app, /shouldAcceptVectorHoverResult\(\{[\s\S]*currentTargetKey: lspHoverCurrentTarget\?\.matchKey \?\? lspHoverCurrentTarget\?\.key,[\s\S]*contextMenuOpen: state\.contextMenuOpen/);
   assert.match(grid, /setHoverSuspended\(suspended\)/);
   assert.match(grid, /clearHoverState\(\)/);
   assert.match(grid, /return !this\.hoverSuspended && !this\.resizing && !this\.dragging;/);
@@ -1170,13 +1415,58 @@ test("Vector-LSP hover can be disabled without clearing baseline hover behavior"
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(app, /const savedVectorLspHover = localStorage\.getItem\("txteditor\.vectorLspHover"\) !== "off";/);
-  assert.match(app, /async function requestLspHover\(row, col\)\s*\{\s*if \(state\.contextMenuOpen\) return;\s*if \(!state\.vectorLspHover\) return;/);
+  assert.match(app, /function effectiveVectorLspHoverEnabled\(\)\s*\{\s*return isVectorLintEngine\(\) && state\.vectorLspHover;/);
+  assert.match(app, /vectorHoverEnabled: effectiveVectorLspHoverEnabled\(\)/);
+  assert.match(app, /cancelVectorHoverSample\(sample, acceptance\.reason, perfNow\)/);
   assert.match(grid, /setVectorLspHoverEnabled\(enabled\)/);
   assert.match(grid, /if \(!this\.vectorLspHoverEnabled\) return;/);
   assert.match(grid, /if \(!this\.vectorLspHoverEnabled\) \{\s*this\._hoveredCell = null;\s*this\.clearLspHovers\(\);\s*this\.showLegacyHoverPreview\(hit, event, value\);\s*return;/);
   assert.match(grid, /showLegacyHoverPreview\(hit, event, value\)/);
   assert.match(grid, /if \(shouldShowFirstColumnHover\(hit, value\)\) \{\s*this\.updateFirstColumnHoverPreview\(hit, event\);/);
   assert.match(grid, /export function shouldShowFirstColumnHover/);
+});
+
+test("lint engine selector defaults to Vector-LSP and persists separately from lint settings", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /const LINT_ENGINE_VECTOR = "vector-lsp";/);
+  assert.match(source, /const LINT_ENGINE_LEGACY = "legacy";/);
+  assert.match(source, /const savedLintEngine = localStorage\.getItem\("txteditor\.lint\.engine"\) === LINT_ENGINE_LEGACY \? LINT_ENGINE_LEGACY : LINT_ENGINE_VECTOR;/);
+  assert.match(source, /lint:\s*\{[\s\S]*engine: savedLintEngine/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.lint\.engine", state\.lint\.engine\)/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.legacyLint\.settings", JSON\.stringify\(state\.lint\.legacy\.settings\)\)/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.lint\.settings", JSON\.stringify\(\{ enabled: state\.lint\.enabled \}\)\)/);
+});
+
+test("Settings and Problems controls switch between Vector-LSP and Legacy Lint", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";
+  assert.match(html, /id="lintControls" class="lint-controls"/);
+  assert.match(html, /id="lintRulesPanel" class="lint-rules-panel hidden"/);
+  assert.match(appSettings, /Lint Engine/);
+  assert.match(appSettings, /data-settings-lint-engine="vector-lsp">Vector-LSP/);
+  assert.match(appSettings, /data-settings-lint-engine="legacy">Legacy Lint/);
+  assert.match(appSettings, /settingsVectorLspHover"\$\{state\.vectorLspHover \? " checked" : ""\}\$\{isLegacyLintEngine\(\) \? " disabled" : ""\}/);
+  assert.match(source, /function renderLintControls\(\)/);
+  assert.match(source, /if \(isLegacyLintEngine\(\)\) \{[\s\S]*lintProfileSelect[\s\S]*toggle-lint-rules[\s\S]*return;/);
+  assert.match(source, /data-command="open-settings" title="Lint options">Lint Options/);
+});
+
+test("Legacy Lint is isolated from Vector-LSP traffic and writes the shared diagnostic pipeline", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /function scheduleLegacyLintForChange\(doc\)/);
+  assert.match(source, /const diagnostics = runLint\(activeLegacyLintDocuments\(\), state\.lint\.legacy\.settings\);/);
+  assert.match(source, /setLintDiagnostics\(diagnostics\);/);
+  assert.match(source, /if \(!state\.lint\.enabled \|\| !isVectorLintEngine\(\)\) \{[\s\S]*vector-diagnostics-ignored/);
+  assert.match(source, /async function requestLspHover\(row, col, options = \{\}\) \{\s*if \(!effectiveVectorLspHoverEnabled\(\)\)/);
+  assert.match(source, /if \(isVectorLintEngine\(\)\) lspUpdateDoc\(doc, changedRows\)\.catch/);
+  assert.match(source, /else scheduleLegacyLintForChange\(doc\);/);
+  assert.match(source, /if \(isVectorLintEngine\(\)\) \{\s*lspOpenDoc\(doc\)\.catch/);
+  assert.match(source, /else scheduleLegacyLintForChange\(doc\);/);
+  assert.match(source, /if \(!isVectorLintEngine\(\) \|\| !state\.lsp\.started\) return false;/);
+  assert.match(source, /if \(!isVectorLintEngine\(\) \|\| !state\.lsp\.started\) return;/);
+  assert.match(source, /state\.lint\.legacy\.workspaceDocs = mergeOpenLegacyWorkspaceDocs\(docs\);/);
+  assert.match(source, /state\.lint\.legacy\.workspaceDocs\.find/);
 });
 
 test("resize interactions clear hover state and block stale hover results", () => {
@@ -1198,11 +1488,59 @@ test("header and Vector-LSP hover clear immediately on pointer leave", () => {
 
 test("Vector-LSP tooltip owns leftmost hover and legacy preview is fallback only", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
-  assert.match(source, /if \(hoverText\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
+  assert.match(source, /const diags = this\.diagnosticsByCell\.get\(key\) \?\? \[\];\s*const hoverText = this\._lspHoverByCell\.get\(key\) \?\? null;\s*const hasLocalValue = String\(value \?\? ""\)\.trim\(\)\.length > 0;\s*if \(hoverText \|\| diags\.length \|\| hasLocalValue\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
   assert.match(source, /else \{\s*this\.hideVectorTooltip\(\);\s*this\.showLegacyHoverPreview\(hit, event, value\);/);
-  assert.match(source, /if \(text\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
+  assert.match(source, /const diags = this\.diagnosticsByCell\.get\(key\) \?\? \[\];\s*const hasLocalValue = String\(this\.doc\.getCell\(row, col\) \?\? ""\)\.trim\(\)\.length > 0;\s*if \(text \|\| diags\.length \|\| hasLocalValue\) \{\s*this\.hideFirstColumnHoverPreview\(\);\s*this\._renderTooltip/);
   assert.match(source, /else \{\s*this\.hideVectorTooltip\(\);\s*this\.showLegacyHoverPreview/);
   assert.match(source, /if \(this\._hoveredCell\?\.row !== row \|\| this\._hoveredCell\?\.col !== col\) return;/);
+});
+
+test("Vector-LSP hover app cache stores ready no-content results with version and TTL", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /const HOVER_NO_CONTENT_TTL_MS = 60_000;/);
+  assert.match(source, /function makeHoverSemanticCacheKey\(target\)/);
+  assert.match(source, /function makeHoverCacheEntry\(target, text\)[\s\S]*hasContent,[\s\S]*noContent: !hasContent,[\s\S]*documentVersion: target\.documentVersion,[\s\S]*semanticKey: makeHoverSemanticCacheKey\(target\),[\s\S]*cachedAt: perfNow\(\)/);
+  assert.match(source, /function isHoverCacheEntryUsable\(entry, target\)[\s\S]*entry\.uri !== target\.uri \|\| entry\.documentVersion !== target\.documentVersion/);
+  assert.match(source, /entry\.noContent && perfNow\(\) - entry\.cachedAt > HOVER_NO_CONTENT_TTL_MS/);
+  assert.match(source, /const cacheEntry = setHoverCacheEntry\(target, text\);/);
+  assert.match(source, /cacheEntry\.noContent \? "no-content-stored" : "stored"/);
+  assert.match(source, /cacheEntry\.noContent \? `\$\{cacheEntry\.cacheSource\}-no-content-hit` : `\$\{cacheEntry\.cacheSource\}-hit`/);
+  assert.match(source, /lspHoverSemanticCache\.set\(entry\.semanticKey, entry\)/);
+});
+
+test("Vector-LSP hover queue keeps one active request and one latest replacement", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /let lspHoverActiveUserRequest = null;/);
+  assert.match(source, /let lspHoverLatestQueuedRequest = null;/);
+  assert.match(source, /function enqueueUserHoverTarget\(target, generation, sample\)/);
+  assert.match(source, /if \(!lspHoverActiveUserRequest\) \{\s*dispatchUserHoverRequest\(request\);\s*return;\s*\}/);
+  assert.match(source, /cancelVectorHoverSample\(lspHoverLatestQueuedRequest\.sample, "replaced-by-latest-hover", perfNow\)/);
+  assert.match(source, /const next = lspHoverLatestQueuedRequest;\s*lspHoverLatestQueuedRequest = null;\s*if \(next\) dispatchUserHoverRequest\(next\);/);
+  assert.match(source, /recordHoverQueueEvent\(\{[\s\S]*reason: "dispatch-hover"/);
+});
+
+test("Vector-LSP traffic counters and idempotent didOpen state are exposed for runtime proof", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  assert.match(source, /window\.__txteditorPerf\.hoverQueueSamples = hoverQueueSamples;/);
+  assert.match(source, /window\.__txteditorPerf\.lspTraffic = lspTraffic;/);
+  assert.match(source, /window\.__txteditorPerf\.lspReadiness = lspReadiness;/);
+  assert.match(source, /function recordLspTraffic\(uri, kind, details = \{\}\)/);
+  for (const label of ["lsp_open_file", "lsp_update_file", "lsp_update_file_incremental", "lsp_get_diagnostics", "lsp_hover", "diagnostics_changed", "hover_cache_hit", "hover_cache_miss", "hover_semantic_cache_hit", "hover_header_cache_hit"]) {
+    assert.match(source, new RegExp(`${label}: 0`));
+  }
+  assert.match(source, /if \(doc\._lspOpened && doc\._lspOpenedUri === uri && doc\._lspOpenedVersion === version\) return;/);
+  assert.match(source, /if \(doc\._lspOpenPromise\) return doc\._lspOpenPromise;/);
+  assert.match(source, /doc\._lspOpenPromise = \(async \(\) => \{[\s\S]*recordLspTraffic\(uri, "lsp_open_file"/);
+  assert.match(source, /recordLspTraffic\(target\.uri, "lsp_hover"/);
+  assert.match(source, /function markDocHoverReady\(doc, uri, reason\)/);
+  assert.match(source, /recordLspReadiness\(uri, "didOpenSent"/);
+  assert.match(source, /recordLspReadiness\(uri, "firstDiagnosticsReceived"/);
+  assert.match(source, /recordLspReadiness\(target\.uri, "firstHoverRequested"/);
+  assert.match(source, /recordLspReadiness\(target\.uri, "firstHoverResponse"/);
+  const scrollHandler = grid.match(/this\.host\.addEventListener\("scroll"[\s\S]*?this\.onViewportChanged\?\.\("scroll"\);/)?.[0] ?? "";
+  assert.notEqual(scrollHandler, "");
+  assert.doesNotMatch(scrollHandler, /lspOpenDoc|lspUpdateDoc|lspGetDiagnostics|lsp_open_file|lsp_update_file|lsp_get_diagnostics/);
 });
 
 test("Problems panel rendering is skipped while hidden and cached while unchanged", () => {
@@ -1269,7 +1607,7 @@ test("first-column hover preview is single and clears on grid context changes", 
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.hoverPreview = createFirstColumnHoverPreview\(\);/);
   assert.match(source, /this\.host\.addEventListener\("mouseleave", \(event\) => this\.onMouseLeave\(event\)\);/);
-  assert.match(source, /setDocument\(doc\) \{\s*this\.hideFirstColumnHoverPreview\(\);/);
+  assert.match(source, /setDocument\(doc\) \{\s*if \(this\._tooltip\) this\.clearHoverState\(\);\s*else this\.hideFirstColumnHoverPreview\(\);/);
   assert.match(source, /this\.clearHoverState\(\);\s*this\.requestRender\("scroll"\);/);
   assert.match(source, /onContext\(event\) \{\s*event\.preventDefault\(\);\s*this\.clearHoverState\(\);/);
   assert.match(source, /function createFirstColumnHoverPreview\(\) \{\s*const preview = document\.createElement\("div"\);/);
@@ -1315,20 +1653,20 @@ test("quick typing edit commits on arrow navigation while explicit edit keeps ca
   assert.equal(source.includes("this.editor.select();"), false);
 });
 
-test("version metadata is kept at TXTeditor 0.4", () => {
+test("version metadata is bumped to TXTeditor 0.4.1", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.4.0");
-  assert.equal(lock.version, "0.4.0");
-  assert.equal(lock.packages[""].version, "0.4.0");
-  assert.match(pkg.description, /TXTeditor 0\.4/);
-  assert.match(cargoToml, /version = "0\.4\.0"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.4/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.0"/);
-  assert.equal(tauri.version, "0.4.0");
-  assert.match(readme, /TXTeditor 0\.4 is/);
+  assert.equal(pkg.version, "0.4.1");
+  assert.equal(lock.version, "0.4.1");
+  assert.equal(lock.packages[""].version, "0.4.1");
+  assert.match(pkg.description, /TXTeditor 0\.4\.1/);
+  assert.match(cargoToml, /version = "0\.4\.1"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.4\.1/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.1"/);
+  assert.equal(tauri.version, "0.4.1");
+  assert.match(readme, /TXTeditor 0\.4\.1 is/);
 });
