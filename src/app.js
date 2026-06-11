@@ -42,6 +42,7 @@ import {
   lspOpenFile,
   lspStart,
   lspUpdateFile,
+  lspUpdateFileIncremental,
   openFilesNative,
   openNativePaths,
   openWorkspaceNative,
@@ -287,19 +288,19 @@ function activeUndo() {
   return activeDoc().undo;
 }
 
-function execute(command) {
+function execute(command, changedRows = null) {
   if (!hasOpenDocument()) return showError("Open a file before editing.");
   if (!command || command.isEmpty) return;
   const doc = activeDoc();
   command.redo(activeDoc());
   activeUndo().push(command);
   grid.layout();
-  lspUpdateDoc(doc).catch(() => {});
+  lspUpdateDoc(doc, changedRows).catch(() => {});
   renderChrome();
 }
 
 function applyEdits(edits, label = "Edit Cells") {
-  execute(makeCellCommand(label, activeDoc(), edits));
+  execute(makeCellCommand(label, activeDoc(), edits), [...new Set(edits.map((e) => e.row))]);
 }
 
 function wireEvents() {
@@ -1058,12 +1059,20 @@ async function lspOpenDoc(doc) {
   renderChrome();
 }
 
-async function lspUpdateDoc(doc) {
+async function lspUpdateDoc(doc, changedRows = null) {
   if (!state.lsp.started) return;
   const uri = docToUri(doc);
   if (!uri) return;
-  doc._lspVersion = ((doc._lspVersion ?? 0) + 1);
-  await lspUpdateFile(uri, doc._lspVersion, doc.toText());
+  doc._lspVersion = (doc._lspVersion ?? 0) + 1;
+  if (changedRows && changedRows.length > 0) {
+    const changes = changedRows.map((row) => ({
+      range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
+      text: doc.rows[row]?.join("\t") ?? ""
+    }));
+    await lspUpdateFileIncremental(uri, doc._lspVersion, changes);
+  } else {
+    await lspUpdateFile(uri, doc._lspVersion, doc.toText());
+  }
 }
 
 async function lspCloseDoc(doc) {

@@ -155,6 +155,12 @@ export async function lspUpdateFile(uri, version, text) {
   await api.invoke("lsp_update_file", { uri, version, text });
 }
 
+export async function lspUpdateFileIncremental(uri, version, changes) {
+  if (!isTauriRuntime()) return;
+  const api = await tauriApi();
+  await api.invoke("lsp_update_file_incremental", { uri, version, changes });
+}
+
 export async function lspCloseFile(uri) {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
