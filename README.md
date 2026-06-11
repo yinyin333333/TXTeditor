@@ -1,6 +1,6 @@
 # TXTeditor
 
-TXTeditor 0.4 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
+TXTeditor 0.4.1 is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
 
 TXTeditor is a personal project. I am not an experienced programmer, and most of the implementation was built with the help of OpenAI Codex. The app may contain bugs, incomplete behavior, or rough edges, but I am sharing it in case it is useful to others.
 
@@ -17,6 +17,7 @@ TXTeditor is not affiliated with, endorsed by, or connected to Blizzard Entertai
 - Copy, cut, paste, fill, and simple arithmetic operations on selections.
 - Hide and unhide rows or columns.
 - D2R-aware linting in the live Problems panel.
+- Select either Vector-LSP or Legacy Lint as the active lint engine.
 - Click a diagnostic to jump to the matching file, row, column, and cell.
 - RotW and 2.4 lint profile toggle.
 
@@ -26,7 +27,17 @@ TXTeditor includes RotW and 2.4 lint profiles. These rules are based on the beha
 
 The RotW-oriented lint behavior has been checked against the project's current d2rlint-compatible fixture/oracle workflow. Other data sets, mod variants, or future rule changes may still expose bugs or differences.
 
-Version 0.4 integrates [vector-lsp](https://github.com/eezstreet/vector-lsp) created by eezstreet, which will replace the existing linting system.
+## Lint Engines
+
+Version 0.4.1 adds a lint engine selector in Settings.
+
+Vector-LSP is the default engine for first-time runs and keeps the 0.4 behavior: bundled Vector-LSP diagnostics, Vector-LSP hover, Lint Options, and Problems panel integration.
+
+Legacy Lint restores the earlier built-in lint path from TXTeditor 0.33. In Legacy Lint mode, the Problems panel shows the RotW / 2.4 profile selector and Rules panel, and diagnostics are produced by TXTeditor's built-in legacy lint engine instead of Vector-LSP.
+
+You can switch between Vector-LSP and Legacy Lint while TXTeditor is running. Only the selected engine updates the active diagnostics, cell markers, overview-ruler marks, and Problems panel. Switching back to Vector-LSP resyncs open files with Vector-LSP and restores the stored Vector-LSP Hover preference.
+
+Version 0.4.1 integrates [vector-lsp](https://github.com/eezstreet/vector-lsp) created by eezstreet while allowing users to choose Vector-LSP or Legacy Lint as the active lint engine.
 
 ## Build
 
