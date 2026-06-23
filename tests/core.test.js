@@ -1425,8 +1425,13 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
   assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.problems-header\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.problems-header\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow \.problems-header\s*\{[\s\S]*grid-template-rows:\s*38px 38px;[\s\S]*height:\s*76px;/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow \.lint-controls\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
   assert.match(css, /\.lint-controls\s*\{[\s\S]*flex:\s*0 0 auto;/);
+  assert.match(source, /function syncProblemsHeaderLayout\(\)/);
+  assert.match(source, /header\.scrollWidth > header\.clientWidth \+ 2/);
   assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.problems-header/);
   assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
@@ -1702,8 +1707,26 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
   assert.match(source, /version: 0/);
   assert.match(source, /function setLintDiagnostics\(diagnostics\)\s*\{\s*state\.lint\.diagnostics = diagnostics;\s*state\.lint\.version \+= 1;/);
   assert.match(source, /function renderProblemsPanelIfNeeded\(\)\s*\{\s*const started = perfNow\(\);\s*if \(!els\.problemsList \|\| !state\.problemsVisible \|\| state\.bottomTab !== "problems"\) \{\s*recordUiPerf\("render-problems-panel", started, \{ skipped: true \}\);\s*return;/);
-  assert.match(source, /if \(els\.problemsList\.dataset\.renderKey === key\) \{\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);\s*return;/);
+  assert.match(source, /if \(els\.problemsList\.dataset\.renderKey === key\) \{\s*updateActiveProblemHighlight\(\);\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);\s*return;/);
   assert.match(source, /function problemsPanelRenderKey\(\)/);
+});
+
+test("Problems list highlights diagnostics for the active or edited marker cell", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /onSelectionChanged: \(\) => updateActiveProblemHighlight\(\)/);
+  assert.match(source, /function activeProblemDiagnosticIds\(\)/);
+  assert.match(source, /const activeCell = grid\.editingCell\?\.\(\) \?\? state\.selection\.focus;/);
+  assert.match(source, /diagnostic\.rowIndex !== activeCell\.row \|\| diagnostic\.columnIndex !== activeCell\.column/);
+  assert.match(source, /button\.classList\.toggle\("problem-item-active-cell", active\);/);
+  assert.match(source, /button\.setAttribute\("aria-current", "location"\)/);
+  assert.match(source, /updateActiveProblemHighlight\(\);\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);/);
+  assert.match(grid, /onSelectionChanged/);
+  assert.match(grid, /notifySelectionChanged\("pointer-selection"\)/);
+  assert.match(grid, /notifySelectionChanged\("keyboard-selection"\)/);
+  assert.match(grid, /notifySelectionChanged\("edit-start"\)/);
+  assert.match(css, /\.problem-item\.problem-item-active-cell\s*\{[\s\S]*background:\s*color-mix/);
 });
 
 test("UI performance instrumentation records row and lint display work", () => {

@@ -73,7 +73,7 @@ const GRID_CSS_VARS = {
 };
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -91,6 +91,7 @@ export class CanvasGrid {
     this.onHoverRequest = onHoverRequest;
     this.onHoverInvalidated = onHoverInvalidated;
     this.onViewportChanged = onViewportChanged;
+    this.onSelectionChanged = onSelectionChanged;
     this._lspHoverByCell = new Map();
     this._hoveredCell = null;
     this._lastTooltipX = 0;
@@ -233,6 +234,14 @@ export class CanvasGrid {
   setDiagnostics(diagnosticsByCell) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     this.draw();
+  }
+
+  notifySelectionChanged(reason = "selection") {
+    this.onSelectionChanged?.({
+      reason,
+      focus: { ...this.selection.focus },
+      editingCell: this.editingCell()
+    });
   }
 
   bind() {
@@ -780,6 +789,7 @@ export class CanvasGrid {
     this.dragging = hit.kind === "cell" && !toggle;
     if (this.dragging) this.clearHoverState();
     this.draw();
+    this.notifySelectionChanged("pointer-selection");
   }
 
   isScrollbarEvent(event) {
@@ -819,6 +829,7 @@ export class CanvasGrid {
       this.clearHoverState();
       this.selection.extend(hit.row, hit.column);
       this.draw();
+      this.notifySelectionChanged("drag-selection");
       return;
     }
     if (!this.resizing) this._updateTooltip(event, hit);
@@ -970,6 +981,7 @@ export class CanvasGrid {
     if (hit.kind === "column-header" && !this.selection.hasFullColumn(hit.column, this.doc.rowCount)) this.selectColumn(hit.column);
     if (hit.kind === "corner") this.selection.selectAll(this.doc.rowCount, this.doc.columnCount);
     this.draw();
+    this.notifySelectionChanged("context-selection");
     this.onContextMenu?.({ x: event.clientX, y: event.clientY, hit });
   }
 
@@ -1084,6 +1096,7 @@ export class CanvasGrid {
     this.scrollCellIntoView(row, column);
     event.preventDefault();
     this.draw();
+    this.notifySelectionChanged("keyboard-selection");
   }
 
   jumpRow(row, direction) {
@@ -1164,6 +1177,7 @@ export class CanvasGrid {
     this.editing = true;
     this.editMode = mode;
     this.draw();
+    this.notifySelectionChanged("edit-start");
     this.editor.focus();
     this.editor.selectionStart = this.editor.value.length;
     this.editor.selectionEnd = this.editor.value.length;
@@ -1178,6 +1192,7 @@ export class CanvasGrid {
     this.editor.classList.remove("active");
     this.onEdit?.([{ row, column, value: this.editor.value }], "Edit Cell");
     this.draw();
+    this.notifySelectionChanged("edit-commit");
   }
 
   cancelEdit() {
@@ -1185,6 +1200,7 @@ export class CanvasGrid {
     this.editMode = null;
     this.editor.classList.remove("active");
     this.draw();
+    this.notifySelectionChanged("edit-cancel");
   }
 
   moveSelectionBy(rowDelta, columnDelta) {
@@ -1192,6 +1208,7 @@ export class CanvasGrid {
     this.selection.set(row, column);
     this.scrollCellIntoView(row, column);
     this.draw();
+    this.notifySelectionChanged("keyboard-selection");
   }
 
   editingCell() {

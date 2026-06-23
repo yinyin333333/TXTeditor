@@ -373,7 +373,8 @@ const grid = new CanvasGrid({
   onAutoFitColumn: (column) => autoFitColumns([column]).catch(showError),
   onHoverRequest: (row, column, meta) => requestLspHover(row, column, meta).catch(() => {}),
   onHoverInvalidated: () => clearVisibleLspHover("grid-hover-cleared"),
-  onViewportChanged: (reason) => scheduleHoverPrewarm(reason)
+  onViewportChanged: (reason) => scheduleHoverPrewarm(reason),
+  onSelectionChanged: () => updateActiveProblemHighlight()
 });
 
 grid.setFontFamily(state.gridFont);
@@ -574,6 +575,17 @@ function syncDockLayout() {
     });
   }
   applyDockVariables();
+  syncProblemsHeaderLayout();
+}
+
+function syncProblemsHeaderLayout() {
+  const panel = els.problemsPanel;
+  const header = panel?.querySelector(".problems-header");
+  if (!panel || !header) return;
+  panel.classList.remove("problems-panel-narrow");
+  const sideDocked = panel.dataset.dockEdge === "left" || panel.dataset.dockEdge === "right";
+  if (!sideDocked || panel.classList.contains("hidden")) return;
+  if (header.scrollWidth > header.clientWidth + 2) panel.classList.add("problems-panel-narrow");
 }
 
 function setPanelDock(panel, edge) {
@@ -1070,6 +1082,7 @@ function findNext() {
   state.selection.set(found.row, found.column);
   grid.scrollCellIntoView(found.row, found.column);
   grid.draw();
+  updateActiveProblemHighlight();
   els.searchStatus.textContent = `R${found.row + 1}:C${found.column + 1}`;
 }
 
@@ -2763,6 +2776,7 @@ async function goToDefinition() {
   state.selection.set(targetRow, targetCol);
   grid.scrollCellIntoView(targetRow, targetCol);
   grid.draw();
+  updateActiveProblemHighlight();
   renderChrome();
   els.host.focus();
 }
@@ -2798,6 +2812,7 @@ async function goToDiagnostic(id) {
   updateGridDiagnostics();
   grid.scrollCellIntoView(state.selection.focus.row, state.selection.focus.column);
   grid.draw();
+  updateActiveProblemHighlight();
   state.problemsVisible = true;
   localStorage.setItem("txteditor.problems", "visible");
   renderChrome();
@@ -3396,6 +3411,7 @@ function renderChrome() {
     button.classList.remove("active");
   }
   if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
+  syncProblemsHeaderLayout();
   if (els.fontSelect) {
     const hasOption = [...els.fontSelect.options].some((option) => option.value === state.gridFont);
     if (!hasOption) populateFontSelect();
@@ -3453,6 +3469,7 @@ function renderProblemsPanelIfNeeded() {
   }
   const key = problemsPanelRenderKey();
   if (els.problemsList.dataset.renderKey === key) {
+    updateActiveProblemHighlight();
     recordUiPerf("render-problems-panel", started, { cached: true });
     return;
   }
@@ -3468,7 +3485,33 @@ function renderProblemsPanelIfNeeded() {
   for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
     button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
   }
+  updateActiveProblemHighlight();
   recordUiPerf("render-problems-panel", started, { rendered: true });
+}
+
+function activeProblemDiagnosticIds() {
+  const ids = new Set();
+  if (!lintActive() || !hasOpenDocument()) return ids;
+  const doc = activeDoc();
+  const activeCell = grid.editingCell?.() ?? state.selection.focus;
+  const fileKey = lintDocKey(doc);
+  for (const diagnostic of state.lint.diagnostics) {
+    if (diagnostic.fileKey !== fileKey) continue;
+    if (diagnostic.rowIndex !== activeCell.row || diagnostic.columnIndex !== activeCell.column) continue;
+    ids.add(diagnostic.id);
+  }
+  return ids;
+}
+
+function updateActiveProblemHighlight() {
+  if (!els.problemsList) return;
+  const activeIds = activeProblemDiagnosticIds();
+  for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
+    const active = activeIds.has(button.dataset.diagnosticId);
+    button.classList.toggle("problem-item-active-cell", active);
+    if (active) button.setAttribute("aria-current", "location");
+    else button.removeAttribute("aria-current");
+  }
 }
 
 function problemsPanelRenderKey() {

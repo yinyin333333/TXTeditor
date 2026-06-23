@@ -654,6 +654,12 @@ button.active {
   overflow: hidden;
 }
 
+.problem-item.problem-item-active-cell {
+  background: color-mix(in srgb, var(--selection) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text-strong);
+}
+
 .problem-item[data-severity="error"] {
   border-left-color: #f14c4c;
 }
@@ -664,6 +670,12 @@ button.active {
 
 .problem-item[data-severity="info"] {
   border-left-color: #3794ff;
+}
+
+.problem-item.problem-item-active-cell .problem-location,
+.problem-item.problem-item-active-cell .problem-message,
+.problem-item.problem-item-active-cell .problem-rule {
+  color: var(--text-strong);
 }
 
 .problem-location {
@@ -934,6 +946,10 @@ button.active {
   overflow: hidden;
 }
 
+.problems-panel.problems-panel-narrow {
+  grid-template-rows: 76px auto minmax(0, 1fr);
+}
+
 .problems-panel.hidden {
   display: none;
 }
@@ -955,7 +971,22 @@ button.active {
   background: var(--surface-3);
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.problems-header::-webkit-scrollbar {
+  display: none;
+}
+
+.problems-panel.problems-panel-narrow .problems-header {
+  display: grid;
+  grid-template-rows: 38px 38px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  height: 76px;
+  min-height: 76px;
+  padding: 0;
+  overflow: hidden;
 }
 
 .bottom-tabs {
@@ -967,7 +998,16 @@ button.active {
   flex: 0 0 auto;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.bottom-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.problems-panel.problems-panel-narrow .bottom-tabs {
+  width: 100%;
+  height: 38px;
 }
 
 .bottom-tab {
@@ -1008,6 +1048,20 @@ button.active {
   gap: 6px;
   min-width: 0;
   flex: 0 0 auto;
+}
+
+.problems-panel.problems-panel-narrow .lint-controls {
+  width: 100%;
+  height: 38px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--line-soft);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.problems-panel.problems-panel-narrow .lint-controls::-webkit-scrollbar {
+  display: none;
 }
 
 .lint-controls button {
