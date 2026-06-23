@@ -500,10 +500,16 @@ button.active {
   letter-spacing: .08em;
 }
 
-.sidebar-header[draggable="true"],
-.problems-header[draggable="true"],
-.activity-button[draggable="true"] {
+.sidebar-header[data-dock-drag-handle="true"],
+.problems-header[data-dock-drag-handle="true"],
+.activity-button[data-dock-drag-handle="true"] {
   cursor: grab;
+}
+
+body.dock-dragging,
+body.dock-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
 }
 
 .sidebar-actions {

@@ -1407,9 +1407,14 @@ test("dock settings and drag controls expose Explorer, Problems, and reset layou
   assert.match(appSettings, /data-settings-reset-layout/);
   assert.match(appSettings, /setPanelDock\(button\.dataset\.settingsDockPanel, button\.dataset\.settingsDockEdge\)/);
   assert.match(appSettings, /resetDockLayout\(\); refresh\(\);/);
-  assert.match(source, /const DOCK_DRAG_TYPE = "application\/x-txteditor-dock-panel";/);
+  assert.match(source, /const DOCK_DRAG_THRESHOLD = 4;/);
   assert.match(source, /function wireDocking\(\)/);
-  assert.match(source, /dataTransfer\?\.setData\(DOCK_DRAG_TYPE, panel\)/);
+  assert.match(source, /handle\.draggable = false;/);
+  assert.match(source, /handle\.dataset\.dockDragHandle = "true";/);
+  assert.match(source, /function startDockPointerDrag\(panel, handle, event\)/);
+  assert.match(source, /function updateDockDragTarget\(x, y\)/);
+  assert.match(source, /const target = updateDockDragTarget\(event\.clientX, event\.clientY\);/);
+  assert.match(source, /if \(edge\) setPanelDock\(state\.panel, edge\);/);
 });
 
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
@@ -1777,11 +1782,12 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
 
-test("quick typing edit commits on arrow navigation while explicit edit keeps caret behavior", () => {
+test("quick and explicit edit modes commit on arrow-key cell navigation", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.startEdit\(event\.key, true, "quick"\)/);
   assert.match(source, /this\.startEdit\(null, false, "explicit"\)/);
-  assert.match(source, /this\.editMode === "quick" && isArrowNavigationKey\(event\.key\)/);
+  assert.match(source, /if \(isArrowNavigationKey\(event\.key\)\) \{/);
+  assert.doesNotMatch(source.match(/onEditorKeyDown\(event\) \{[\s\S]*?\n  startEdit/)?.[0] ?? "", /editMode === "quick"/);
   assert.match(source, /this\.commitEdit\(\);\s*this\.moveSelectionBy\(rowDelta, columnDelta\);/);
   assert.match(source, /this\.host\.addEventListener\("dblclick", \(event\) => this\.onDblClick\(event\)\)/);
   assert.match(source, /this\.editor\.selectionStart = this\.editor\.value\.length;\s*this\.editor\.selectionEnd = this\.editor\.value\.length;/);
