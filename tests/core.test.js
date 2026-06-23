@@ -1380,7 +1380,7 @@ test("dock shell renders every edge and same-edge split orientations", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  for (const id of ["layoutRoot", "dockTop", "dockLeft", "dockRight", "dockBottom", "dockDropZones"]) {
+  for (const id of ["layoutRoot", "dockTop", "dockLeft", "dockRight", "dockBottom"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /data-dock-panel="explorer"/);
@@ -1398,7 +1398,7 @@ test("dock shell renders every edge and same-edge split orientations", () => {
   assert.match(source, /grid\.layout\(\);/);
 });
 
-test("dock settings and drag controls expose Explorer, Problems, and reset layout", () => {
+test("dock settings expose Explorer, Problems, and reset layout without drag controls", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";
   assert.match(appSettings, /Explorer Dock/);
@@ -1407,28 +1407,28 @@ test("dock settings and drag controls expose Explorer, Problems, and reset layou
   assert.match(appSettings, /data-settings-reset-layout/);
   assert.match(appSettings, /setPanelDock\(button\.dataset\.settingsDockPanel, button\.dataset\.settingsDockEdge\)/);
   assert.match(appSettings, /resetDockLayout\(\); refresh\(\);/);
-  assert.match(source, /const DOCK_DRAG_THRESHOLD = 4;/);
-  assert.match(source, /function wireDocking\(\)/);
-  assert.match(source, /document\.querySelectorAll\("\.activity-button\[data-dock-panel\], \.sidebar-header\[data-dock-panel\], \.problems-header\[data-dock-panel\]"\)/);
-  assert.doesNotMatch(source, /\.\.\.document\.querySelectorAll\("\[data-dock-panel\]"\)/);
-  assert.match(source, /handle\.draggable = false;/);
-  assert.match(source, /handle\.dataset\.dockDragHandle = "true";/);
-  assert.match(source, /function startDockPointerDrag\(panel, handle, event\)/);
-  assert.match(source, /function updateDockDragTarget\(x, y\)/);
-  assert.match(source, /const target = updateDockDragTarget\(event\.clientX, event\.clientY\);/);
-  assert.match(source, /if \(edge\) setPanelDock\(state\.panel, edge\);/);
+  assert.doesNotMatch(source, /DOCK_DRAG_THRESHOLD/);
+  assert.doesNotMatch(source, /function wireDocking\(\)/);
+  assert.doesNotMatch(source, /function startDockPointerDrag/);
+  assert.doesNotMatch(source, /dockDragState/);
+  assert.doesNotMatch(source, /dockDragHandle/);
 });
 
-test("dock drop hints are subtle and docked controls avoid clipping", () => {
+test("dock drop UI is removed and docked controls keep a single-row Problems header", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.dock-drop-zone\s*\{[\s\S]*background:\s*transparent;[\s\S]*font-size:\s*0;/);
-  assert.match(css, /\.dock-drop-zone::after\s*\{[\s\S]*opacity:\s*\.26;/);
-  assert.match(css, /\.dock-drop-zone\.drag-over::after\s*\{[\s\S]*opacity:\s*\.78;/);
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
+  assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
+  assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
+  assert.doesNotMatch(source, /dockDropZones|data-dock-target|dockSuppressClick/);
   assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
   assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
-  assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*auto auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.problems-header,\s*\.problems-panel\[data-dock-edge="right"\] \.problems-header\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/);
-  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls,\s*\.problems-panel\[data-dock-edge="right"\] \.lint-controls\s*\{[\s\S]*min-height:\s*38px;/);
+  assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.problems-header\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;/);
+  assert.match(css, /\.lint-controls\s*\{[\s\S]*flex:\s*0 0 auto;/);
+  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.problems-header/);
+  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
 
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {

@@ -143,7 +143,6 @@ const DEFAULT_DOCK_LAYOUT = Object.freeze({
   splits: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5 },
   sizes: { explorerHeight: DEFAULT_PANEL_HEIGHT, problemsWidth: DEFAULT_PROBLEMS_WIDTH }
 });
-const DOCK_DRAG_THRESHOLD = 4;
 const savedSidebarWidth = clamp(Number(localStorage.getItem("txteditor.sidebarWidth")) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, 520);
 const savedProblemsHeight = clamp(Number(localStorage.getItem("txteditor.problemsHeight")) || 260, 150, 520);
 const savedDockLayout = normalizeDockLayout(readJsonStorage("txteditor.layout.docks", DEFAULT_DOCK_LAYOUT));
@@ -249,7 +248,6 @@ const els = {
   dockLeft: document.getElementById("dockLeft"),
   dockRight: document.getElementById("dockRight"),
   dockBottom: document.getElementById("dockBottom"),
-  dockDropZones: document.getElementById("dockDropZones"),
   sidebar: document.getElementById("sidebar"),
   sidebarResizer: document.getElementById("sidebarResizer"),
   problemsPanel: document.getElementById("problemsPanel"),
@@ -283,7 +281,6 @@ const els = {
 };
 
 const dockSplitters = new Map();
-let dockDragState = null;
 
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const uiPerfSamples = [];
@@ -653,120 +650,6 @@ function setDockEdgeSize(edge, size) {
   }
 }
 
-function showDockDropZones() {
-  els.dockDropZones?.classList.remove("hidden");
-}
-
-function hideDockDropZones() {
-  els.dockDropZones?.classList.add("hidden");
-  for (const zone of els.dockDropZones?.querySelectorAll("[data-dock-target]") ?? []) zone.classList.remove("drag-over");
-}
-
-function dockZoneAt(x, y) {
-  return document.elementFromPoint(x, y)?.closest?.("[data-dock-target]") ?? null;
-}
-
-function updateDockDragTarget(x, y) {
-  const target = dockZoneAt(x, y);
-  for (const zone of els.dockDropZones?.querySelectorAll("[data-dock-target]") ?? []) {
-    zone.classList.toggle("drag-over", zone === target);
-  }
-  return target;
-}
-
-function clearDockPointerDrag() {
-  if (dockDragState?.handle) delete dockDragState.handle.dataset.dockDragging;
-  document.body.classList.remove("dock-dragging");
-  hideDockDropZones();
-  dockDragState = null;
-}
-
-function suppressNextDockClick(handle) {
-  handle.dataset.dockSuppressClick = "true";
-  window.setTimeout(() => {
-    if (handle.dataset.dockSuppressClick === "true") delete handle.dataset.dockSuppressClick;
-  }, 0);
-}
-
-function startDockPointerDrag(panel, handle, event) {
-  if (event.button !== 0) return;
-  if (!handle.classList.contains("activity-button") && event.target.closest("input, select")) return;
-  dockDragState = {
-    panel,
-    handle,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    active: false
-  };
-  handle.setPointerCapture?.(event.pointerId);
-  window.addEventListener("pointermove", onDockPointerMove);
-  window.addEventListener("pointerup", onDockPointerUp);
-  window.addEventListener("pointercancel", onDockPointerCancel);
-}
-
-function onDockPointerMove(event) {
-  if (!dockDragState || event.pointerId !== dockDragState.pointerId) return;
-  const moved = Math.hypot(event.clientX - dockDragState.startX, event.clientY - dockDragState.startY);
-  if (!dockDragState.active && moved < DOCK_DRAG_THRESHOLD) return;
-  if (!dockDragState.active) {
-    dockDragState.active = true;
-    dockDragState.handle.dataset.dockDragging = "true";
-    document.body.classList.add("dock-dragging");
-    showDockDropZones();
-  }
-  event.preventDefault();
-  updateDockDragTarget(event.clientX, event.clientY);
-}
-
-function onDockPointerUp(event) {
-  if (!dockDragState || event.pointerId !== dockDragState.pointerId) return;
-  const state = dockDragState;
-  window.removeEventListener("pointermove", onDockPointerMove);
-  window.removeEventListener("pointerup", onDockPointerUp);
-  window.removeEventListener("pointercancel", onDockPointerCancel);
-  if (state.active) {
-    event.preventDefault();
-    event.stopPropagation();
-    const target = updateDockDragTarget(event.clientX, event.clientY);
-    const edge = target?.dataset.dockTarget;
-    suppressNextDockClick(state.handle);
-    clearDockPointerDrag();
-    if (edge) setPanelDock(state.panel, edge);
-    return;
-  }
-  clearDockPointerDrag();
-}
-
-function onDockPointerCancel(event) {
-  if (!dockDragState || event.pointerId !== dockDragState.pointerId) return;
-  window.removeEventListener("pointermove", onDockPointerMove);
-  window.removeEventListener("pointerup", onDockPointerUp);
-  window.removeEventListener("pointercancel", onDockPointerCancel);
-  clearDockPointerDrag();
-}
-
-function wireDocking() {
-  const handles = new Set([
-    ...document.querySelectorAll(".activity-button[data-dock-panel], .sidebar-header[data-dock-panel], .problems-header[data-dock-panel]")
-  ].filter(Boolean));
-  for (const handle of handles) {
-    const panel = handle.dataset.dockPanel;
-    if (!DOCK_PANELS.includes(panel)) continue;
-    handle.draggable = false;
-    handle.dataset.dockDragHandle = "true";
-    handle.addEventListener("pointerdown", (event) => startDockPointerDrag(panel, handle, event));
-    handle.addEventListener("click", (event) => {
-      if (handle.dataset.dockSuppressClick === "true") {
-        event.preventDefault();
-        event.stopPropagation();
-        delete handle.dataset.dockSuppressClick;
-        return;
-      }
-    }, true);
-  }
-}
-
 function elapsedMs(started) {
   return Math.round((perfNow() - started) * 100) / 100;
 }
@@ -884,7 +767,6 @@ function wireEvents() {
   });
   els.fontSelect?.addEventListener("change", () => changeGridFont(els.fontSelect.value));
   wirePaneResizers();
-  wireDocking();
   els.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();

@@ -9,8 +9,8 @@
   <body>
     <div id="app" class="shell">
       <aside class="activity" aria-label="Activity">
-        <button class="activity-button active" data-command="show-explorer" data-dock-panel="explorer" title="Explorer">E</button>
-        <button class="activity-button" data-command="show-problems" data-dock-panel="problems" title="Problems">P</button>
+        <button class="activity-button active" data-command="show-explorer" title="Explorer">E</button>
+        <button class="activity-button" data-command="show-problems" title="Problems">P</button>
       </aside>
 
       <div id="layoutRoot" class="layout-root">
@@ -19,7 +19,7 @@
         <section id="dockLeft" class="dock dock-left" data-dock-edge="left" aria-label="Left dock">
           <aside id="sidebar" class="sidebar" aria-label="Workspace" data-dock-panel="explorer">
             <div id="sidebarResizer" class="sidebar-resizer pane-resizer" aria-hidden="true"></div>
-            <header class="sidebar-header" data-dock-panel="explorer">TXTeditor</header>
+            <header class="sidebar-header">TXTeditor</header>
             <div class="sidebar-actions">
               <button data-command="open-file">Open File</button>
               <button data-command="open-folder">Open Folder</button>
@@ -56,7 +56,7 @@
         <section id="dockBottom" class="dock dock-bottom" data-dock-edge="bottom" aria-label="Bottom dock">
           <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems" data-dock-panel="problems">
             <div id="problemsResizer" class="problems-resizer pane-resizer" aria-hidden="true"></div>
-            <header class="problems-header" data-dock-panel="problems">
+            <header class="problems-header">
               <div class="bottom-tabs">
                 <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
                 <button class="bottom-tab" data-bottom-tab="log">Log</button>
@@ -68,13 +68,6 @@
             <div id="logList" class="log-list hidden"></div>
           </section>
         </section>
-      </div>
-
-      <div id="dockDropZones" class="dock-drop-zones hidden" aria-hidden="true">
-        <div class="dock-drop-zone dock-drop-zone-left" data-dock-target="left">Left</div>
-        <div class="dock-drop-zone dock-drop-zone-right" data-dock-target="right">Right</div>
-        <div class="dock-drop-zone dock-drop-zone-top" data-dock-target="top">Top</div>
-        <div class="dock-drop-zone dock-drop-zone-bottom" data-dock-target="bottom">Bottom</div>
       </div>
     </div>
 
