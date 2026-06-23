@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::UNIX_EPOCH;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tokio::sync::oneshot;
@@ -705,6 +706,11 @@ fn read_text_file(path: String) -> Result<TextFilePayload, String> {
 }
 
 #[tauri::command]
+fn read_text_files(paths: Vec<String>) -> Vec<Result<TextFilePayload, String>> {
+    paths.into_iter().map(read_text_file).collect()
+}
+
+#[tauri::command]
 fn write_text_file_safe(path: String, text: String) -> Result<SavePayload, String> {
     let target = PathBuf::from(&path);
 
@@ -755,6 +761,13 @@ fn collect_text_files(path: &Path, files: &mut Vec<WorkspaceFile>, depth: usize)
         if entry_path.is_dir() {
             collect_text_files(&entry_path, files, depth + 1)?;
         } else if is_text_like(&entry_path) {
+            let metadata = entry.metadata().ok();
+            let modified_ms = metadata
+                .as_ref()
+                .and_then(|value| value.modified().ok())
+                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+            let size = metadata.as_ref().map(|value| value.len());
             let name = entry_path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -763,6 +776,8 @@ fn collect_text_files(path: &Path, files: &mut Vec<WorkspaceFile>, depth: usize)
             files.push(WorkspaceFile {
                 path: entry_path.to_string_lossy().to_string(),
                 name,
+                modified_ms,
+                size,
             });
         }
     }
@@ -812,6 +827,10 @@ struct SavePayload {
 struct WorkspaceFile {
     path: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -857,6 +876,7 @@ pub fn run() {
             open_folder_dialog,
             save_file_dialog,
             read_text_file,
+            read_text_files,
             write_text_file_safe,
             list_workspace_files,
             get_config,

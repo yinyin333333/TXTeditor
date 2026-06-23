@@ -262,6 +262,12 @@ export function runLint(documents, settings = createDefaultLintSettings()) {
   if (!normalized.enabled) return [];
   const docs = uniqueDocuments(documents);
   const index = buildWorkspaceIndex(docs, normalized.profile);
+  return runLintWithWorkspaceIndex(index, normalized);
+}
+
+export function runLintWithWorkspaceIndex(index, settings = createDefaultLintSettings()) {
+  const normalized = normalizeLintSettings(settings);
+  if (!normalized.enabled) return [];
   const diagnostics = [];
   for (const entry of rulesForProfile(normalized.profile)) {
     const ruleSetting = normalized.profiles[normalized.profile]?.rules?.[entry.id];
@@ -423,16 +429,22 @@ function lintNoDuplicateExcel(index, ctx) {
     const keys = DUPLICATE_KEYS[table.fileName] ?? [];
     for (const key of keys) {
       if (!table.hasColumn(key)) continue;
+      const column = table.columnIndex(key);
+      const seen = new Map();
       for (let i = 1; i < table.rows.length; i += 1) {
-        const value = clean(table.rows[i]?.[table.columnIndex(key)]);
+        const value = clean(table.rows[i]?.[column]);
         if (!value || value === "Expansion") continue;
-        for (let j = i + 1; j < table.rows.length; j += 1) {
-          const compared = clean(table.rows[j]?.[table.columnIndex(key)]);
-          if (value !== compared) continue;
-          ctx.add(table, j, key, `Duplicate ${key} "${value}" also appears on row ${i + 1}.`, {
-            d2rMessage: `${table.displayName} - duplicate detected on lines ${i + 1} and ${j + 1} for field '${key}' (${value})`,
-            d2rSortLine: i + 1
-          });
+        const previousRows = seen.get(value);
+        if (previousRows) {
+          for (const previous of previousRows) {
+            ctx.add(table, i, key, `Duplicate ${key} "${value}" also appears on row ${previous + 1}.`, {
+              d2rMessage: `${table.displayName} - duplicate detected on lines ${previous + 1} and ${i + 1} for field '${key}' (${value})`,
+              d2rSortLine: previous + 1
+            });
+          }
+          previousRows.push(i);
+        } else {
+          seen.set(value, [i]);
         }
       }
     }

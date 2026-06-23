@@ -41,17 +41,73 @@ export async function openWorkspaceNative() {
 }
 
 export async function openNativePaths(paths, DocumentType, invokeFn = null) {
+  const results = await openNativePathsBulk(paths, DocumentType, invokeFn);
+  const failed = results.find((result) => result.error);
+  if (failed) throw new Error(failed.error);
+  return results.map((result) => result.doc).filter(Boolean);
+}
+
+export async function openNativePathsBulk(paths, DocumentType, invokeFn = null) {
   const invoke = invokeFn ?? (await tauriApi()).invoke;
-  const docs = [];
-  for (const path of paths) {
-    const payload = await invoke("read_text_file", { path });
-    docs.push(DocumentType.fromText(payload.name, payload.text, {
-      path: payload.path,
-      encoding: payload.encoding,
-      dirty: false
-    }));
+  const payloads = await readNativeTextFiles(paths, invoke);
+  return payloads.map((result) => {
+    if (result.error) return result;
+    const started = perfNow();
+    try {
+      const doc = documentFromTextPayload(result.payload, DocumentType);
+      return {
+        path: result.payload.path,
+        name: result.payload.name,
+        bulkRead: result.bulkRead,
+        parseMs: elapsedMs(started),
+        doc
+      };
+    } catch (error) {
+      return {
+        path: result.payload.path,
+        name: result.payload.name,
+        bulkRead: result.bulkRead,
+        parseMs: elapsedMs(started),
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  });
+}
+
+async function readNativeTextFiles(paths, invoke) {
+  if (!paths.length) return [];
+  try {
+    const results = await invoke("read_text_files", { paths });
+    return results.map((entry, index) => normalizeNativeReadResult(entry, paths[index], true));
+  } catch {
+    const results = [];
+    for (const path of paths) {
+      try {
+        const payload = await invoke("read_text_file", { path });
+        results.push({ path, payload, bulkRead: false });
+      } catch (error) {
+        results.push({ path, error: error instanceof Error ? error.message : String(error), bulkRead: false });
+      }
+    }
+    return results;
   }
-  return docs;
+}
+
+function normalizeNativeReadResult(entry, fallbackPath, bulkRead) {
+  if (entry?.Ok) return { path: entry.Ok.path ?? fallbackPath, payload: entry.Ok, bulkRead };
+  if (entry?.Err) return { path: fallbackPath, error: String(entry.Err), bulkRead };
+  if (entry?.ok) return { path: entry.ok.path ?? fallbackPath, payload: entry.ok, bulkRead };
+  if (entry?.err) return { path: fallbackPath, error: String(entry.err), bulkRead };
+  if (entry?.path && typeof entry.text === "string") return { path: entry.path, payload: entry, bulkRead };
+  return { path: fallbackPath, error: "Unexpected native read result.", bulkRead };
+}
+
+function documentFromTextPayload(payload, DocumentType) {
+  return DocumentType.fromText(payload.name, payload.text, {
+    path: payload.path,
+    encoding: payload.encoding,
+    dirty: false
+  });
 }
 
 export async function saveDocumentNative(doc, saveAs = false) {
@@ -110,6 +166,14 @@ export function encodeText(text, encoding = "utf-8") {
     return new TextEncoder().encode(text);
   }
   return new TextEncoder().encode(text);
+}
+
+function perfNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function elapsedMs(started) {
+  return Math.round((perfNow() - started) * 100) / 100;
 }
 
 export async function getConfig() {

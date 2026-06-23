@@ -28,6 +28,9 @@ import {
 import { movedCell, normalizeVectorLspTooltip, shouldDrawCellText, shouldShowFirstColumnHover, VECTOR_LSP_HOVER_DELAY_MS } from "../src/ui/canvas-grid.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle, columnColorIndex } from "../src/ui/grid-geometry.js";
 import {
+  openNativePathsBulk
+} from "../src/core/io.js";
+import {
   LINT_RULES,
   buildWorkspaceFileStates,
   buildWorkspaceIndex,
@@ -477,6 +480,22 @@ test("renderer skips stale text for the active editing cell only", () => {
   assert.equal(shouldDrawCellText(0, 1, null), true);
 });
 
+test("editing cell drawing suppresses selected chrome only for the editing cell", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const drawCell = source.match(/drawCell\(row, column, x, y, width, height, options = \{\}\) \{[\s\S]*?\n  drawDiagnosticMarker/)?.[0] ?? "";
+  const styleEditor = source.match(/styleEditorForCell\(row, column\) \{[\s\S]*?\n  async measureColumnFitWidth/)?.[0] ?? "";
+  assert.match(drawCell, /const editing = this\.editingCell\(\);/);
+  assert.match(drawCell, /const editingThisCell = editing\?\.row === row && editing\?\.column === column;/);
+  assert.match(drawCell, /const selected = !editingThisCell && this\.selection\.contains\(row, column\);/);
+  assert.match(drawCell, /const active = !editingThisCell && this\.selection\.focus\.row === row && this\.selection\.focus\.column === column;/);
+  assert.match(drawCell, /this\.drawDiagnosticMarker\(row, column, x, y, width, height\);/);
+  assert.match(drawCell, /if \(active\) \{/);
+  assert.match(styleEditor, /const unselectedBackground = cellBackground\(row, false, frozen, firstColumnLabel\);/);
+  assert.match(styleEditor, /this\.editor\.style\.backgroundColor = unselectedBackground;/);
+  assert.match(styleEditor, /cellTextColor\(row, column, this\.doc\.getCell\(row, column\), false, this\.colorizeColumns, firstColumnLabel\)/);
+  assert.doesNotMatch(styleEditor, /const selectedBackground|opaqueColor|cellBackground\(row, true/);
+});
+
 test("first-column hover is gated to real first-column cells with text", () => {
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, "full-code-value"), true);
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 0, column: 0 }, "full-code-value"), false);
@@ -764,6 +783,19 @@ test("frozen pane dividers are bounded to visible table content", () => {
   }), 0);
 });
 
+test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /drawFrozenVerticalEdge\(x, tableHeight\);/);
+  assert.match(source, /drawFrozenHorizontalEdge\(y, tableWidth\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeHighlight;[\s\S]*ctx\.fillRect\(x - 2, 0, 1, height\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeShadow;[\s\S]*ctx\.fillRect\(x - 1, 0, 1, height\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeAmbient;[\s\S]*ctx\.fillRect\(x, 0, 3, height\);/);
+  assert.match(css, /--grid-frozen-edge-highlight:/);
+  assert.match(css, /--grid-frozen-edge-shadow:/);
+  assert.match(css, /--grid-frozen-edge-ambient:/);
+});
+
 test("resize handles are detected on cell boundaries, not only headers", () => {
   assert.deepEqual(
     classifyResizeHandle({
@@ -893,6 +925,17 @@ test("lint catches duplicate excel identifiers and maps diagnostics to cells", (
   assert.equal(duplicate.columnIndex, 0);
   assert.equal(groupDiagnosticsByCell(diagnostics).has("2:0"), true);
   assert.equal(diagnosticsForDocument(diagnostics, doc).length > 0, true);
+});
+
+test("duplicate Excel lint preserves duplicate pairs without quadratic unique-row scans", () => {
+  const doc = TableDocument.fromText("armor.txt", "code\tname\nabc\tOne\nabc\tTwo\nabc\tThree\nExpansion\tSkip\nExpansion\tSkip");
+  const diagnostics = runLint([doc], createDefaultLintSettings()).filter((item) => item.ruleId === "Basic/NoDuplicateExcel");
+  assert.equal(diagnostics.length, 3);
+  assert.deepEqual(diagnostics.map((item) => item.rowIndex), [2, 3, 3]);
+  const source = readFileSync(new URL("../src/core/lint-engine.js", import.meta.url), "utf8");
+  const body = source.match(/function lintNoDuplicateExcel\(index, ctx\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(body, /const seen = new Map\(\);/);
+  assert.doesNotMatch(body, /for \(let j = i \+ 1;/);
 });
 
 test("Basic/LinkedExcel reports bad references from workspace docs with exact cells", () => {
@@ -1314,7 +1357,8 @@ test("Open File and Open Folder sidebar buttons are constrained to one line", ()
   assert.match(html, /<button data-command="open-file">Open File<\/button>/);
   assert.match(html, /<button data-command="open-folder">Open Folder<\/button>/);
   assert.match(css, /--sidebar-width:\s*260px/);
-  assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*260px/);
+  assert.match(css, /\.layout-root\s*\{[\s\S]*grid-template-columns:\s*var\(--dock-left-width\) minmax\(var\(--editor-min-width\), 1fr\) var\(--dock-right-width\)/);
+  assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*0/);
   assert.match(css, /\.sidebar-actions button\s*\{[\s\S]*white-space:\s*nowrap/);
   assert.match(app, /const MIN_SIDEBAR_WIDTH = 260/);
   assert.match(app, /clamp\(Math\.round\(width\), MIN_SIDEBAR_WIDTH, 520\)/);
@@ -1326,7 +1370,86 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.match(source, /async function toggleProblemsPanel\(\)/);
   assert.match(source, /txteditor\.sidebarWidth/);
   assert.match(source, /txteditor\.problemsHeight/);
-  assert.match(source, /state\.problemsVisible/);
+  assert.match(source, /problemsVisible: localStorage\.getItem\("txteditor\.problems"\) === "visible"/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.problems", state\.problemsVisible \? "visible" : "hidden"\)/);
+});
+
+test("dock layout defaults to Explorer left and Problems bottom without replacing visibility keys", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const resetDockLayout = source.match(/function resetDockLayout\(\)[\s\S]*?\nfunction setDockSplitRatio/)?.[0] ?? "";
+  assert.match(source, /const DOCK_EDGES = \["left", "right", "top", "bottom"\];/);
+  assert.match(source, /const DEFAULT_DOCK_LAYOUT = Object\.freeze\(\{\s*explorer: "left",\s*problems: "bottom"/);
+  assert.match(source, /const savedDockLayout = normalizeDockLayout\(readJsonStorage\("txteditor\.layout\.docks", DEFAULT_DOCK_LAYOUT\)\);/);
+  assert.match(source, /dockLayout: savedDockLayout/);
+  assert.match(source, /sidebarVisible: localStorage\.getItem\("txteditor\.sidebar"\) !== "hidden"/);
+  assert.match(source, /problemsVisible: localStorage\.getItem\("txteditor\.problems"\) === "visible"/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.layout\.docks", JSON\.stringify\(state\.dockLayout\)\)/);
+  assert.match(resetDockLayout, /explorer: DEFAULT_DOCK_LAYOUT\.explorer/);
+  assert.match(resetDockLayout, /problems: DEFAULT_DOCK_LAYOUT\.problems/);
+  assert.doesNotMatch(resetDockLayout, /sidebarVisible|problemsVisible|txteditor\.sidebar|txteditor\.problems|state\.lint/);
+});
+
+test("dock shell renders every edge and same-edge split orientations", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  for (const id of ["layoutRoot", "dockTop", "dockLeft", "dockRight", "dockBottom"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /data-dock-panel="explorer"/);
+  assert.match(html, /data-dock-panel="problems"/);
+  assert.match(css, /\.dock-left\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.dock-right\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.dock-top\s*\{[\s\S]*flex-direction:\s*row/);
+  assert.match(css, /\.dock-bottom\s*\{[\s\S]*flex-direction:\s*row/);
+  assert.match(css, /\.dock-left \.dock-splitter,\s*\.dock-right \.dock-splitter\s*\{[\s\S]*cursor:\s*ns-resize/);
+  assert.match(css, /\.dock-top \.dock-splitter,\s*\.dock-bottom \.dock-splitter\s*\{[\s\S]*cursor:\s*ew-resize/);
+  assert.match(source, /function syncDockLayout\(\)/);
+  assert.match(source, /function dockSplitter\(edge\)/);
+  assert.match(source, /function startDockSplitResize\(edge, event\)/);
+  assert.match(source, /function setDockEdgeSize\(edge, size\)/);
+  assert.match(source, /grid\.layout\(\);/);
+});
+
+test("dock settings expose Explorer, Problems, and reset layout without drag controls", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";
+  assert.match(appSettings, /Explorer Dock/);
+  assert.match(appSettings, /Problems Dock/);
+  assert.match(appSettings, /data-settings-dock-panel="\$\{panel\}"/);
+  assert.match(appSettings, /data-settings-reset-layout/);
+  assert.match(appSettings, /setPanelDock\(button\.dataset\.settingsDockPanel, button\.dataset\.settingsDockEdge\)/);
+  assert.match(appSettings, /resetDockLayout\(\); refresh\(\);/);
+  assert.doesNotMatch(source, /DOCK_DRAG_THRESHOLD/);
+  assert.doesNotMatch(source, /function wireDocking\(\)/);
+  assert.doesNotMatch(source, /function startDockPointerDrag/);
+  assert.doesNotMatch(source, /dockDragState/);
+  assert.doesNotMatch(source, /dockDragHandle/);
+});
+
+test("dock drop UI is removed and docked controls keep a single-row Problems header", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
+  assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
+  assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
+  assert.doesNotMatch(source, /dockDropZones|data-dock-target|dockSuppressClick/);
+  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
+  assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.problems-header\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow \.problems-header\s*\{[\s\S]*grid-template-rows:\s*38px 38px;[\s\S]*height:\s*76px;/);
+  assert.match(css, /\.problems-panel\.problems-panel-narrow \.lint-controls\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
+  assert.match(css, /\.lint-controls\s*\{[\s\S]*flex:\s*0 0 auto;/);
+  assert.match(css, /\.problem-item\s*\{[\s\S]*white-space:\s*nowrap !important;/);
+  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.problem-item,\s*\.problems-panel\[data-dock-edge="right"\] \.problem-item\s*\{[\s\S]*white-space:\s*normal !important;/);
+  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.problem-message,\s*\.problems-panel\[data-dock-edge="right"\] \.problem-message\s*\{[\s\S]*overflow-wrap:\s*anywhere;[\s\S]*white-space:\s*normal;/);
+  assert.match(source, /function syncProblemsHeaderLayout\(\)/);
+  assert.match(source, /header\.scrollWidth > header\.clientWidth \+ 2/);
+  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.problems-header/);
+  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
 
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
@@ -1335,6 +1458,19 @@ test("Problems lint panel is gated by the active P panel and lint enabled state"
   assert.match(source, /if \(!state\.lint\.enabled \|\| !isVectorLintEngine\(\)\) \{/);
   assert.match(source, /const diagnosticsByCell = lintActive\(\)\s*\?\s*groupDiagnosticsByCell/);
   assert.match(source, /const diags = lintActive\(\) \? diagnosticsForDocument/);
+});
+
+test("Legacy Lint and Vector-LSP activation stay independent of dock placement", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const lintActivation = source.match(/function lintActive\(\)[\s\S]*?\nfunction effectiveVectorLspHoverEnabled/)?.[0] ?? "";
+  const legacyScheduling = source.match(/function scheduleLegacyLintForOpen[\s\S]*?\nasync function runLegacyLint/)?.[0] ?? "";
+  const vectorDiagnostics = source.match(/function handleLspDiagnosticsChanged[\s\S]*?\nfunction updateGridDiagnostics/)?.[0] ?? "";
+  assert.match(lintActivation, /return state\.problemsVisible && state\.lint\.enabled;/);
+  assert.match(lintActivation, /return lintActive\(\) && isLegacyLintEngine\(\);/);
+  assert.match(lintActivation, /return lintActive\(\) && isVectorLintEngine\(\);/);
+  assert.doesNotMatch(lintActivation, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
+  assert.doesNotMatch(legacyScheduling, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
+  assert.doesNotMatch(vectorDiagnostics, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
 });
 
 test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
@@ -1454,19 +1590,58 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
 
 test("Legacy Lint is isolated from Vector-LSP traffic and writes the shared diagnostic pipeline", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(source, /function scheduleLegacyLintForChange\(doc\)/);
-  assert.match(source, /const diagnostics = runLint\(activeLegacyLintDocuments\(\), state\.lint\.legacy\.settings\);/);
+  assert.match(source, /function scheduleLegacyLintForOpen\(reason = "file-opened"\)\s*\{\s*scheduleLegacyLintFull\(reason, 0\);/);
+  assert.match(source, /function scheduleLegacyLintForEdit\(doc\)[\s\S]*const delay = hasDiagnostics \? 120 : 180;[\s\S]*scheduleLegacyLintFull\(hasDiagnostics \? "diagnostic-file-edited" : "file-edited", delay\);/);
+  assert.match(source, /function scheduleLegacyLintFull\(reason = "change", delay = 0\)/);
+  assert.match(source, /const diagnostics = runLintWithWorkspaceIndex\(indexResult\.index, state\.lint\.legacy\.settings\);/);
   assert.match(source, /setLintDiagnostics\(diagnostics\);/);
   assert.match(source, /if \(!state\.lint\.enabled \|\| !isVectorLintEngine\(\)\) \{[\s\S]*vector-diagnostics-ignored/);
   assert.match(source, /async function requestLspHover\(row, col, options = \{\}\) \{\s*if \(!effectiveVectorLspHoverEnabled\(\)\)/);
   assert.match(source, /if \(isVectorLintEngine\(\)\) lspUpdateDoc\(doc, changedRows\)\.catch/);
-  assert.match(source, /else scheduleLegacyLintForChange\(doc\);/);
+  assert.match(source, /else scheduleLegacyLintForEdit\(doc\);/);
   assert.match(source, /if \(isVectorLintEngine\(\)\) \{\s*lspOpenDoc\(doc\)\.catch/);
-  assert.match(source, /else scheduleLegacyLintForChange\(doc\);/);
+  assert.match(source, /else \{\s*scheduleLegacyLintForOpen\("file-opened"\);/);
   assert.match(source, /if \(!isVectorLintEngine\(\) \|\| !state\.lsp\.started\) return false;/);
   assert.match(source, /if \(!isVectorLintEngine\(\) \|\| !state\.lsp\.started\) return;/);
   assert.match(source, /state\.lint\.legacy\.workspaceDocs = mergeOpenLegacyWorkspaceDocs\(docs\);/);
   assert.match(source, /state\.lint\.legacy\.workspaceDocs\.find/);
+});
+
+test("Legacy Lint activation paths schedule immediate runs without changing the P tab model", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const addDocument = source.match(/async function addDocument\(doc\)[\s\S]*?\nasync function openFile\(\)/)?.[0] ?? "";
+  assert.match(source, /function legacyLintDisplayActive\(\)\s*\{\s*return lintActive\(\) && isLegacyLintEngine\(\);/);
+  assert.match(source, /else scheduleLegacyLintFull\("workspace-opened", 0\);/);
+  assert.match(source, /scheduleLegacyLintFull\("engine-switched-legacy", 0\);/);
+  assert.match(source, /scheduleLegacyLintFull\("lint-enabled", 0\);/);
+  assert.match(source, /scheduleLegacyLintFull\("profile-changed", 0\);/);
+  assert.match(source, /scheduleLegacyLintFull\("problems-opened", 0\);/);
+  assert.match(addDocument, /scheduleLegacyLintForOpen\("file-opened"\);/);
+  assert.doesNotMatch(addDocument, /scheduleLegacyLintForEdit\(doc\)/);
+});
+
+test("Legacy Lint workspace loading uses bulk native reads and cache signatures", async () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  assert.match(source, /openNativePathsBulk\(explorerFiles\.map\(\(file\) => file\.path\), TableDocument\)/);
+  assert.match(source, /function legacyWorkspaceFileSignature\(files\)/);
+  assert.match(source, /workspaceLoad\.status === "ready" && state\.lint\.legacy\.workspaceLoad\.signature === signature/);
+  assert.match(source, /workspaceIndexCache/);
+  assert.match(rust, /fn read_text_files\(paths: Vec<String>\) -> Vec<Result<TextFilePayload, String>>/);
+  assert.match(rust, /read_text_files,/);
+  assert.match(rust, /modified_ms: Option<u64>/);
+  const results = await openNativePathsBulk(["a.txt", "bad.txt"], TableDocument, async (command, args) => {
+    assert.equal(command, "read_text_files");
+    assert.deepEqual(args.paths, ["a.txt", "bad.txt"]);
+    return [
+      { Ok: { path: "a.txt", name: "a.txt", text: "col\n1\n", encoding: "utf-8" } },
+      { Err: "failed to read" }
+    ];
+  });
+  assert.equal(results.length, 2);
+  assert.equal(results[0].doc.name, "a.txt");
+  assert.equal(results[0].bulkRead, true);
+  assert.equal(results[1].error, "failed to read");
 });
 
 test("resize interactions clear hover state and block stale hover results", () => {
@@ -1548,8 +1723,26 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
   assert.match(source, /version: 0/);
   assert.match(source, /function setLintDiagnostics\(diagnostics\)\s*\{\s*state\.lint\.diagnostics = diagnostics;\s*state\.lint\.version \+= 1;/);
   assert.match(source, /function renderProblemsPanelIfNeeded\(\)\s*\{\s*const started = perfNow\(\);\s*if \(!els\.problemsList \|\| !state\.problemsVisible \|\| state\.bottomTab !== "problems"\) \{\s*recordUiPerf\("render-problems-panel", started, \{ skipped: true \}\);\s*return;/);
-  assert.match(source, /if \(els\.problemsList\.dataset\.renderKey === key\) \{\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);\s*return;/);
+  assert.match(source, /if \(els\.problemsList\.dataset\.renderKey === key\) \{\s*updateActiveProblemHighlight\(\);\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);\s*return;/);
   assert.match(source, /function problemsPanelRenderKey\(\)/);
+});
+
+test("Problems list highlights diagnostics for the active or edited marker cell", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /onSelectionChanged: \(\) => updateActiveProblemHighlight\(\)/);
+  assert.match(source, /function activeProblemDiagnosticIds\(\)/);
+  assert.match(source, /const activeCell = grid\.editingCell\?\.\(\) \?\? state\.selection\.focus;/);
+  assert.match(source, /diagnostic\.rowIndex !== activeCell\.row \|\| diagnostic\.columnIndex !== activeCell\.column/);
+  assert.match(source, /button\.classList\.toggle\("problem-item-active-cell", active\);/);
+  assert.match(source, /button\.setAttribute\("aria-current", "location"\)/);
+  assert.match(source, /updateActiveProblemHighlight\(\);\s*recordUiPerf\("render-problems-panel", started, \{ cached: true \}\);/);
+  assert.match(grid, /onSelectionChanged/);
+  assert.match(grid, /notifySelectionChanged\("pointer-selection"\)/);
+  assert.match(grid, /notifySelectionChanged\("keyboard-selection"\)/);
+  assert.match(grid, /notifySelectionChanged\("edit-start"\)/);
+  assert.match(css, /\.problem-item\.problem-item-active-cell\s*\{[\s\S]*background:\s*color-mix/);
 });
 
 test("UI performance instrumentation records row and lint display work", () => {
@@ -1566,10 +1759,23 @@ test("active cell highlights both the first-row header and left row header", () 
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /const activeHeader = this\.selection\.focus\.row === row;/);
-  assert.match(source, /const activeColumnHeader = row === 0 && this\.selection\.focus\.column === column;/);
+  assert.match(source, /const activeColumnHeader = !editingThisCell && row === 0 && this\.selection\.focus\.column === column;/);
   assert.match(source, /GRID_COLORS\.activeHeader/);
   assert.match(css, /--grid-active-header-bg: var\(--activeHeaderBg\);/);
   assert.match(css, /--grid-active-header-text: var\(--activeHeaderText\);/);
+});
+
+test("active row header draws raised chrome over the row index only", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /if \(activeHeader\) this\.drawActiveRowHeaderChrome\(y, height\);/);
+  assert.match(source, /drawActiveRowHeaderChrome\(y, height\) \{/);
+  assert.match(source, /GRID_COLORS\.activeRowHeaderHighlight/);
+  assert.match(source, /GRID_COLORS\.activeRowHeaderShadow/);
+  assert.match(source, /GRID_COLORS\.activeRowHeaderSheen/);
+  assert.match(css, /--grid-active-row-header-highlight:/);
+  assert.match(css, /--grid-active-row-header-shadow:/);
+  assert.match(css, /--grid-active-row-header-sheen:/);
 });
 
 test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
@@ -1642,31 +1848,32 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
 
-test("quick typing edit commits on arrow navigation while explicit edit keeps caret behavior", () => {
+test("quick and explicit edit modes commit on arrow-key cell navigation", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.startEdit\(event\.key, true, "quick"\)/);
   assert.match(source, /this\.startEdit\(null, false, "explicit"\)/);
-  assert.match(source, /this\.editMode === "quick" && isArrowNavigationKey\(event\.key\)/);
+  assert.match(source, /if \(isArrowNavigationKey\(event\.key\)\) \{/);
+  assert.doesNotMatch(source.match(/onEditorKeyDown\(event\) \{[\s\S]*?\n  startEdit/)?.[0] ?? "", /editMode === "quick"/);
   assert.match(source, /this\.commitEdit\(\);\s*this\.moveSelectionBy\(rowDelta, columnDelta\);/);
   assert.match(source, /this\.host\.addEventListener\("dblclick", \(event\) => this\.onDblClick\(event\)\)/);
   assert.match(source, /this\.editor\.selectionStart = this\.editor\.value\.length;\s*this\.editor\.selectionEnd = this\.editor\.value\.length;/);
   assert.equal(source.includes("this.editor.select();"), false);
 });
 
-test("version metadata is bumped to TXTeditor 0.4.1", () => {
+test("version metadata is bumped to TXTeditor 0.4.2", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.4.1");
-  assert.equal(lock.version, "0.4.1");
-  assert.equal(lock.packages[""].version, "0.4.1");
-  assert.match(pkg.description, /TXTeditor 0\.4\.1/);
-  assert.match(cargoToml, /version = "0\.4\.1"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.4\.1/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.1"/);
-  assert.equal(tauri.version, "0.4.1");
-  assert.match(readme, /TXTeditor 0\.4\.1 is/);
+  assert.equal(pkg.version, "0.4.2");
+  assert.equal(lock.version, "0.4.2");
+  assert.equal(lock.packages[""].version, "0.4.2");
+  assert.match(pkg.description, /TXTeditor 0\.4\.2/);
+  assert.match(cargoToml, /version = "0\.4\.2"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.4\.2/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.2"/);
+  assert.equal(tauri.version, "0.4.2");
+  assert.match(readme, /TXTeditor 0\.4\.2 is/);
 });

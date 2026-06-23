@@ -18,6 +18,9 @@ const GRID_COLORS = {
   firstColumnBorder: "#4f5c6a",
   activeHeader: "#315f8f",
   activeHeaderText: "#ffffff",
+  activeRowHeaderHighlight: "rgba(255, 255, 255, .28)",
+  activeRowHeaderShadow: "rgba(4, 16, 28, .42)",
+  activeRowHeaderSheen: "rgba(255, 255, 255, .08)",
   frozen: "#252a31",
   frozenHeader: "#30343b",
   grid: "#3a3d41",
@@ -37,7 +40,10 @@ const GRID_COLORS = {
   textSelected: "#ffffff",
   textEmpty: "#6f747b",
   textHeader: "#d8d8d8",
-  frozenDivider: "#6a7b90"
+  frozenDivider: "#6a7b90",
+  frozenEdgeHighlight: "rgba(255, 255, 255, .22)",
+  frozenEdgeShadow: "rgba(18, 31, 45, .24)",
+  frozenEdgeAmbient: "rgba(18, 31, 45, .10)"
 };
 const GRID_CSS_VARS = {
   background: "--grid-bg",
@@ -50,6 +56,9 @@ const GRID_CSS_VARS = {
   firstColumnBorder: "--grid-first-column-border",
   activeHeader: "--grid-active-header-bg",
   activeHeaderText: "--grid-active-header-text",
+  activeRowHeaderHighlight: "--grid-active-row-header-highlight",
+  activeRowHeaderShadow: "--grid-active-row-header-shadow",
+  activeRowHeaderSheen: "--grid-active-row-header-sheen",
   frozen: "--grid-frozen-bg",
   frozenHeader: "--grid-frozen-header-bg",
   grid: "--grid-line",
@@ -69,11 +78,14 @@ const GRID_CSS_VARS = {
   textSelected: "--grid-text-selected",
   textEmpty: "--grid-text-empty",
   textHeader: "--grid-header-text",
-  frozenDivider: "--grid-frozen-divider"
+  frozenDivider: "--grid-frozen-divider",
+  frozenEdgeHighlight: "--grid-frozen-edge-highlight",
+  frozenEdgeShadow: "--grid-frozen-edge-shadow",
+  frozenEdgeAmbient: "--grid-frozen-edge-ambient"
 };
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -91,6 +103,7 @@ export class CanvasGrid {
     this.onHoverRequest = onHoverRequest;
     this.onHoverInvalidated = onHoverInvalidated;
     this.onViewportChanged = onViewportChanged;
+    this.onSelectionChanged = onSelectionChanged;
     this._lspHoverByCell = new Map();
     this._hoveredCell = null;
     this._lastTooltipX = 0;
@@ -233,6 +246,14 @@ export class CanvasGrid {
   setDiagnostics(diagnosticsByCell) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     this.draw();
+  }
+
+  notifySelectionChanged(reason = "selection") {
+    this.onSelectionChanged?.({
+      reason,
+      focus: { ...this.selection.focus },
+      editingCell: this.editingCell()
+    });
   }
 
   bind() {
@@ -551,6 +572,7 @@ export class CanvasGrid {
     this.ctx.fillRect(0, y, this.rowHeaderWidth, height);
     this.ctx.strokeStyle = GRID_COLORS.grid;
     this.ctx.strokeRect(0, y, this.rowHeaderWidth, height);
+    if (activeHeader) this.drawActiveRowHeaderChrome(y, height);
     this.ctx.fillStyle = selected ? GRID_COLORS.textSelected : activeHeader ? GRID_COLORS.activeHeaderText : GRID_COLORS.rowText;
     this.ctx.font = this.font(400);
     const label = String(row + 1);
@@ -559,14 +581,39 @@ export class CanvasGrid {
     this.ctx.fillText(label, x, y + height / 2);
   }
 
+  drawActiveRowHeaderChrome(y, height) {
+    if (height <= 2 || this.rowHeaderWidth <= 2) return;
+    const ctx = this.ctx;
+    const right = this.rowHeaderWidth - 1.5;
+    const bottom = y + height - 1.5;
+    ctx.save();
+    ctx.fillStyle = GRID_COLORS.activeRowHeaderSheen;
+    ctx.fillRect(2, y + 2, Math.max(0, this.rowHeaderWidth - 4), Math.max(1, Math.floor(height * .35)));
+    ctx.strokeStyle = GRID_COLORS.activeRowHeaderHighlight;
+    ctx.beginPath();
+    ctx.moveTo(1.5, bottom - 1);
+    ctx.lineTo(1.5, y + 1.5);
+    ctx.lineTo(right - 1, y + 1.5);
+    ctx.stroke();
+    ctx.strokeStyle = GRID_COLORS.activeRowHeaderShadow;
+    ctx.beginPath();
+    ctx.moveTo(1.5, bottom);
+    ctx.lineTo(right, bottom);
+    ctx.lineTo(right, y + 1.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawCell(row, column, x, y, width, height, options = {}) {
-    const selected = this.selection.contains(row, column);
-    const active = this.selection.focus.row === row && this.selection.focus.column === column;
+    const editing = this.editingCell();
+    const editingThisCell = editing?.row === row && editing?.column === column;
+    const selected = !editingThisCell && this.selection.contains(row, column);
+    const active = !editingThisCell && this.selection.focus.row === row && this.selection.focus.column === column;
     const ctx = this.ctx;
     const firstColumnLabel = column === 0 && row > 0;
     ctx.font = this.font(row === 0 || firstColumnLabel ? 600 : 400);
     const frozen = options.frozenRow || options.frozenColumn;
-    const activeColumnHeader = row === 0 && this.selection.focus.column === column;
+    const activeColumnHeader = !editingThisCell && row === 0 && this.selection.focus.column === column;
     const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
     ctx.fillStyle = baseBackground;
     ctx.fillRect(x, y, width, height);
@@ -580,7 +627,7 @@ export class CanvasGrid {
       ctx.stroke();
     }
     const value = this.doc.getCell(row, column);
-    if (shouldDrawCellText(row, column, this.editingCell())) {
+    if (shouldDrawCellText(row, column, editing)) {
       ctx.fillStyle = activeColumnHeader && !selected ? GRID_COLORS.activeHeaderText : cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
       ctx.textBaseline = "middle";
       this.fillText(value, x + 8, y + height / 2, width - 12);
@@ -628,38 +675,42 @@ export class CanvasGrid {
     }
     if (frozenColWidth) {
       const x = this.rowHeaderWidth + frozenColWidth;
-      ctx.strokeStyle = GRID_COLORS.gridFrozen;
-      ctx.beginPath();
-      ctx.moveTo(x - .5, 0);
-      ctx.lineTo(x - .5, tableHeight);
-      ctx.stroke();
-      ctx.strokeStyle = GRID_COLORS.frozenDivider;
-      ctx.beginPath();
-      ctx.moveTo(x + .5, 0);
-      ctx.lineTo(x + .5, tableHeight);
-      ctx.stroke();
+      this.drawFrozenVerticalEdge(x, tableHeight);
     }
     if (frozenRowHeight) {
       const y = frozenRowHeight;
-      ctx.strokeStyle = GRID_COLORS.gridFrozen;
-      ctx.beginPath();
-      ctx.moveTo(0, y - .5);
-      ctx.lineTo(tableWidth, y - .5);
-      ctx.stroke();
-      ctx.strokeStyle = GRID_COLORS.frozenDivider;
-      ctx.beginPath();
-      ctx.moveTo(0, y + .5);
-      ctx.lineTo(tableWidth, y + .5);
-      ctx.stroke();
+      this.drawFrozenHorizontalEdge(y, tableWidth);
     }
     ctx.restore();
+  }
+
+  drawFrozenVerticalEdge(x, height) {
+    if (height <= 0) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = GRID_COLORS.frozenEdgeHighlight;
+    ctx.fillRect(x - 2, 0, 1, height);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeShadow;
+    ctx.fillRect(x - 1, 0, 1, height);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeAmbient;
+    ctx.fillRect(x, 0, 3, height);
+  }
+
+  drawFrozenHorizontalEdge(y, width) {
+    if (width <= 0) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = GRID_COLORS.frozenEdgeHighlight;
+    ctx.fillRect(0, y - 2, width, 1);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeShadow;
+    ctx.fillRect(0, y - 1, width, 1);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeAmbient;
+    ctx.fillRect(0, y, width, 3);
   }
 
   drawFrozenBorderRect(x, y, width, height) {
     if (width <= 0 || height <= 0) return;
     const ctx = this.ctx;
     ctx.save();
-    ctx.strokeStyle = GRID_COLORS.gridFrozen;
+    ctx.strokeStyle = GRID_COLORS.frozenEdgeAmbient;
     ctx.strokeRect(x + .5, y + .5, width - 1, height - 1);
     ctx.restore();
   }
@@ -778,6 +829,7 @@ export class CanvasGrid {
     this.dragging = hit.kind === "cell" && !toggle;
     if (this.dragging) this.clearHoverState();
     this.draw();
+    this.notifySelectionChanged("pointer-selection");
   }
 
   isScrollbarEvent(event) {
@@ -817,6 +869,7 @@ export class CanvasGrid {
       this.clearHoverState();
       this.selection.extend(hit.row, hit.column);
       this.draw();
+      this.notifySelectionChanged("drag-selection");
       return;
     }
     if (!this.resizing) this._updateTooltip(event, hit);
@@ -968,6 +1021,7 @@ export class CanvasGrid {
     if (hit.kind === "column-header" && !this.selection.hasFullColumn(hit.column, this.doc.rowCount)) this.selectColumn(hit.column);
     if (hit.kind === "corner") this.selection.selectAll(this.doc.rowCount, this.doc.columnCount);
     this.draw();
+    this.notifySelectionChanged("context-selection");
     this.onContextMenu?.({ x: event.clientX, y: event.clientY, hit });
   }
 
@@ -1082,6 +1136,7 @@ export class CanvasGrid {
     this.scrollCellIntoView(row, column);
     event.preventDefault();
     this.draw();
+    this.notifySelectionChanged("keyboard-selection");
   }
 
   jumpRow(row, direction) {
@@ -1124,7 +1179,7 @@ export class CanvasGrid {
   }
 
   onEditorKeyDown(event) {
-    if (this.editMode === "quick" && isArrowNavigationKey(event.key)) {
+    if (isArrowNavigationKey(event.key)) {
       event.preventDefault();
       const { rowDelta, columnDelta } = arrowNavigationDelta(event.key);
       this.commitEdit();
@@ -1162,6 +1217,7 @@ export class CanvasGrid {
     this.editing = true;
     this.editMode = mode;
     this.draw();
+    this.notifySelectionChanged("edit-start");
     this.editor.focus();
     this.editor.selectionStart = this.editor.value.length;
     this.editor.selectionEnd = this.editor.value.length;
@@ -1176,6 +1232,7 @@ export class CanvasGrid {
     this.editor.classList.remove("active");
     this.onEdit?.([{ row, column, value: this.editor.value }], "Edit Cell");
     this.draw();
+    this.notifySelectionChanged("edit-commit");
   }
 
   cancelEdit() {
@@ -1183,6 +1240,7 @@ export class CanvasGrid {
     this.editMode = null;
     this.editor.classList.remove("active");
     this.draw();
+    this.notifySelectionChanged("edit-cancel");
   }
 
   moveSelectionBy(rowDelta, columnDelta) {
@@ -1190,6 +1248,7 @@ export class CanvasGrid {
     this.selection.set(row, column);
     this.scrollCellIntoView(row, column);
     this.draw();
+    this.notifySelectionChanged("keyboard-selection");
   }
 
   editingCell() {
@@ -1204,9 +1263,8 @@ export class CanvasGrid {
     const frozen = (this.doc.freezeFirstRow && row === 0) || (this.doc.freezeFirstColumn && column === 0);
     const firstColumnLabel = column === 0 && row > 0;
     const unselectedBackground = cellBackground(row, false, frozen, firstColumnLabel);
-    const selectedBackground = cellBackground(row, true, frozen, firstColumnLabel);
-    this.editor.style.backgroundColor = opaqueColor(selectedBackground, unselectedBackground);
-    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), true, this.colorizeColumns, firstColumnLabel);
+    this.editor.style.backgroundColor = unselectedBackground;
+    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), false, this.colorizeColumns, firstColumnLabel);
     this.editor.style.fontFamily = this.gridFontFamily;
     this.editor.style.fontWeight = row === 0 || firstColumnLabel ? "600" : "400";
   }
@@ -1345,38 +1403,6 @@ function cellTextColor(row, column, value, selected, colorizeColumns, firstColum
   return GRID_COLORS.text;
 }
 
-function opaqueColor(foreground, background) {
-  const fg = parseColor(foreground);
-  if (!fg || fg.a >= 1) return foreground;
-  const bg = parseColor(background) ?? { r: 30, g: 30, b: 30, a: 1 };
-  const alpha = fg.a + bg.a * (1 - fg.a);
-  const blend = (fgValue, bgValue) => Math.round((fgValue * fg.a + bgValue * bg.a * (1 - fg.a)) / alpha);
-  return `rgb(${blend(fg.r, bg.r)}, ${blend(fg.g, bg.g)}, ${blend(fg.b, bg.b)})`;
-}
-
-function parseColor(value) {
-  const text = String(value).trim();
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-  if (hex) {
-    const raw = hex[1].length === 3
-      ? hex[1].split("").map((part) => part + part).join("")
-      : hex[1];
-    return {
-      r: Number.parseInt(raw.slice(0, 2), 16),
-      g: Number.parseInt(raw.slice(2, 4), 16),
-      b: Number.parseInt(raw.slice(4, 6), 16),
-      a: 1
-    };
-  }
-  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([.\d]+))?\s*\)$/i.exec(text);
-  if (!rgb) return null;
-  return {
-    r: clamp(Number.parseInt(rgb[1], 10), 0, 255),
-    g: clamp(Number.parseInt(rgb[2], 10), 0, 255),
-    b: clamp(Number.parseInt(rgb[3], 10), 0, 255),
-    a: rgb[4] === undefined ? 1 : clamp(Number.parseFloat(rgb[4]), 0, 1)
-  };
-}
 
 function isPrintableEditKey(event) {
   return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;

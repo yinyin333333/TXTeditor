@@ -13,52 +13,62 @@
         <button class="activity-button" data-command="show-problems" title="Problems">P</button>
       </aside>
 
-      <aside id="sidebar" class="sidebar" aria-label="Workspace">
-        <header class="sidebar-header">TXTeditor</header>
-        <div class="sidebar-actions">
-          <button data-command="open-file">Open File</button>
-          <button data-command="open-folder">Open Folder</button>
-        </div>
-        <div id="fileList" class="file-list"></div>
-      </aside>
-      <div id="sidebarResizer" class="sidebar-resizer" aria-hidden="true"></div>
+      <div id="layoutRoot" class="layout-root">
+        <section id="dockTop" class="dock dock-top" data-dock-edge="top" aria-label="Top dock"></section>
 
-      <main class="main">
-        <div id="tabs" class="tabs"></div>
-        <section class="toolbar">
-          <button data-command="open-file">Open</button>
-          <button data-command="save-file">Save</button>
-          <button data-command="save-as">Save As</button>
-          <button data-command="undo">Undo</button>
-          <button data-command="redo">Redo</button>
-          <button data-command="search">Find</button>
-          <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
-          <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
-          <button data-command="open-app-settings">Settings</button>
+        <section id="dockLeft" class="dock dock-left" data-dock-edge="left" aria-label="Left dock">
+          <aside id="sidebar" class="sidebar" aria-label="Workspace" data-dock-panel="explorer">
+            <div id="sidebarResizer" class="sidebar-resizer pane-resizer" aria-hidden="true"></div>
+            <header class="sidebar-header">TXTeditor</header>
+            <div class="sidebar-actions">
+              <button data-command="open-file">Open File</button>
+              <button data-command="open-folder">Open Folder</button>
+            </div>
+            <div id="fileList" class="file-list"></div>
+          </aside>
         </section>
-        <section id="gridHost" class="grid-host" tabindex="0" aria-label="Virtual table editor">
-          <canvas id="gridCanvas"></canvas>
-          <canvas id="frozenCanvas"></canvas>
-          <div id="scrollSurface" class="scroll-surface"></div>
-          <input id="cellEditor" class="cell-editor" autocomplete="off" spellcheck="false" />
-          <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
-          <div id="overviewRuler" class="overview-ruler"></div>
-        </section>
-      </main>
 
-      <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems">
-        <div id="problemsResizer" class="problems-resizer" aria-hidden="true"></div>
-        <header class="problems-header">
-          <div class="bottom-tabs">
-            <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
-            <button class="bottom-tab" data-bottom-tab="log">Log</button>
-          </div>
-          <div id="lintControls" class="lint-controls"></div>
-        </header>
-        <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules"></div>
-        <div id="problemsList" class="problems-list"></div>
-        <div id="logList" class="log-list hidden"></div>
-      </section>
+        <main class="main">
+          <div id="tabs" class="tabs"></div>
+          <section class="toolbar">
+            <button data-command="open-file">Open</button>
+            <button data-command="save-file">Save</button>
+            <button data-command="save-as">Save As</button>
+            <button data-command="undo">Undo</button>
+            <button data-command="redo">Redo</button>
+            <button data-command="search">Find</button>
+            <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
+            <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
+            <button data-command="open-app-settings">Settings</button>
+          </section>
+          <section id="gridHost" class="grid-host" tabindex="0" aria-label="Virtual table editor">
+            <canvas id="gridCanvas"></canvas>
+            <canvas id="frozenCanvas"></canvas>
+            <div id="scrollSurface" class="scroll-surface"></div>
+            <input id="cellEditor" class="cell-editor" autocomplete="off" spellcheck="false" />
+            <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
+            <div id="overviewRuler" class="overview-ruler"></div>
+          </section>
+        </main>
+
+        <section id="dockRight" class="dock dock-right" data-dock-edge="right" aria-label="Right dock"></section>
+
+        <section id="dockBottom" class="dock dock-bottom" data-dock-edge="bottom" aria-label="Bottom dock">
+          <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems" data-dock-panel="problems">
+            <div id="problemsResizer" class="problems-resizer pane-resizer" aria-hidden="true"></div>
+            <header class="problems-header">
+              <div class="bottom-tabs">
+                <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
+                <button class="bottom-tab" data-bottom-tab="log">Log</button>
+              </div>
+              <div id="lintControls" class="lint-controls"></div>
+            </header>
+            <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules"></div>
+            <div id="problemsList" class="problems-list"></div>
+            <div id="logList" class="log-list hidden"></div>
+          </section>
+        </section>
+      </div>
     </div>
 
     <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
