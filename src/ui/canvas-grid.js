@@ -37,7 +37,10 @@ const GRID_COLORS = {
   textSelected: "#ffffff",
   textEmpty: "#6f747b",
   textHeader: "#d8d8d8",
-  frozenDivider: "#6a7b90"
+  frozenDivider: "#6a7b90",
+  frozenEdgeHighlight: "rgba(255, 255, 255, .22)",
+  frozenEdgeShadow: "rgba(18, 31, 45, .24)",
+  frozenEdgeAmbient: "rgba(18, 31, 45, .10)"
 };
 const GRID_CSS_VARS = {
   background: "--grid-bg",
@@ -69,7 +72,10 @@ const GRID_CSS_VARS = {
   textSelected: "--grid-text-selected",
   textEmpty: "--grid-text-empty",
   textHeader: "--grid-header-text",
-  frozenDivider: "--grid-frozen-divider"
+  frozenDivider: "--grid-frozen-divider",
+  frozenEdgeHighlight: "--grid-frozen-edge-highlight",
+  frozenEdgeShadow: "--grid-frozen-edge-shadow",
+  frozenEdgeAmbient: "--grid-frozen-edge-ambient"
 };
 
 export class CanvasGrid {
@@ -639,38 +645,42 @@ export class CanvasGrid {
     }
     if (frozenColWidth) {
       const x = this.rowHeaderWidth + frozenColWidth;
-      ctx.strokeStyle = GRID_COLORS.gridFrozen;
-      ctx.beginPath();
-      ctx.moveTo(x - .5, 0);
-      ctx.lineTo(x - .5, tableHeight);
-      ctx.stroke();
-      ctx.strokeStyle = GRID_COLORS.frozenDivider;
-      ctx.beginPath();
-      ctx.moveTo(x + .5, 0);
-      ctx.lineTo(x + .5, tableHeight);
-      ctx.stroke();
+      this.drawFrozenVerticalEdge(x, tableHeight);
     }
     if (frozenRowHeight) {
       const y = frozenRowHeight;
-      ctx.strokeStyle = GRID_COLORS.gridFrozen;
-      ctx.beginPath();
-      ctx.moveTo(0, y - .5);
-      ctx.lineTo(tableWidth, y - .5);
-      ctx.stroke();
-      ctx.strokeStyle = GRID_COLORS.frozenDivider;
-      ctx.beginPath();
-      ctx.moveTo(0, y + .5);
-      ctx.lineTo(tableWidth, y + .5);
-      ctx.stroke();
+      this.drawFrozenHorizontalEdge(y, tableWidth);
     }
     ctx.restore();
+  }
+
+  drawFrozenVerticalEdge(x, height) {
+    if (height <= 0) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = GRID_COLORS.frozenEdgeHighlight;
+    ctx.fillRect(x - 2, 0, 1, height);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeShadow;
+    ctx.fillRect(x - 1, 0, 1, height);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeAmbient;
+    ctx.fillRect(x, 0, 3, height);
+  }
+
+  drawFrozenHorizontalEdge(y, width) {
+    if (width <= 0) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = GRID_COLORS.frozenEdgeHighlight;
+    ctx.fillRect(0, y - 2, width, 1);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeShadow;
+    ctx.fillRect(0, y - 1, width, 1);
+    ctx.fillStyle = GRID_COLORS.frozenEdgeAmbient;
+    ctx.fillRect(0, y, width, 3);
   }
 
   drawFrozenBorderRect(x, y, width, height) {
     if (width <= 0 || height <= 0) return;
     const ctx = this.ctx;
     ctx.save();
-    ctx.strokeStyle = GRID_COLORS.gridFrozen;
+    ctx.strokeStyle = GRID_COLORS.frozenEdgeAmbient;
     ctx.strokeRect(x + .5, y + .5, width - 1, height - 1);
     ctx.restore();
   }

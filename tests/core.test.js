@@ -783,6 +783,19 @@ test("frozen pane dividers are bounded to visible table content", () => {
   }), 0);
 });
 
+test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(source, /drawFrozenVerticalEdge\(x, tableHeight\);/);
+  assert.match(source, /drawFrozenHorizontalEdge\(y, tableWidth\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeHighlight;[\s\S]*ctx\.fillRect\(x - 2, 0, 1, height\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeShadow;[\s\S]*ctx\.fillRect\(x - 1, 0, 1, height\);/);
+  assert.match(source, /ctx\.fillStyle = GRID_COLORS\.frozenEdgeAmbient;[\s\S]*ctx\.fillRect\(x, 0, 3, height\);/);
+  assert.match(css, /--grid-frozen-edge-highlight:/);
+  assert.match(css, /--grid-frozen-edge-shadow:/);
+  assert.match(css, /--grid-frozen-edge-ambient:/);
+});
+
 test("resize handles are detected on cell boundaries, not only headers", () => {
   assert.deepEqual(
     classifyResizeHandle({

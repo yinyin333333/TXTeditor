@@ -90,6 +90,9 @@
   --grid-text-selected: #ffffff;
   --grid-text-empty: var(--cellTextMuted);
   --grid-frozen-divider: var(--frozenBorder);
+  --grid-frozen-edge-highlight: rgba(255, 255, 255, .18);
+  --grid-frozen-edge-shadow: rgba(0, 0, 0, .34);
+  --grid-frozen-edge-ambient: rgba(0, 0, 0, .12);
   --grid-font: Consolas, "Cascadia Mono", monospace;
   --sidebar-width: 260px;
   --sidebar-height: 260px;
@@ -195,6 +198,9 @@
   --grid-text-selected: #08111c;
   --grid-text-empty: var(--cellTextMuted);
   --grid-frozen-divider: var(--frozenBorder);
+  --grid-frozen-edge-highlight: rgba(255, 255, 255, .78);
+  --grid-frozen-edge-shadow: rgba(67, 92, 122, .26);
+  --grid-frozen-edge-ambient: rgba(67, 92, 122, .10);
 }
 
 * {
