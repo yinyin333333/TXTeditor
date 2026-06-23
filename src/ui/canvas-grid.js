@@ -560,13 +560,15 @@ export class CanvasGrid {
   }
 
   drawCell(row, column, x, y, width, height, options = {}) {
-    const selected = this.selection.contains(row, column);
-    const active = this.selection.focus.row === row && this.selection.focus.column === column;
+    const editing = this.editingCell();
+    const editingThisCell = editing?.row === row && editing?.column === column;
+    const selected = !editingThisCell && this.selection.contains(row, column);
+    const active = !editingThisCell && this.selection.focus.row === row && this.selection.focus.column === column;
     const ctx = this.ctx;
     const firstColumnLabel = column === 0 && row > 0;
     ctx.font = this.font(row === 0 || firstColumnLabel ? 600 : 400);
     const frozen = options.frozenRow || options.frozenColumn;
-    const activeColumnHeader = row === 0 && this.selection.focus.column === column;
+    const activeColumnHeader = !editingThisCell && row === 0 && this.selection.focus.column === column;
     const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
     ctx.fillStyle = baseBackground;
     ctx.fillRect(x, y, width, height);
@@ -580,7 +582,7 @@ export class CanvasGrid {
       ctx.stroke();
     }
     const value = this.doc.getCell(row, column);
-    if (shouldDrawCellText(row, column, this.editingCell())) {
+    if (shouldDrawCellText(row, column, editing)) {
       ctx.fillStyle = activeColumnHeader && !selected ? GRID_COLORS.activeHeaderText : cellTextColor(row, column, value, selected, this.colorizeColumns, firstColumnLabel);
       ctx.textBaseline = "middle";
       this.fillText(value, x + 8, y + height / 2, width - 12);
@@ -1204,9 +1206,8 @@ export class CanvasGrid {
     const frozen = (this.doc.freezeFirstRow && row === 0) || (this.doc.freezeFirstColumn && column === 0);
     const firstColumnLabel = column === 0 && row > 0;
     const unselectedBackground = cellBackground(row, false, frozen, firstColumnLabel);
-    const selectedBackground = cellBackground(row, true, frozen, firstColumnLabel);
-    this.editor.style.backgroundColor = opaqueColor(selectedBackground, unselectedBackground);
-    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), true, this.colorizeColumns, firstColumnLabel);
+    this.editor.style.backgroundColor = unselectedBackground;
+    this.editor.style.color = cellTextColor(row, column, this.doc.getCell(row, column), false, this.colorizeColumns, firstColumnLabel);
     this.editor.style.fontFamily = this.gridFontFamily;
     this.editor.style.fontWeight = row === 0 || firstColumnLabel ? "600" : "400";
   }
@@ -1345,38 +1346,6 @@ function cellTextColor(row, column, value, selected, colorizeColumns, firstColum
   return GRID_COLORS.text;
 }
 
-function opaqueColor(foreground, background) {
-  const fg = parseColor(foreground);
-  if (!fg || fg.a >= 1) return foreground;
-  const bg = parseColor(background) ?? { r: 30, g: 30, b: 30, a: 1 };
-  const alpha = fg.a + bg.a * (1 - fg.a);
-  const blend = (fgValue, bgValue) => Math.round((fgValue * fg.a + bgValue * bg.a * (1 - fg.a)) / alpha);
-  return `rgb(${blend(fg.r, bg.r)}, ${blend(fg.g, bg.g)}, ${blend(fg.b, bg.b)})`;
-}
-
-function parseColor(value) {
-  const text = String(value).trim();
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-  if (hex) {
-    const raw = hex[1].length === 3
-      ? hex[1].split("").map((part) => part + part).join("")
-      : hex[1];
-    return {
-      r: Number.parseInt(raw.slice(0, 2), 16),
-      g: Number.parseInt(raw.slice(2, 4), 16),
-      b: Number.parseInt(raw.slice(4, 6), 16),
-      a: 1
-    };
-  }
-  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([.\d]+))?\s*\)$/i.exec(text);
-  if (!rgb) return null;
-  return {
-    r: clamp(Number.parseInt(rgb[1], 10), 0, 255),
-    g: clamp(Number.parseInt(rgb[2], 10), 0, 255),
-    b: clamp(Number.parseInt(rgb[3], 10), 0, 255),
-    a: rgb[4] === undefined ? 1 : clamp(Number.parseFloat(rgb[4]), 0, 1)
-  };
-}
 
 function isPrintableEditKey(event) {
   return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;

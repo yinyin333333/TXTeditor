@@ -480,6 +480,22 @@ test("renderer skips stale text for the active editing cell only", () => {
   assert.equal(shouldDrawCellText(0, 1, null), true);
 });
 
+test("editing cell drawing suppresses selected chrome only for the editing cell", () => {
+  const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const drawCell = source.match(/drawCell\(row, column, x, y, width, height, options = \{\}\) \{[\s\S]*?\n  drawDiagnosticMarker/)?.[0] ?? "";
+  const styleEditor = source.match(/styleEditorForCell\(row, column\) \{[\s\S]*?\n  async measureColumnFitWidth/)?.[0] ?? "";
+  assert.match(drawCell, /const editing = this\.editingCell\(\);/);
+  assert.match(drawCell, /const editingThisCell = editing\?\.row === row && editing\?\.column === column;/);
+  assert.match(drawCell, /const selected = !editingThisCell && this\.selection\.contains\(row, column\);/);
+  assert.match(drawCell, /const active = !editingThisCell && this\.selection\.focus\.row === row && this\.selection\.focus\.column === column;/);
+  assert.match(drawCell, /this\.drawDiagnosticMarker\(row, column, x, y, width, height\);/);
+  assert.match(drawCell, /if \(active\) \{/);
+  assert.match(styleEditor, /const unselectedBackground = cellBackground\(row, false, frozen, firstColumnLabel\);/);
+  assert.match(styleEditor, /this\.editor\.style\.backgroundColor = unselectedBackground;/);
+  assert.match(styleEditor, /cellTextColor\(row, column, this\.doc\.getCell\(row, column\), false, this\.colorizeColumns, firstColumnLabel\)/);
+  assert.doesNotMatch(styleEditor, /const selectedBackground|opaqueColor|cellBackground\(row, true/);
+});
+
 test("first-column hover is gated to real first-column cells with text", () => {
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 2, column: 0 }, "full-code-value"), true);
   assert.equal(shouldShowFirstColumnHover({ kind: "cell", row: 0, column: 0 }, "full-code-value"), false);
@@ -1328,7 +1344,8 @@ test("Open File and Open Folder sidebar buttons are constrained to one line", ()
   assert.match(html, /<button data-command="open-file">Open File<\/button>/);
   assert.match(html, /<button data-command="open-folder">Open Folder<\/button>/);
   assert.match(css, /--sidebar-width:\s*260px/);
-  assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*260px/);
+  assert.match(css, /\.layout-root\s*\{[\s\S]*grid-template-columns:\s*var\(--dock-left-width\) minmax\(var\(--editor-min-width\), 1fr\) var\(--dock-right-width\)/);
+  assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*0/);
   assert.match(css, /\.sidebar-actions button\s*\{[\s\S]*white-space:\s*nowrap/);
   assert.match(app, /const MIN_SIDEBAR_WIDTH = 260/);
   assert.match(app, /clamp\(Math\.round\(width\), MIN_SIDEBAR_WIDTH, 520\)/);
@@ -1344,12 +1361,76 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.match(source, /localStorage\.setItem\("txteditor\.problems", state\.problemsVisible \? "visible" : "hidden"\)/);
 });
 
+test("dock layout defaults to Explorer left and Problems bottom without replacing visibility keys", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const resetDockLayout = source.match(/function resetDockLayout\(\)[\s\S]*?\nfunction setDockSplitRatio/)?.[0] ?? "";
+  assert.match(source, /const DOCK_EDGES = \["left", "right", "top", "bottom"\];/);
+  assert.match(source, /const DEFAULT_DOCK_LAYOUT = Object\.freeze\(\{\s*explorer: "left",\s*problems: "bottom"/);
+  assert.match(source, /const savedDockLayout = normalizeDockLayout\(readJsonStorage\("txteditor\.layout\.docks", DEFAULT_DOCK_LAYOUT\)\);/);
+  assert.match(source, /dockLayout: savedDockLayout/);
+  assert.match(source, /sidebarVisible: localStorage\.getItem\("txteditor\.sidebar"\) !== "hidden"/);
+  assert.match(source, /problemsVisible: localStorage\.getItem\("txteditor\.problems"\) === "visible"/);
+  assert.match(source, /localStorage\.setItem\("txteditor\.layout\.docks", JSON\.stringify\(state\.dockLayout\)\)/);
+  assert.match(resetDockLayout, /explorer: DEFAULT_DOCK_LAYOUT\.explorer/);
+  assert.match(resetDockLayout, /problems: DEFAULT_DOCK_LAYOUT\.problems/);
+  assert.doesNotMatch(resetDockLayout, /sidebarVisible|problemsVisible|txteditor\.sidebar|txteditor\.problems|state\.lint/);
+});
+
+test("dock shell renders every edge and same-edge split orientations", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  for (const id of ["layoutRoot", "dockTop", "dockLeft", "dockRight", "dockBottom", "dockDropZones"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /data-dock-panel="explorer"/);
+  assert.match(html, /data-dock-panel="problems"/);
+  assert.match(css, /\.dock-left\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.dock-right\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.dock-top\s*\{[\s\S]*flex-direction:\s*row/);
+  assert.match(css, /\.dock-bottom\s*\{[\s\S]*flex-direction:\s*row/);
+  assert.match(css, /\.dock-left \.dock-splitter,\s*\.dock-right \.dock-splitter\s*\{[\s\S]*cursor:\s*ns-resize/);
+  assert.match(css, /\.dock-top \.dock-splitter,\s*\.dock-bottom \.dock-splitter\s*\{[\s\S]*cursor:\s*ew-resize/);
+  assert.match(source, /function syncDockLayout\(\)/);
+  assert.match(source, /function dockSplitter\(edge\)/);
+  assert.match(source, /function startDockSplitResize\(edge, event\)/);
+  assert.match(source, /function setDockEdgeSize\(edge, size\)/);
+  assert.match(source, /grid\.layout\(\);/);
+});
+
+test("dock settings and drag controls expose Explorer, Problems, and reset layout", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";
+  assert.match(appSettings, /Explorer Dock/);
+  assert.match(appSettings, /Problems Dock/);
+  assert.match(appSettings, /data-settings-dock-panel="\$\{panel\}"/);
+  assert.match(appSettings, /data-settings-reset-layout/);
+  assert.match(appSettings, /setPanelDock\(button\.dataset\.settingsDockPanel, button\.dataset\.settingsDockEdge\)/);
+  assert.match(appSettings, /resetDockLayout\(\); refresh\(\);/);
+  assert.match(source, /const DOCK_DRAG_TYPE = "application\/x-txteditor-dock-panel";/);
+  assert.match(source, /function wireDocking\(\)/);
+  assert.match(source, /dataTransfer\?\.setData\(DOCK_DRAG_TYPE, panel\)/);
+});
+
 test("Problems lint panel is gated by the active P panel and lint enabled state", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(source, /function lintActive\(\)\s*\{\s*return state\.problemsVisible && state\.lint\.enabled;/);
   assert.match(source, /if \(!state\.lint\.enabled \|\| !isVectorLintEngine\(\)\) \{/);
   assert.match(source, /const diagnosticsByCell = lintActive\(\)\s*\?\s*groupDiagnosticsByCell/);
   assert.match(source, /const diags = lintActive\(\) \? diagnosticsForDocument/);
+});
+
+test("Legacy Lint and Vector-LSP activation stay independent of dock placement", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const lintActivation = source.match(/function lintActive\(\)[\s\S]*?\nfunction effectiveVectorLspHoverEnabled/)?.[0] ?? "";
+  const legacyScheduling = source.match(/function scheduleLegacyLintForOpen[\s\S]*?\nasync function runLegacyLint/)?.[0] ?? "";
+  const vectorDiagnostics = source.match(/function handleLspDiagnosticsChanged[\s\S]*?\nfunction updateGridDiagnostics/)?.[0] ?? "";
+  assert.match(lintActivation, /return state\.problemsVisible && state\.lint\.enabled;/);
+  assert.match(lintActivation, /return lintActive\(\) && isLegacyLintEngine\(\);/);
+  assert.match(lintActivation, /return lintActive\(\) && isVectorLintEngine\(\);/);
+  assert.doesNotMatch(lintActivation, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
+  assert.doesNotMatch(legacyScheduling, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
+  assert.doesNotMatch(vectorDiagnostics, /dockLayout|dockForPanel|txteditor\.layout\.docks/);
 });
 
 test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
@@ -1620,7 +1701,7 @@ test("active cell highlights both the first-row header and left row header", () 
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /const activeHeader = this\.selection\.focus\.row === row;/);
-  assert.match(source, /const activeColumnHeader = row === 0 && this\.selection\.focus\.column === column;/);
+  assert.match(source, /const activeColumnHeader = !editingThisCell && row === 0 && this\.selection\.focus\.column === column;/);
   assert.match(source, /GRID_COLORS\.activeHeader/);
   assert.match(css, /--grid-active-header-bg: var\(--activeHeaderBg\);/);
   assert.match(css, /--grid-active-header-text: var\(--activeHeaderText\);/);

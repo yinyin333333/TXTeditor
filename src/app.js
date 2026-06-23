@@ -129,8 +129,24 @@ const LINT_ENGINE_LEGACY = "legacy";
 const savedLintEngine = localStorage.getItem("txteditor.lint.engine") === LINT_ENGINE_LEGACY ? LINT_ENGINE_LEGACY : LINT_ENGINE_VECTOR;
 const savedLegacyLintSettings = normalizeLintSettings(readJsonStorage("txteditor.legacyLint.settings", createDefaultLintSettings()));
 const MIN_SIDEBAR_WIDTH = 260;
+const MIN_DOCK_WIDTH = 180;
+const MIN_DOCK_HEIGHT = 150;
+const MIN_EDITOR_WIDTH = 320;
+const MIN_EDITOR_HEIGHT = 220;
+const DEFAULT_PANEL_HEIGHT = 260;
+const DEFAULT_PROBLEMS_WIDTH = 320;
+const DOCK_EDGES = ["left", "right", "top", "bottom"];
+const DOCK_PANELS = ["explorer", "problems"];
+const DEFAULT_DOCK_LAYOUT = Object.freeze({
+  explorer: "left",
+  problems: "bottom",
+  splits: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5 },
+  sizes: { explorerHeight: DEFAULT_PANEL_HEIGHT, problemsWidth: DEFAULT_PROBLEMS_WIDTH }
+});
+const DOCK_DRAG_TYPE = "application/x-txteditor-dock-panel";
 const savedSidebarWidth = clamp(Number(localStorage.getItem("txteditor.sidebarWidth")) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, 520);
 const savedProblemsHeight = clamp(Number(localStorage.getItem("txteditor.problemsHeight")) || 260, 150, 520);
+const savedDockLayout = normalizeDockLayout(readJsonStorage("txteditor.layout.docks", DEFAULT_DOCK_LAYOUT));
 const savedFreeze = readJsonStorage("txteditor.freeze", {});
 const collapsedProblemFiles = new Set();
 const collapsedFileGroups = new Set();
@@ -175,8 +191,11 @@ const state = {
   },
   sidebarVisible: localStorage.getItem("txteditor.sidebar") !== "hidden",
   sidebarWidth: savedSidebarWidth,
+  sidebarHeight: savedDockLayout.sizes.explorerHeight,
   problemsVisible: localStorage.getItem("txteditor.problems") === "visible",
+  problemsWidth: savedDockLayout.sizes.problemsWidth,
   problemsHeight: savedProblemsHeight,
+  dockLayout: savedDockLayout,
   freezeRow: savedFreeze.row ?? false,
   freezeColumn: savedFreeze.column ?? false,
   contextHit: null,
@@ -225,6 +244,12 @@ const state = {
 
 const els = {
   shell: document.getElementById("app"),
+  layoutRoot: document.getElementById("layoutRoot"),
+  dockTop: document.getElementById("dockTop"),
+  dockLeft: document.getElementById("dockLeft"),
+  dockRight: document.getElementById("dockRight"),
+  dockBottom: document.getElementById("dockBottom"),
+  dockDropZones: document.getElementById("dockDropZones"),
   sidebar: document.getElementById("sidebar"),
   sidebarResizer: document.getElementById("sidebarResizer"),
   problemsPanel: document.getElementById("problemsPanel"),
@@ -256,6 +281,8 @@ const els = {
   closeDialogText: document.getElementById("closeDialogText"),
   overviewRuler: document.getElementById("overviewRuler")
 };
+
+const dockSplitters = new Map();
 
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const uiPerfSamples = [];
@@ -331,6 +358,8 @@ const commands = Object.fromEntries(commandLabels.map(([id]) => [id, () => runCo
 
 const EMPTY_DOC = TableDocument.fromText("Empty", "");
 
+syncDockLayout();
+
 const grid = new CanvasGrid({
   host: els.host,
   canvas: els.canvas,
@@ -376,6 +405,305 @@ function activeUndo() {
 
 function perfNow() {
   return typeof performance === "undefined" ? 0 : performance.now();
+}
+
+function normalizeDockEdge(value, fallback) {
+  return DOCK_EDGES.includes(value) ? value : fallback;
+}
+
+function normalizeDockLayout(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const splits = source.splits && typeof source.splits === "object" ? source.splits : {};
+  const sizes = source.sizes && typeof source.sizes === "object" ? source.sizes : {};
+  return {
+    explorer: normalizeDockEdge(source.explorer, DEFAULT_DOCK_LAYOUT.explorer),
+    problems: normalizeDockEdge(source.problems, DEFAULT_DOCK_LAYOUT.problems),
+    splits: Object.fromEntries(DOCK_EDGES.map((edge) => [
+      edge,
+      clamp(Number(splits[edge]) || DEFAULT_DOCK_LAYOUT.splits[edge], 0.15, 0.85)
+    ])),
+    sizes: {
+      explorerHeight: clamp(Number(sizes.explorerHeight) || DEFAULT_DOCK_LAYOUT.sizes.explorerHeight, MIN_DOCK_HEIGHT, 520),
+      problemsWidth: clamp(Number(sizes.problemsWidth) || DEFAULT_DOCK_LAYOUT.sizes.problemsWidth, MIN_DOCK_WIDTH, 640)
+    }
+  };
+}
+
+function dockContainer(edge) {
+  return {
+    left: els.dockLeft,
+    right: els.dockRight,
+    top: els.dockTop,
+    bottom: els.dockBottom
+  }[edge] ?? els.dockLeft;
+}
+
+function panelElement(panel) {
+  return panel === "explorer" ? els.sidebar : panel === "problems" ? els.problemsPanel : null;
+}
+
+function panelResizer(panel) {
+  return panel === "explorer" ? els.sidebarResizer : panel === "problems" ? els.problemsResizer : null;
+}
+
+function isPanelVisible(panel) {
+  return panel === "explorer" ? state.sidebarVisible : panel === "problems" ? state.problemsVisible : false;
+}
+
+function dockForPanel(panel) {
+  return normalizeDockEdge(state.dockLayout?.[panel], DEFAULT_DOCK_LAYOUT[panel]);
+}
+
+function panelsForDock(edge, { visibleOnly = true } = {}) {
+  return DOCK_PANELS.filter((panel) => dockForPanel(panel) === edge && (!visibleOnly || isPanelVisible(panel)));
+}
+
+function saveDockLayout() {
+  state.dockLayout = normalizeDockLayout({
+    explorer: state.dockLayout.explorer,
+    problems: state.dockLayout.problems,
+    splits: state.dockLayout.splits,
+    sizes: {
+      explorerHeight: state.sidebarHeight,
+      problemsWidth: state.problemsWidth
+    }
+  });
+  localStorage.setItem("txteditor.layout.docks", JSON.stringify(state.dockLayout));
+}
+
+function dockEdgeWidth(edge) {
+  const panels = panelsForDock(edge);
+  if (!panels.length) return 0;
+  return Math.max(...panels.map((panel) => panel === "explorer" ? state.sidebarWidth : state.problemsWidth), MIN_DOCK_WIDTH);
+}
+
+function dockEdgeHeight(edge) {
+  const panels = panelsForDock(edge);
+  if (!panels.length) return 0;
+  return Math.max(...panels.map((panel) => panel === "explorer" ? state.sidebarHeight : state.problemsHeight), MIN_DOCK_HEIGHT);
+}
+
+function fitDockPair(first, second, maxTotal, minSize) {
+  if (!first && !second) return [0, 0];
+  if (first + second <= maxTotal || maxTotal <= 0) return [first, second];
+  if (first && second && maxTotal >= minSize * 2) {
+    const share = first / (first + second);
+    const fittedFirst = clamp(Math.round(maxTotal * share), minSize, maxTotal - minSize);
+    return [fittedFirst, maxTotal - fittedFirst];
+  }
+  if (first && second) return [Math.ceil(maxTotal / 2), Math.floor(maxTotal / 2)];
+  return first ? [Math.max(minSize, maxTotal), 0] : [0, Math.max(minSize, maxTotal)];
+}
+
+function applyDockVariables() {
+  const root = document.documentElement;
+  root.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
+  root.style.setProperty("--sidebar-height", `${state.sidebarHeight}px`);
+  root.style.setProperty("--problems-width", `${state.problemsWidth}px`);
+  root.style.setProperty("--problems-height", `${state.problemsHeight}px`);
+  const layoutWidth = Math.max(MIN_EDITOR_WIDTH, els.layoutRoot?.clientWidth || window.innerWidth - 48);
+  const layoutHeight = Math.max(MIN_EDITOR_HEIGHT, els.layoutRoot?.clientHeight || window.innerHeight);
+  const [leftWidth, rightWidth] = fitDockPair(
+    dockEdgeWidth("left"),
+    dockEdgeWidth("right"),
+    Math.max(0, layoutWidth - MIN_EDITOR_WIDTH),
+    MIN_DOCK_WIDTH
+  );
+  const [topHeight, bottomHeight] = fitDockPair(
+    dockEdgeHeight("top"),
+    dockEdgeHeight("bottom"),
+    Math.max(0, layoutHeight - MIN_EDITOR_HEIGHT),
+    MIN_DOCK_HEIGHT
+  );
+  root.style.setProperty("--dock-left-width", `${leftWidth}px`);
+  root.style.setProperty("--dock-right-width", `${rightWidth}px`);
+  root.style.setProperty("--dock-top-height", `${topHeight}px`);
+  root.style.setProperty("--dock-bottom-height", `${bottomHeight}px`);
+}
+
+function dockSplitter(edge) {
+  let splitter = dockSplitters.get(edge);
+  if (!splitter) {
+    splitter = document.createElement("div");
+    splitter.className = "dock-splitter";
+    splitter.dataset.dockSplitter = edge;
+    splitter.addEventListener("pointerdown", (event) => startDockSplitResize(edge, event));
+    dockSplitters.set(edge, splitter);
+  }
+  return splitter;
+}
+
+function applyPanelFlex(panel, panelEl, edge, count, index) {
+  panelEl.dataset.dockEdge = edge;
+  panelEl.style.width = "";
+  panelEl.style.height = "";
+  panelEl.style.minWidth = edge === "top" || edge === "bottom" ? `${MIN_DOCK_WIDTH}px` : "0";
+  panelEl.style.minHeight = edge === "left" || edge === "right" ? `${MIN_DOCK_HEIGHT}px` : "0";
+  if (count <= 1) {
+    panelEl.style.flex = "1 1 auto";
+    return;
+  }
+  const ratio = clamp(Number(state.dockLayout.splits?.[edge]) || 0.5, 0.15, 0.85);
+  const basis = index === 0 ? ratio * 100 : (1 - ratio) * 100;
+  panelEl.style.flex = `0 1 ${basis}%`;
+  panelEl.dataset.dockPanel = panel;
+}
+
+function syncDockLayout() {
+  for (const panel of DOCK_PANELS) {
+    const panelEl = panelElement(panel);
+    if (!panelEl) continue;
+    const edge = dockForPanel(panel);
+    panelEl.classList.toggle("hidden", !isPanelVisible(panel));
+    panelEl.dataset.dockPanel = panel;
+    panelEl.dataset.dockEdge = edge;
+    const resizer = panelResizer(panel);
+    if (resizer) resizer.dataset.dockEdge = edge;
+  }
+  for (const edge of DOCK_EDGES) {
+    const dock = dockContainer(edge);
+    if (!dock) continue;
+    const panels = panelsForDock(edge);
+    dock.replaceChildren();
+    dock.classList.toggle("dock-empty", panels.length === 0);
+    dock.classList.toggle("dock-same-edge", panels.length > 1);
+    panels.forEach((panel, index) => {
+      const panelEl = panelElement(panel);
+      if (!panelEl) return;
+      applyPanelFlex(panel, panelEl, edge, panels.length, index);
+      dock.append(panelEl);
+      if (index < panels.length - 1) dock.append(dockSplitter(edge));
+    });
+  }
+  applyDockVariables();
+}
+
+function setPanelDock(panel, edge) {
+  if (!DOCK_PANELS.includes(panel)) return;
+  const nextEdge = normalizeDockEdge(edge, dockForPanel(panel));
+  if (dockForPanel(panel) === nextEdge) return;
+  state.dockLayout = normalizeDockLayout({ ...state.dockLayout, [panel]: nextEdge });
+  saveDockLayout();
+  syncDockLayout();
+  renderChrome();
+  grid.layout();
+}
+
+function resetDockLayout() {
+  state.dockLayout = normalizeDockLayout({
+    ...state.dockLayout,
+    explorer: DEFAULT_DOCK_LAYOUT.explorer,
+    problems: DEFAULT_DOCK_LAYOUT.problems,
+    splits: DEFAULT_DOCK_LAYOUT.splits
+  });
+  saveDockLayout();
+  syncDockLayout();
+  renderChrome();
+  grid.layout();
+}
+
+function setDockSplitRatio(edge, ratio) {
+  if (!DOCK_EDGES.includes(edge)) return;
+  state.dockLayout = normalizeDockLayout({
+    ...state.dockLayout,
+    splits: { ...state.dockLayout.splits, [edge]: ratio }
+  });
+  saveDockLayout();
+  syncDockLayout();
+  grid.layout();
+}
+
+function startDockSplitResize(edge, event) {
+  const dock = dockContainer(edge);
+  const rect = dock?.getBoundingClientRect();
+  const sameEdgePanels = panelsForDock(edge);
+  if (!rect || sameEdgePanels.length < 2) return;
+  event.preventDefault();
+  const horizontal = edge === "top" || edge === "bottom";
+  const size = horizontal ? rect.width : rect.height;
+  if (size <= 0) return;
+  const startPoint = horizontal ? event.clientX : event.clientY;
+  const startRatio = clamp(Number(state.dockLayout.splits?.[edge]) || 0.5, 0.15, 0.85);
+  const minRatio = clamp((horizontal ? MIN_DOCK_WIDTH : MIN_DOCK_HEIGHT) / size, 0.08, 0.45);
+  const onMove = (moveEvent) => {
+    const point = horizontal ? moveEvent.clientX : moveEvent.clientY;
+    setDockSplitRatio(edge, clamp(startRatio + ((point - startPoint) / size), minRatio, 1 - minRatio));
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function setDockEdgeSize(edge, size) {
+  const panels = panelsForDock(edge);
+  if (!panels.length) return;
+  for (const panel of panels) {
+    if (edge === "left" || edge === "right") {
+      if (panel === "explorer") setSidebarWidth(size);
+      else setProblemsWidth(size);
+    } else if (panel === "explorer") {
+      setSidebarHeight(size);
+    } else {
+      setProblemsHeight(size);
+    }
+  }
+}
+
+function showDockDropZones() {
+  els.dockDropZones?.classList.remove("hidden");
+}
+
+function hideDockDropZones() {
+  els.dockDropZones?.classList.add("hidden");
+  for (const zone of els.dockDropZones?.querySelectorAll("[data-dock-target]") ?? []) zone.classList.remove("drag-over");
+}
+
+function isDockDragEvent(event) {
+  return Array.from(event.dataTransfer?.types ?? []).includes(DOCK_DRAG_TYPE);
+}
+
+function wireDocking() {
+  const handles = new Set([
+    ...document.querySelectorAll("[data-dock-panel]"),
+    els.sidebar?.querySelector("[data-dock-panel='explorer']"),
+    els.problemsPanel?.querySelector("[data-dock-panel='problems']")
+  ].filter(Boolean));
+  for (const handle of handles) {
+    const panel = handle.dataset.dockPanel;
+    if (!DOCK_PANELS.includes(panel)) continue;
+    handle.draggable = true;
+    handle.addEventListener("dragstart", (event) => {
+      if (!handle.classList.contains("activity-button") && event.target.closest("button, input, select")) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer?.setData(DOCK_DRAG_TYPE, panel);
+      event.dataTransfer?.setData("text/plain", panel);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      showDockDropZones();
+    });
+    handle.addEventListener("dragend", hideDockDropZones);
+  }
+  for (const zone of els.dockDropZones?.querySelectorAll("[data-dock-target]") ?? []) {
+    zone.addEventListener("dragover", (event) => {
+      if (!isDockDragEvent(event)) return;
+      event.preventDefault();
+      zone.classList.add("drag-over");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+    zone.addEventListener("drop", (event) => {
+      if (!isDockDragEvent(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const panel = event.dataTransfer?.getData(DOCK_DRAG_TYPE);
+      const edge = zone.dataset.dockTarget;
+      hideDockDropZones();
+      setPanelDock(panel, edge);
+    });
+  }
 }
 
 function elapsedMs(started) {
@@ -475,10 +803,16 @@ function wireEvents() {
     if (tab) closeTab(Number(tab.dataset.tab)).catch(showError);
   });
   document.addEventListener("keydown", handleGlobalKeydown);
-  window.addEventListener("resize", () => { positionContextMenu(); updateOverviewRuler(); });
+  window.addEventListener("resize", () => {
+    syncDockLayout();
+    grid.layout();
+    positionContextMenu();
+    updateOverviewRuler();
+  });
   window.addEventListener("dragover", (event) => event.preventDefault());
   window.addEventListener("drop", async (event) => {
     event.preventDefault();
+    if (isDockDragEvent(event)) return;
     if (isTauriRuntime()) return;
     const files = Array.from(event.dataTransfer?.files ?? []).filter(isTextLikeFile);
     for (const file of files) await addDocument(await readFileAsDocument(file, TableDocument));
@@ -490,6 +824,7 @@ function wireEvents() {
   });
   els.fontSelect?.addEventListener("change", () => changeGridFont(els.fontSelect.value));
   wirePaneResizers();
+  wireDocking();
   els.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -1299,6 +1634,24 @@ function setSidebarWidth(width) {
   state.sidebarWidth = clamp(Math.round(width), MIN_SIDEBAR_WIDTH, 520);
   document.documentElement.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
   localStorage.setItem("txteditor.sidebarWidth", String(state.sidebarWidth));
+  syncDockLayout();
+  grid.layout();
+}
+
+function setSidebarHeight(height) {
+  const maxHeight = Math.max(MIN_DOCK_HEIGHT, Math.floor(window.innerHeight * 0.7));
+  state.sidebarHeight = clamp(Math.round(height), MIN_DOCK_HEIGHT, maxHeight);
+  document.documentElement.style.setProperty("--sidebar-height", `${state.sidebarHeight}px`);
+  saveDockLayout();
+  syncDockLayout();
+  grid.layout();
+}
+
+function setProblemsWidth(width) {
+  state.problemsWidth = clamp(Math.round(width), MIN_DOCK_WIDTH, 640);
+  document.documentElement.style.setProperty("--problems-width", `${state.problemsWidth}px`);
+  saveDockLayout();
+  syncDockLayout();
   grid.layout();
 }
 
@@ -1307,31 +1660,31 @@ function setProblemsHeight(height) {
   state.problemsHeight = clamp(Math.round(height), 150, maxHeight);
   document.documentElement.style.setProperty("--problems-height", `${state.problemsHeight}px`);
   localStorage.setItem("txteditor.problemsHeight", String(state.problemsHeight));
+  syncDockLayout();
   grid.layout();
 }
 
 function wirePaneResizers() {
-  els.sidebarResizer?.addEventListener("pointerdown", (event) => {
-    if (!state.sidebarVisible) return;
+  wirePanelResizer("explorer", els.sidebarResizer);
+  wirePanelResizer("problems", els.problemsResizer);
+}
+
+function wirePanelResizer(panel, handle) {
+  handle?.addEventListener("pointerdown", (event) => {
+    if (!isPanelVisible(panel)) return;
+    const edge = dockForPanel(panel);
     event.preventDefault();
-    els.sidebarResizer.setPointerCapture?.(event.pointerId);
+    handle.setPointerCapture?.(event.pointerId);
     const startX = event.clientX;
-    const startWidth = state.sidebarWidth;
-    const onMove = (moveEvent) => setSidebarWidth(startWidth + moveEvent.clientX - startX);
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  });
-  els.problemsResizer?.addEventListener("pointerdown", (event) => {
-    if (!state.problemsVisible) return;
-    event.preventDefault();
-    els.problemsResizer.setPointerCapture?.(event.pointerId);
     const startY = event.clientY;
-    const startHeight = state.problemsHeight;
-    const onMove = (moveEvent) => setProblemsHeight(startHeight + startY - moveEvent.clientY);
+    const startSize = edge === "left" || edge === "right" ? dockEdgeWidth(edge) : dockEdgeHeight(edge);
+    const onMove = (moveEvent) => {
+      const delta = edge === "left" ? moveEvent.clientX - startX
+        : edge === "right" ? startX - moveEvent.clientX
+          : edge === "top" ? moveEvent.clientY - startY
+            : startY - moveEvent.clientY;
+      setDockEdgeSize(edge, startSize + delta);
+    };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -2506,6 +2859,7 @@ async function goToDiagnostic(id) {
   state.problemsVisible = true;
   localStorage.setItem("txteditor.problems", "visible");
   renderChrome();
+  grid.layout();
   els.host.focus();
 }
 
@@ -2520,6 +2874,9 @@ function showAppSettings() {
   const fontOptions = FONT_OPTIONS.map(([label, value]) =>
     `<option value="${escapeHtml(value)}"${state.gridFont === value ? " selected" : ""}>${escapeHtml(label)}</option>`
   ).join("");
+  const dockOptionsFor = (panel) => DOCK_EDGES.map((edge) => `
+    <button class="${dockForPanel(panel) === edge ? "active" : ""}" data-settings-dock-panel="${panel}" data-settings-dock-edge="${edge}">${edge[0].toUpperCase()}${edge.slice(1)}</button>
+  `).join("");
   backdrop.innerHTML = `
     <div class="modal settings-modal">
       <h2>Settings</h2>
@@ -2545,6 +2902,19 @@ function showAppSettings() {
           <button class="${state.theme === "dark" ? "active" : ""}" data-settings-theme="dark">Dark</button>
           <button class="${state.theme === "light" ? "active" : ""}" data-settings-theme="light">Light</button>
         </div>
+        <div class="settings-dock-row">
+          <div>
+            <div class="settings-label">Explorer Dock</div>
+            <div class="settings-segmented" role="group" aria-label="Explorer Dock">${dockOptionsFor("explorer")}</div>
+          </div>
+          <div>
+            <div class="settings-label">Problems Dock</div>
+            <div class="settings-segmented" role="group" aria-label="Problems Dock">${dockOptionsFor("problems")}</div>
+          </div>
+        </div>
+        <div class="settings-reset-row">
+          <button data-settings-reset-layout>Reset Layout</button>
+        </div>
       </div>
       <div class="modal-actions">
         <button data-settings-close>Close</button>
@@ -2558,6 +2928,7 @@ function showAppSettings() {
   const fontInput = backdrop.querySelector("#settingsGridFont");
   const lintEngineButtons = [...backdrop.querySelectorAll("[data-settings-lint-engine]")];
   const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
+  const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
   const refresh = () => {
     colorizeInput.checked = state.colorizeColumns;
     hoverInput.checked = state.vectorLspHover;
@@ -2566,6 +2937,7 @@ function showAppSettings() {
     fontInput.value = state.gridFont;
     for (const button of lintEngineButtons) button.classList.toggle("active", button.dataset.settingsLintEngine === state.lint.engine);
     for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
+    for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
   };
   colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
   hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
@@ -2576,6 +2948,10 @@ function showAppSettings() {
   for (const button of themeButtons) {
     button.addEventListener("click", () => { setTheme(button.dataset.settingsTheme); refresh(); });
   }
+  for (const button of dockButtons) {
+    button.addEventListener("click", () => { setPanelDock(button.dataset.settingsDockPanel, button.dataset.settingsDockEdge); refresh(); });
+  }
+  backdrop.querySelector("[data-settings-reset-layout]")?.addEventListener("click", () => { resetDockLayout(); refresh(); });
 
   const close = () => {
     backdrop.remove();
@@ -3031,8 +3407,10 @@ function renderLegacyLintRulesPanel() {
 
 function renderChrome() {
   const started = perfNow();
+  syncDockLayout();
   els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
   els.shell.classList.toggle("problems-open", state.problemsVisible);
+  els.sidebar?.classList.toggle("hidden", !state.sidebarVisible);
   els.problemsPanel?.classList.toggle("hidden", !state.problemsVisible);
   for (const btn of document.querySelectorAll("[data-bottom-tab]")) {
     btn.classList.toggle("active", btn.dataset.bottomTab === state.bottomTab);
