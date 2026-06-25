@@ -2809,14 +2809,14 @@ async function goToDiagnostic(id) {
     clamp(diagnostic.rowIndex, 0, Math.max(0, activeDoc().rowCount - 1)),
     clamp(diagnostic.columnIndex, 0, Math.max(0, activeDoc().columnCount - 1))
   );
-  updateGridDiagnostics();
-  grid.scrollCellIntoView(state.selection.focus.row, state.selection.focus.column);
-  grid.draw();
-  updateActiveProblemHighlight();
   state.problemsVisible = true;
   localStorage.setItem("txteditor.problems", "visible");
+  updateGridDiagnostics();
   renderChrome();
   grid.layout();
+  grid.scrollCellToCenter(state.selection.focus.row, state.selection.focus.column);
+  grid.draw();
+  updateActiveProblemHighlight({ scroll: true });
   els.host.focus();
 }
 
@@ -3503,15 +3503,18 @@ function activeProblemDiagnosticIds() {
   return ids;
 }
 
-function updateActiveProblemHighlight() {
+function updateActiveProblemHighlight({ scroll = false } = {}) {
   if (!els.problemsList) return;
   const activeIds = activeProblemDiagnosticIds();
+  let activeButton = null;
   for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
     const active = activeIds.has(button.dataset.diagnosticId);
     button.classList.toggle("problem-item-active-cell", active);
     if (active) button.setAttribute("aria-current", "location");
     else button.removeAttribute("aria-current");
+    if (active && !activeButton) activeButton = button;
   }
+  if (scroll && activeButton) activeButton.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
 }
 
 function problemsPanelRenderKey() {

@@ -1315,6 +1315,27 @@ export class CanvasGrid {
     }
   }
 
+  scrollCellToCenter(row, column) {
+    if (!(this.doc.freezeFirstColumn && column === 0)) {
+      const viewport = Math.max(0, this.host.clientWidth - this.rowHeaderWidth - this.frozenColumnWidth());
+      this.host.scrollLeft = centeredScrollOffset({
+        itemStart: this.columnContentLeft(column),
+        itemSize: this.scaledColumnWidth(column),
+        viewportSize: viewport,
+        maxScroll: this.scrollableColumnWidth() - viewport
+      });
+    }
+    if (!(this.doc.freezeFirstRow && row === 0)) {
+      const viewport = Math.max(0, this.host.clientHeight - this.headerHeight - this.frozenRowHeight());
+      this.host.scrollTop = centeredScrollOffset({
+        itemStart: this.rowContentTop(row),
+        itemSize: this.scaledRowHeight(row),
+        viewportSize: viewport,
+        maxScroll: this.scrollableRowsHeight() - viewport
+      });
+    }
+  }
+
   statusText() {
     const r = this.selection.rect;
     return `${this.doc.name} | ${this.doc.rowCount.toLocaleString()} rows x ${this.doc.columnCount.toLocaleString()} columns | R${this.selection.focus.row + 1}:C${this.selection.focus.column + 1} | Selection ${r.bottom - r.top + 1}x${r.right - r.left + 1} | ${this.doc.dirty ? "Modified" : "Saved"} | ${this.doc.encoding} | ${Math.round(this.doc.zoom * 100)}%`;
@@ -1348,6 +1369,12 @@ export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
     row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)),
     column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1))
   };
+}
+
+export function centeredScrollOffset({ itemStart, itemSize, viewportSize, maxScroll }) {
+  const viewport = Math.max(0, Number(viewportSize) || 0);
+  const max = Math.max(0, Number(maxScroll) || 0);
+  return clamp(Math.round(itemStart + itemSize / 2 - viewport / 2), 0, max);
 }
 
 function splitHoverText(hoverText) {

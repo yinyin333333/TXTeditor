@@ -25,7 +25,7 @@ import {
   resizeColumnCommand,
   resizeRowCommand
 } from "../src/core/operations.js";
-import { movedCell, normalizeVectorLspTooltip, shouldDrawCellText, shouldShowFirstColumnHover, VECTOR_LSP_HOVER_DELAY_MS } from "../src/ui/canvas-grid.js";
+import { centeredScrollOffset, movedCell, normalizeVectorLspTooltip, shouldDrawCellText, shouldShowFirstColumnHover, VECTOR_LSP_HOVER_DELAY_MS } from "../src/ui/canvas-grid.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle, columnColorIndex } from "../src/ui/grid-geometry.js";
 import {
   openNativePathsBulk
@@ -781,6 +781,12 @@ test("frozen pane dividers are bounded to visible table content", () => {
     scrollOffset: 700,
     viewportExtent: 900
   }), 0);
+});
+
+test("centered scroll offsets clamp for short and bounded content", () => {
+  assert.equal(centeredScrollOffset({ itemStart: 240, itemSize: 26, viewportSize: 500, maxScroll: -120 }), 0);
+  assert.equal(centeredScrollOffset({ itemStart: 240, itemSize: 26, viewportSize: 100, maxScroll: 1000 }), 203);
+  assert.equal(centeredScrollOffset({ itemStart: 980, itemSize: 40, viewportSize: 200, maxScroll: 720 }), 720);
 });
 
 test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
@@ -1743,6 +1749,19 @@ test("Problems list highlights diagnostics for the active or edited marker cell"
   assert.match(grid, /notifySelectionChanged\("keyboard-selection"\)/);
   assert.match(grid, /notifySelectionChanged\("edit-start"\)/);
   assert.match(css, /\.problem-item\.problem-item-active-cell\s*\{[\s\S]*background:\s*color-mix/);
+});
+
+test("diagnostic navigation centers the grid cell and active problem item", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
+  const goToDiagnostic = source.match(/async function goToDiagnostic\(id\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(grid, /scrollCellToCenter\(row, column\) \{/);
+  assert.match(grid, /centeredScrollOffset\(\{[\s\S]*maxScroll: this\.scrollableRowsHeight\(\) - viewport/);
+  assert.match(goToDiagnostic, /renderChrome\(\);\s*grid\.layout\(\);\s*grid\.scrollCellToCenter\(state\.selection\.focus\.row, state\.selection\.focus\.column\);/);
+  assert.doesNotMatch(goToDiagnostic, /grid\.scrollCellIntoView/);
+  assert.match(goToDiagnostic, /updateActiveProblemHighlight\(\{ scroll: true \}\);/);
+  assert.match(source, /function updateActiveProblemHighlight\(\{ scroll = false \} = \{\}\) \{/);
+  assert.match(source, /if \(scroll && activeButton\) activeButton\.scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\);/);
 });
 
 test("UI performance instrumentation records row and lint display work", () => {
