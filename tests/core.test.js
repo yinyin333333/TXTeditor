@@ -1417,6 +1417,15 @@ test("dock shell renders every edge and same-edge split orientations", () => {
   assert.match(source, /grid\.layout\(\);/);
 });
 
+test("dock sync preserves mounted panels when the dock order is unchanged", () => {
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(source, /function syncDockChildren\(dock, children\) \{/);
+  assert.match(source, /current\.length === children\.length && current\.every\(\(child, index\) => child === children\[index\]\)/);
+  assert.match(source, /dock\.replaceChildren\(\.\.\.children\);/);
+  assert.match(source, /syncDockChildren\(dock, children\);/);
+  assert.doesNotMatch(source, /dock\.replaceChildren\(\);\s*dock\.classList\.toggle\("dock-empty"/);
+});
+
 test("dock settings expose Explorer, Problems, and reset layout without drag controls", () => {
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const appSettings = source.match(/function showAppSettings\(\)[\s\S]*?\nasync function showSettings\(\)/)?.[0] ?? "";

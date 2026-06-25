@@ -532,6 +532,12 @@ function dockSplitter(edge) {
   return splitter;
 }
 
+function syncDockChildren(dock, children) {
+  const current = Array.from(dock.children);
+  if (current.length === children.length && current.every((child, index) => child === children[index])) return;
+  dock.replaceChildren(...children);
+}
+
 function applyPanelFlex(panel, panelEl, edge, count, index) {
   panelEl.dataset.dockEdge = edge;
   panelEl.style.width = "";
@@ -563,16 +569,17 @@ function syncDockLayout() {
     const dock = dockContainer(edge);
     if (!dock) continue;
     const panels = panelsForDock(edge);
-    dock.replaceChildren();
     dock.classList.toggle("dock-empty", panels.length === 0);
     dock.classList.toggle("dock-same-edge", panels.length > 1);
+    const children = [];
     panels.forEach((panel, index) => {
       const panelEl = panelElement(panel);
       if (!panelEl) return;
       applyPanelFlex(panel, panelEl, edge, panels.length, index);
-      dock.append(panelEl);
-      if (index < panels.length - 1) dock.append(dockSplitter(edge));
+      children.push(panelEl);
+      if (index < panels.length - 1) children.push(dockSplitter(edge));
     });
+    syncDockChildren(dock, children);
   }
   applyDockVariables();
   syncProblemsHeaderLayout();
