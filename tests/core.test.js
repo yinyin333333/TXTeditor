@@ -1848,12 +1848,11 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
 
-test("quick and explicit edit modes commit on arrow-key cell navigation", () => {
+test("only quick edit mode commits on arrow-key cell navigation", () => {
   const source = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   assert.match(source, /this\.startEdit\(event\.key, true, "quick"\)/);
   assert.match(source, /this\.startEdit\(null, false, "explicit"\)/);
-  assert.match(source, /if \(isArrowNavigationKey\(event\.key\)\) \{/);
-  assert.doesNotMatch(source.match(/onEditorKeyDown\(event\) \{[\s\S]*?\n  startEdit/)?.[0] ?? "", /editMode === "quick"/);
+  assert.match(source, /if \(this\.editMode === "quick" && isArrowNavigationKey\(event\.key\)\) \{/);
   assert.match(source, /this\.commitEdit\(\);\s*this\.moveSelectionBy\(rowDelta, columnDelta\);/);
   assert.match(source, /this\.host\.addEventListener\("dblclick", \(event\) => this\.onDblClick\(event\)\)/);
   assert.match(source, /this\.editor\.selectionStart = this\.editor\.value\.length;\s*this\.editor\.selectionEnd = this\.editor\.value\.length;/);

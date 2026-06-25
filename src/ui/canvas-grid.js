@@ -1179,7 +1179,7 @@ export class CanvasGrid {
   }
 
   onEditorKeyDown(event) {
-    if (isArrowNavigationKey(event.key)) {
+    if (this.editMode === "quick" && isArrowNavigationKey(event.key)) {
       event.preventDefault();
       const { rowDelta, columnDelta } = arrowNavigationDelta(event.key);
       this.commitEdit();
