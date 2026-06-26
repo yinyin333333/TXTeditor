@@ -1,27 +1,120 @@
+import { markTableContentDirty, resetTableFileState } from "./table-file-state.js";
+import { autoFitColumnWidth, initialHeaderColumnWidth } from "./table-sizing.js";
+import { resetTableViewState, tableViewState } from "./table-view-state.js";
+
 export class TableDocument {
   constructor(name = "Untitled.txt", rows = [[]], meta = {}) {
-    this.name = name;
-    this.path = meta.path ?? "";
-    this.handle = meta.handle ?? null;
     this.rows = rows.length ? rows : [[]];
-    this.lineEnding = meta.lineEnding ?? "\n";
-    this.finalNewline = meta.finalNewline ?? false;
-    this.encoding = meta.encoding ?? "utf-8";
-    this.dirty = meta.dirty ?? false;
-    this.hiddenRows = new Set(meta.hiddenRows ?? []);
-    this.hiddenColumns = new Set(meta.hiddenColumns ?? []);
-    this.columnWidths = meta.columnWidths ? [...meta.columnWidths] : [];
-    this.rowHeights = meta.rowHeights ? [...meta.rowHeights] : [];
-    this.defaultColumnWidth = meta.defaultColumnWidth ?? 120;
-    this.defaultRowHeight = meta.defaultRowHeight ?? 26;
-    this.hasCustomRowHeights = meta.hasCustomRowHeights ?? false;
-    this.zoom = meta.zoom ?? 1;
-    this.freezeFirstRow = meta.freezeFirstRow ?? false;
-    this.freezeFirstColumn = meta.freezeFirstColumn ?? false;
+    resetTableFileState(this, name, meta);
+    resetTableViewState(this, meta);
     this.refreshShape();
     if (!meta.columnWidths && meta.autoFitInitialColumns !== false) {
       this.autoFitInitialColumns(meta.initialFitSampleRows ?? 300);
     }
+  }
+
+  get hiddenRows() {
+    return tableViewState(this).hiddenRows;
+  }
+
+  set hiddenRows(value) {
+    tableViewState(this).hiddenRows = value instanceof Set ? value : new Set(value ?? []);
+  }
+
+  get hiddenColumns() {
+    return tableViewState(this).hiddenColumns;
+  }
+
+  set hiddenColumns(value) {
+    tableViewState(this).hiddenColumns = value instanceof Set ? value : new Set(value ?? []);
+  }
+
+  get columnWidths() {
+    return tableViewState(this).columnWidths;
+  }
+
+  set columnWidths(value) {
+    tableViewState(this).columnWidths = Array.isArray(value) ? value : [...(value ?? [])];
+  }
+
+  get rowHeights() {
+    return tableViewState(this).rowHeights;
+  }
+
+  set rowHeights(value) {
+    tableViewState(this).rowHeights = Array.isArray(value) ? value : [...(value ?? [])];
+  }
+
+  get defaultColumnWidth() {
+    return tableViewState(this).defaultColumnWidth;
+  }
+
+  set defaultColumnWidth(value) {
+    tableViewState(this).defaultColumnWidth = value;
+  }
+
+  get defaultRowHeight() {
+    return tableViewState(this).defaultRowHeight;
+  }
+
+  set defaultRowHeight(value) {
+    tableViewState(this).defaultRowHeight = value;
+  }
+
+  get hasCustomRowHeights() {
+    return tableViewState(this).hasCustomRowHeights;
+  }
+
+  set hasCustomRowHeights(value) {
+    tableViewState(this).hasCustomRowHeights = Boolean(value);
+  }
+
+  get zoom() {
+    return tableViewState(this).zoom;
+  }
+
+  set zoom(value) {
+    tableViewState(this).zoom = value;
+  }
+
+  get freezeFirstRow() {
+    return tableViewState(this).freezeFirstRow;
+  }
+
+  set freezeFirstRow(value) {
+    tableViewState(this).freezeFirstRow = Boolean(value);
+  }
+
+  get freezeFirstColumn() {
+    return tableViewState(this).freezeFirstColumn;
+  }
+
+  set freezeFirstColumn(value) {
+    tableViewState(this).freezeFirstColumn = Boolean(value);
+  }
+
+  get scrollLeft() {
+    return tableViewState(this).scrollLeft;
+  }
+
+  set scrollLeft(value) {
+    tableViewState(this).scrollLeft = value;
+  }
+
+  get scrollTop() {
+    return tableViewState(this).scrollTop;
+  }
+
+  set scrollTop(value) {
+    tableViewState(this).scrollTop = value;
+  }
+
+  get initialColumnFitApplied() {
+    return tableViewState(this).initialColumnFitApplied;
+  }
+
+  set initialColumnFitApplied(value) {
+    tableViewState(this).initialColumnFitApplied = Boolean(value);
   }
 
   static fromText(name, text, meta = {}) {
@@ -59,7 +152,7 @@ export class TableDocument {
   setCell(row, column, value) {
     this.ensureCell(row, column);
     this.rows[row][column] = String(value);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
   }
 
@@ -73,7 +166,7 @@ export class TableDocument {
       this.ensureCell(change.row, change.column);
       this.rows[change.row][change.column] = change[direction];
     }
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
   }
 
@@ -87,7 +180,7 @@ export class TableDocument {
     this.rows.splice(at, 0, row);
     this.rowHeights.splice(at, 0, this.defaultRowHeight);
     this.hiddenRows = shiftSetForInsert(this.hiddenRows, at, 1);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
     return { type: "insert-row", index: at, values: row };
   }
@@ -99,7 +192,7 @@ export class TableDocument {
     const removedHeights = this.rowHeights.splice(at, safeCount);
     this.hiddenRows = shiftSetForDelete(this.hiddenRows, at, safeCount);
     if (!this.rows.length) this.rows.push([]);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
     return { type: "delete-rows", index: at, rows: removed, rowHeights: removedHeights };
   }
@@ -111,7 +204,7 @@ export class TableDocument {
     }
     this.columnWidths.splice(at, 0, 120);
     this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, at, 1);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
     return { type: "insert-column", index: at, name };
   }
@@ -122,7 +215,7 @@ export class TableDocument {
     const removed = this.rows.map((row) => row.splice(at, safeCount));
     const removedWidths = this.columnWidths.splice(at, safeCount);
     this.hiddenColumns = shiftSetForDelete(this.hiddenColumns, at, safeCount);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
     return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths };
   }
@@ -131,7 +224,7 @@ export class TableDocument {
     this.rows.splice(index, 0, ...rows.map((row) => [...row]));
     this.rowHeights.splice(index, 0, ...rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
     this.hiddenRows = shiftSetForInsert(this.hiddenRows, index, rows.length);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
   }
 
@@ -145,7 +238,7 @@ export class TableDocument {
     }
     this.columnWidths.splice(index, 0, ...columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
     this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, index, columns[0]?.length ?? 0);
-    this.dirty = true;
+    markTableContentDirty(this);
     this.refreshShape();
   }
 
@@ -158,7 +251,7 @@ export class TableDocument {
       if (hidden) this.hiddenRows.add(row);
       else this.hiddenRows.delete(row);
     }
-    this.dirty = true;
+    markTableContentDirty(this);
   }
 
   setColumnsHidden(columns, hidden) {
@@ -166,18 +259,18 @@ export class TableDocument {
       if (hidden) this.hiddenColumns.add(column);
       else this.hiddenColumns.delete(column);
     }
-    this.dirty = true;
+    markTableContentDirty(this);
   }
 
   setColumnWidth(column, width) {
     this.columnWidths[column] = clamp(Math.round(width), 36, 2000);
-    this.dirty = true;
+    markTableContentDirty(this);
   }
 
   setRowHeight(row, height) {
     this.rowHeights[row] = clamp(Math.round(height), 18, 240);
     this.hasCustomRowHeights = true;
-    this.dirty = true;
+    markTableContentDirty(this);
   }
 
   resetRowHeights() {
@@ -198,12 +291,7 @@ export class TableDocument {
   }
 
   autoFitColumn(column, sampleLimit = 300) {
-    let width = 72;
-    const last = Math.min(this.rows.length, sampleLimit);
-    for (let row = 0; row < last; row++) {
-      width = Math.max(width, 28 + this.getCell(row, column).length * 8);
-    }
-    this.columnWidths[column] = Math.min(420, width);
+    this.columnWidths[column] = autoFitColumnWidth(this.rows, column, sampleLimit);
   }
 
   autoFitRow(row) {
@@ -235,20 +323,4 @@ function shiftSetForDelete(set, index, count) {
     else if (value >= index + count) shifted.add(value - count);
   }
   return shifted;
-}
-
-function initialHeaderColumnWidth(header) {
-  return clamp(Math.ceil(estimateTextWidth(header) + 24), 56, 420);
-}
-
-function estimateTextWidth(value) {
-  let width = 0;
-  for (const char of String(value)) {
-    if (char === "\t") width += 16;
-    else if (char === " " || char === "." || char === "," || char === "'" || char === "`") width += 4;
-    else if (/[A-Z0-9_@#%&]/.test(char)) width += 8;
-    else if (char.charCodeAt(0) > 0x7f) width += 12;
-    else width += 7;
-  }
-  return width;
 }
