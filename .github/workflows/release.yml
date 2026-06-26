@@ -73,6 +73,16 @@ jobs:
         working-directory: vector-lsp
         run: cargo build --release --target x86_64-pc-windows-msvc
 
+      - name: Required Vector-LSP runtime smoke
+        shell: pwsh
+        run: |
+          $vlspRoot = (Resolve-Path -LiteralPath "vector-lsp").Path
+          $vlspExe = (Resolve-Path -LiteralPath "vector-lsp\target\x86_64-pc-windows-msvc\release\vector-lsp.exe").Path
+          npm run test:vector-lsp-smoke:required -- `
+            --vector-lsp-exe "$vlspExe" `
+            --vector-lsp-root "$vlspRoot" `
+            --timeout-ms 30000
+
       # Writes a CI-only Tauri config that bundles vector-lsp.exe and contrib/
       # into the NSIS installer as resources. Paths are relative to src-tauri/.
       # This file is not committed and does not affect local dev builds.
@@ -102,14 +112,19 @@ jobs:
         run: |
           $version = "${{ steps.version.outputs.VERSION }}"
           $vlspExe = "vector-lsp\target\x86_64-pc-windows-msvc\release\vector-lsp.exe"
+          $vlspContrib = "vector-lsp\contrib"
+          if (-not (Test-Path $vlspExe -PathType Leaf)) {
+            throw "Required vector-lsp executable is missing: $vlspExe"
+          }
+          if (-not (Test-Path $vlspContrib -PathType Container)) {
+            throw "Required vector-lsp contrib directory is missing: $vlspContrib"
+          }
 
           # ── Portable zip ────────────────────────────────────────────────────
           $portableDir = New-Item -ItemType Directory -Force "staging\portable"
           Copy-Item "src-tauri\target\release\TXTeditor.exe" $portableDir
           Copy-Item $vlspExe $portableDir
-          if (Test-Path "vector-lsp\contrib") {
-            Copy-Item "vector-lsp\contrib" "$portableDir\contrib" -Recurse
-          }
+          Copy-Item $vlspContrib "$portableDir\contrib" -Recurse
           $portableZip = "TXTeditor-${version}-windows-x64-portable.zip"
           Compress-Archive -Path "$portableDir\*" -DestinationPath $portableZip -CompressionLevel Optimal
 
