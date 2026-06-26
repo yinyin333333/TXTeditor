@@ -2,12 +2,17 @@ import {
   GRID_COLORS,
   activeRowHeaderChromeSteps,
   cellBackground,
+  cellGridLineColor,
   cellTextColor,
   centeredTextY,
   columnHeaderRenderState,
+  columnIndexLabel,
+  columnIndexRenderState,
   diagnosticMarkerState,
   frozenHorizontalEdgeRects,
   frozenVerticalEdgeRects,
+  indexHandleChromeSteps,
+  indexHandleRenderState,
   rowHeaderRenderState,
   updateGridRenderStats
 } from "../grid-render-policy.js";
@@ -23,6 +28,7 @@ export function drawGrid(grid, reason = "direct") {
   ctx.fillRect(0, 0, width, height);
   const columns = grid.visibleColumns();
   const rows = grid.visibleRows();
+  drawColumnHeaders(grid, columns);
   drawRows(grid, rows, columns);
   drawFrozenLayer(grid, columns, rows);
   drawResizeGuide(grid);
@@ -37,7 +43,7 @@ function updateRenderStats(grid, started, rows, columns, reason) {
 
 function drawRows(grid, rows, columns) {
   const left = grid.rowHeaderWidth + grid.frozenColumnWidth();
-  const top = grid.frozenRowHeight();
+  const top = grid.headerHeight + grid.frozenRowHeight();
   withClip(grid, left, top, grid.host.clientWidth - left, grid.host.clientHeight - top, () => {
     for (const row of rows) {
       for (const col of columns) drawCell(grid, row.row, col.column, col.left, row.top, col.width, row.height);
@@ -59,17 +65,22 @@ function drawFrozenLayer(grid, columns, rows) {
 function drawFrozenPanes(grid, columns, rows) {
   const frozenColWidth = grid.frozenColumnWidth();
   const frozenRowHeight = grid.frozenRowHeight();
+  const headerHeight = grid.headerHeight;
+  if (grid.doc.freezeFirstColumn && frozenColWidth && headerHeight) {
+    drawColumnHeader(grid, 0, grid.rowHeaderWidth, frozenColWidth, { frozenColumn: true });
+  }
   if (grid.doc.freezeFirstColumn && frozenColWidth) {
-    withClip(grid, grid.rowHeaderWidth, frozenRowHeight, frozenColWidth, grid.host.clientHeight - frozenRowHeight, () => {
+    const top = headerHeight + frozenRowHeight;
+    withClip(grid, grid.rowHeaderWidth, top, frozenColWidth, grid.host.clientHeight - top, () => {
       for (const row of rows) drawCell(grid, row.row, 0, grid.rowHeaderWidth, row.top, frozenColWidth, row.height, { frozenColumn: true });
     });
   }
   if (grid.doc.freezeFirstRow && frozenRowHeight) {
-    const y = grid.headerHeight;
-    withClip(grid, grid.rowHeaderWidth + frozenColWidth, 0, grid.host.clientWidth - grid.rowHeaderWidth - frozenColWidth, frozenRowHeight, () => {
+    const y = headerHeight;
+    withClip(grid, grid.rowHeaderWidth + frozenColWidth, y, grid.host.clientWidth - grid.rowHeaderWidth - frozenColWidth, frozenRowHeight, () => {
       for (const col of columns) drawCell(grid, 0, col.column, col.left, y, col.width, frozenRowHeight, { frozenRow: true });
     });
-    withClip(grid, 0, 0, grid.rowHeaderWidth, frozenRowHeight, () => {
+    withClip(grid, 0, y, grid.rowHeaderWidth, frozenRowHeight, () => {
       drawRowHeader(grid, 0, y, frozenRowHeight, { frozenRow: true });
     });
     if (grid.doc.freezeFirstColumn && frozenColWidth) {
@@ -79,18 +90,69 @@ function drawFrozenPanes(grid, columns, rows) {
   drawFrozenDividers(grid, frozenColWidth, frozenRowHeight);
 }
 
+function drawColumnHeaders(grid, columns) {
+  const height = grid.headerHeight;
+  if (!height) return;
+  drawCornerHeader(grid);
+  const left = grid.rowHeaderWidth + grid.frozenColumnWidth();
+  withClip(grid, left, 0, grid.host.clientWidth - left, height, () => {
+    for (const col of columns) drawColumnHeader(grid, col.column, col.left, col.width);
+  });
+}
+
+function drawCornerHeader(grid) {
+  const height = grid.headerHeight;
+  if (!height) return;
+  const selected = grid.selection.hasFullRow(0, grid.doc.columnCount) && grid.selection.hasFullColumn(0, grid.doc.rowCount);
+  const state = indexHandleRenderState({ selected });
+  grid.ctx.fillStyle = GRID_COLORS[state.fill];
+  grid.ctx.fillRect(0, 0, grid.rowHeaderWidth, height);
+  grid.ctx.strokeStyle = GRID_COLORS[state.stroke];
+  grid.ctx.strokeRect(0, 0, grid.rowHeaderWidth, height);
+  drawChromeSteps(grid, indexHandleChromeSteps({ x: 0, y: 0, width: grid.rowHeaderWidth, height, pressed: state.pressed }));
+}
+
+export function drawGridCornerHeader(grid) {
+  return drawCornerHeader(grid);
+}
+
+function drawColumnHeader(grid, column, x, width, options = {}) {
+  const height = grid.headerHeight;
+  if (!height) return;
+  const frozen = Boolean(options.frozenColumn);
+  const { selected, activeHeader } = columnIndexRenderState({
+    selection: grid.selection,
+    column,
+    rowCount: grid.doc.rowCount
+  });
+  const state = indexHandleRenderState({ selected, active: activeHeader, frozen });
+  grid.ctx.fillStyle = GRID_COLORS[state.fill];
+  grid.ctx.fillRect(x, 0, width, height);
+  grid.ctx.strokeStyle = GRID_COLORS[state.stroke];
+  grid.ctx.strokeRect(x, 0, width, height);
+  drawChromeSteps(grid, indexHandleChromeSteps({ x, y: 0, width, height, pressed: state.pressed }));
+  grid.ctx.fillStyle = GRID_COLORS[state.text];
+  grid.ctx.font = grid.font(400);
+  grid.ctx.textBaseline = "middle";
+  const label = columnIndexLabel(column);
+  const labelWidth = grid.ctx.measureText(label).width;
+  grid.ctx.fillText(label, Math.max(x + 4, x + (width - labelWidth) / 2), centeredTextY(0, height));
+}
+
+export function drawGridColumnHeader(grid, column, x, width, options = {}) {
+  return drawColumnHeader(grid, column, x, width, options);
+}
+
 function drawRowHeader(grid, row, y, height, options = {}) {
   const selected = grid.selection.hasFullRow(row, grid.doc.columnCount);
   const { activeHeader } = rowHeaderRenderState(grid.selection, row);
-  grid.ctx.fillStyle = selected ? GRID_COLORS.selection : activeHeader ? GRID_COLORS.activeHeader : options.frozenRow ? GRID_COLORS.rowHeaderFrozen : GRID_COLORS.rowHeader;
+  const state = indexHandleRenderState({ selected, active: activeHeader, frozen: options.frozenRow });
+  grid.ctx.fillStyle = GRID_COLORS[state.fill];
   grid.ctx.fillRect(0, y, grid.rowHeaderWidth, height);
-  grid.ctx.strokeStyle = GRID_COLORS.grid;
+  grid.ctx.strokeStyle = GRID_COLORS[state.stroke];
   grid.ctx.strokeRect(0, y, grid.rowHeaderWidth, height);
-  if (activeHeader) {
-    if (typeof grid.drawActiveRowHeaderChrome === "function") grid.drawActiveRowHeaderChrome(y, height);
-    else drawActiveRowHeaderChrome(grid, y, height);
-  }
-  grid.ctx.fillStyle = selected ? GRID_COLORS.textSelected : activeHeader ? GRID_COLORS.activeHeaderText : GRID_COLORS.rowText;
+  drawChromeSteps(grid, indexHandleChromeSteps({ x: 0, y, width: grid.rowHeaderWidth, height, pressed: state.pressed }));
+  grid.ctx.fillStyle = GRID_COLORS[state.text];
   grid.ctx.font = grid.font(400);
   const label = String(row + 1);
   const x = Math.max(6, grid.rowHeaderWidth - grid.ctx.measureText(label).width - 8);
@@ -104,6 +166,10 @@ export function drawGridRowHeader(grid, row, y, height, options = {}) {
 
 function drawActiveRowHeaderChrome(grid, y, height) {
   const steps = activeRowHeaderChromeSteps({ rowHeaderWidth: grid.rowHeaderWidth, y, height });
+  drawChromeSteps(grid, steps);
+}
+
+function drawChromeSteps(grid, steps) {
   if (!steps.length) return;
   const ctx = grid.ctx;
   ctx.save();
@@ -141,7 +207,8 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
   const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
   ctx.fillStyle = baseBackground;
   ctx.fillRect(x, y, width, height);
-  ctx.strokeStyle = frozen ? GRID_COLORS.gridFrozen : GRID_COLORS.grid;
+  const gridLine = cellGridLineColor({ selected, frozen });
+  ctx.strokeStyle = gridLine;
   ctx.strokeRect(x, y, width, height);
   if (firstColumnLabel && !selected) {
     ctx.strokeStyle = GRID_COLORS.firstColumnBorder;
@@ -193,22 +260,26 @@ function drawFrozenDividers(grid, frozenColWidth, frozenRowHeight) {
   const ctx = grid.ctx;
   const tableHeight = grid.visibleTableHeight();
   const tableWidth = grid.visibleTableWidth();
+  const headerHeight = grid.headerHeight;
   ctx.save();
+  if (headerHeight) {
+    drawFrozenBorderRect(grid, 0, 0, tableWidth, Math.min(headerHeight, tableHeight));
+  }
   if (frozenRowHeight) {
-    drawFrozenBorderRect(grid, 0, 0, tableWidth, Math.min(frozenRowHeight, tableHeight));
+    drawFrozenBorderRect(grid, 0, headerHeight, tableWidth, Math.min(frozenRowHeight, Math.max(0, tableHeight - headerHeight)));
   }
   if (frozenColWidth) {
     drawFrozenBorderRect(grid, grid.rowHeaderWidth, 0, frozenColWidth, tableHeight);
   }
   if (frozenColWidth && frozenRowHeight) {
-    drawFrozenBorderRect(grid, grid.rowHeaderWidth, 0, frozenColWidth, frozenRowHeight);
+    drawFrozenBorderRect(grid, grid.rowHeaderWidth, headerHeight, frozenColWidth, frozenRowHeight);
   }
   if (frozenColWidth) {
     const x = grid.rowHeaderWidth + frozenColWidth;
     drawFrozenVerticalEdge(grid, x, tableHeight);
   }
   if (frozenRowHeight) {
-    const y = frozenRowHeight;
+    const y = headerHeight + frozenRowHeight;
     drawFrozenHorizontalEdge(grid, y, tableWidth);
   }
   ctx.restore();

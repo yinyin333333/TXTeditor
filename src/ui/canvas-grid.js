@@ -86,7 +86,7 @@ export class CanvasGrid {
   }
 
   get headerHeight() {
-    return 0;
+    return Math.round(24 * this.zoom);
   }
 
   get rowHeaderWidth() {
@@ -463,6 +463,7 @@ export class CanvasGrid {
   }
 
   resizeHit(hit) {
+    if (!hit || hit.kind === "empty") return null;
     const columnRight = this.screenXForColumn(hit.column) + this.scaledColumnWidth(hit.column);
     const rowBottom = this.screenYForRow(hit.row) + this.scaledRowHeight(hit.row);
     return classifyResizeHandle({ hit, columnRight, rowBottom, zoom: this.zoom });
@@ -477,7 +478,7 @@ export class CanvasGrid {
     if (this.doc.freezeFirstRow && row === 0) return this.headerHeight;
     return this.headerHeight + this.frozenRowHeight() + this.rowContentTop(row) - this.scrollTop;
   }
-  
+
   onMouseLeave(event) {
     if (shouldClearHoverForInteraction({ pointerLeave: true })) this.clearHoverState();
   }
@@ -498,7 +499,7 @@ export class CanvasGrid {
     }
     const toggle = event.ctrlKey || event.metaKey;
     this.applyHitSelection(hit, event.shiftKey, toggle);
-    this.dragging = hit.kind === "cell" && !toggle;
+    this.dragging = !toggle && (hit.kind === "cell" || hit.kind === "column-header") ? hit.kind : false;
     if (this.dragging) this.clearHoverState();
     this.draw();
     this.notifySelectionChanged("pointer-selection");
@@ -529,9 +530,16 @@ export class CanvasGrid {
       this.clearHoverState();
       return;
     }
-    if (this.dragging && hit.kind === "cell") {
+    if (this.dragging === "cell" && hit.kind === "cell") {
       this.clearHoverState();
       this.selection.extend(hit.row, hit.column);
+      this.draw();
+      this.notifySelectionChanged("drag-selection");
+      return;
+    }
+    if (this.dragging === "column-header" && hit.kind === "column-header") {
+      this.clearHoverState();
+      this.selection.extendColumns(hit.column, this.doc.rowCount);
       this.draw();
       this.notifySelectionChanged("drag-selection");
       return;
@@ -556,6 +564,7 @@ export class CanvasGrid {
       this.onAutoFitColumn?.(resize.index);
       return;
     }
+    if (hit.kind !== "cell") return;
     this.startEdit(null, false, "explicit");
   }
 
@@ -887,7 +896,4 @@ export function applyGridScrollState({ doc, scrollLeft, scrollTop, clearHoverSta
 }
 
 export { bindHoverExitEvents, createFirstColumnHoverPreview, shouldShowFirstColumnHover };
-
-function yieldToBrowser() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
+function yieldToBrowser() { return new Promise((resolve) => setTimeout(resolve, 0)); }
