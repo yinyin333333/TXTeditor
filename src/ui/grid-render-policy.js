@@ -14,10 +14,18 @@ export const GRID_COLORS = {
   activeRowHeaderHighlight: "rgba(255, 255, 255, .28)",
   activeRowHeaderShadow: "rgba(4, 16, 28, .42)",
   activeRowHeaderSheen: "rgba(255, 255, 255, .08)",
+  indexHeader: "#252526",
+  indexHeaderFrozen: "#30343b",
+  indexHeaderActive: "#30343b",
+  indexHeaderPressed: "#35383d",
+  indexHeaderActiveText: "#ffffff",
+  indexHeaderHighlight: "rgba(255, 255, 255, .20)",
+  indexHeaderShadow: "rgba(0, 0, 0, .48)",
+  indexHeaderSheen: "rgba(255, 255, 255, .06)",
   frozen: "#252a31",
   frozenHeader: "#30343b",
-  grid: "#3a3d41",
-  gridFrozen: "#505863",
+  grid: "#46515b",
+  gridFrozen: "#6a7887",
   rowHeader: "#252526",
   rowHeaderFrozen: "#30343b",
   selection: "#264f78",
@@ -53,6 +61,14 @@ export const GRID_CSS_VARS = {
   activeRowHeaderHighlight: "--grid-active-row-header-highlight",
   activeRowHeaderShadow: "--grid-active-row-header-shadow",
   activeRowHeaderSheen: "--grid-active-row-header-sheen",
+  indexHeader: "--grid-index-header-bg",
+  indexHeaderFrozen: "--grid-index-header-frozen-bg",
+  indexHeaderActive: "--grid-index-header-active-bg",
+  indexHeaderPressed: "--grid-index-header-pressed-bg",
+  indexHeaderActiveText: "--grid-index-header-active-text",
+  indexHeaderHighlight: "--grid-index-header-highlight",
+  indexHeaderShadow: "--grid-index-header-shadow",
+  indexHeaderSheen: "--grid-index-header-sheen",
   frozen: "--grid-frozen-bg",
   frozenHeader: "--grid-frozen-header-bg",
   grid: "--grid-line",
@@ -98,7 +114,27 @@ export function rowHeaderRenderState(selection, row) {
 
 export function columnHeaderRenderState({ selection, row, column, editingThisCell }) {
   return {
-    activeColumnHeader: !editingThisCell && row === 0 && selection.focus.column === column
+    activeColumnHeader: !editingThisCell && row === 0 && selection.focus.row === row && selection.focus.column === column
+  };
+}
+
+export function columnIndexLabel(column) {
+  const index = Math.floor(Number(column));
+  if (!Number.isFinite(index) || index < 0) return "";
+  let value = index + 1;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+export function columnIndexRenderState({ selection, column, rowCount }) {
+  return {
+    selected: selection.hasFullColumn(column, rowCount),
+    activeHeader: selection.focus.column === column
   };
 }
 
@@ -108,6 +144,54 @@ export function cellBackground(row, selected, frozen, firstColumnLabel, colors =
   if (row === 0) return colors.header;
   if (firstColumnLabel) return colors.firstColumn;
   return row % 2 ? colors.rowOdd : colors.rowEven;
+}
+
+export function cellGridLineColor(_state = {}, colors = GRID_COLORS) {
+  return colors.grid;
+}
+
+export function indexHandleRenderState({ selected = false, active = false, frozen = false } = {}) {
+  const pressed = selected || active;
+  return {
+    fill: pressed ? "indexHeaderPressed" : frozen ? "indexHeaderFrozen" : "indexHeader",
+    text: pressed ? "indexHeaderActiveText" : "rowText",
+    stroke: "grid",
+    pressed
+  };
+}
+
+export function indexHandleChromeSteps({ x = 0, y = 0, width = 0, height = 0, pressed = false } = {}) {
+  if (!pressed || width <= 2 || height <= 2) return [];
+  const right = x + width - 1.5;
+  const bottom = y + height - 1.5;
+  return [
+    {
+      kind: "fillRect",
+      color: "indexHeaderSheen",
+      x: x + 2,
+      y: y + 2,
+      width: Math.max(0, width - 4),
+      height: Math.max(1, Math.floor(height * .32))
+    },
+    {
+      kind: "strokePath",
+      color: "indexHeaderShadow",
+      points: [
+        [x + 1.5, bottom],
+        [x + 1.5, y + 1.5],
+        [right - 1, y + 1.5]
+      ]
+    },
+    {
+      kind: "strokePath",
+      color: "indexHeaderHighlight",
+      points: [
+        [x + 1.5, bottom],
+        [right, bottom],
+        [right, y + 1.5]
+      ]
+    }
+  ];
 }
 
 export function cellTextColor(row, column, value, selected, colorizeColumns, firstColumnLabel = false, colors = GRID_COLORS) {
