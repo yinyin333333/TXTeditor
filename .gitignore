@@ -23,6 +23,7 @@ yarn-error.log*
 # temporary files
 tmp/
 temp/
+.runtime-smoke/
 *.tmp
 *.orig
 
