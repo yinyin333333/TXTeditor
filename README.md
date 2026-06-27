@@ -61,7 +61,7 @@ npm run tauri -- build
 
 Vector-LSP runtime layout:
 
-- Release builds pin `eezstreet/vector-lsp` via `vector-lsp.lock.json` and bundle `vector-lsp.exe` plus `contrib/`.
+- Release builds pin `eezstreet/vector-lsp` in the release workflow and bundle `vector-lsp.exe` plus `contrib/`.
 - Local runs first look beside the TXTeditor executable, then in Tauri resources, then in `../vector-lsp/target/{release,debug}` and `../vector-lsp/target/x86_64-pc-windows-msvc/{release,debug}`.
 - `npm run test:vector-lsp-smoke:optional` skips clearly when no runtime is present; `npm run test:vector-lsp-smoke:required` is the CI/release gate.
 

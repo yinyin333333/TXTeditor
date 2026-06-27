@@ -265,7 +265,6 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
 test("Vector-LSP packaging contract keeps adjacent executable and contrib resources", () => {
   const rustLspService = readFileSync(new URL("../src-tauri/src/lsp_service.rs", import.meta.url), "utf8");
   const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  const vectorLock = JSON.parse(readFileSync(new URL("../vector-lsp.lock.json", import.meta.url), "utf8"));
 
   assert.match(rustLspService, /std::env::current_exe\(\)/);
   assert.match(rustLspService, /candidates\.push\(dir\.join\(exe\)\)/);
@@ -274,10 +273,6 @@ test("Vector-LSP packaging contract keeps adjacent executable and contrib resour
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/contrib": "contrib"/);
   assert.match(releaseWorkflow, /VECTOR_LSP_REF: ff93bdb5954fffbe8d231902efe05f7181085afa/);
   assert.match(releaseWorkflow, /ref: \$\{\{ env\.VECTOR_LSP_REF \}\}/);
-  assert.deepEqual(vectorLock, {
-    repository: "eezstreet/vector-lsp",
-    ref: "ff93bdb5954fffbe8d231902efe05f7181085afa"
-  });
   assert.match(releaseWorkflow, /\$txteditorExe = "src-tauri\\target\\release\\txteditor\.exe"/);
   assert.match(releaseWorkflow, /Copy-Item \$txteditorExe "\$portableDir\\TXTeditor\.exe"/);
   assert.doesNotMatch(releaseWorkflow, /src-tauri\\target\\release\\TXTeditor\.exe/);
