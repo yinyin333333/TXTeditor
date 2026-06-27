@@ -1,8 +1,8 @@
 import { clamp } from "../core/table-model.js";
-import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction, keyboardEditStartAction } from "./edit-policy.js";
+import { editorBoxStyle, editorCellState, editorKeyAction, keyboardEditStartAction } from "./edit-policy.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
-import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
+import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget, movementSelectionTarget } from "./grid-selection-policy.js";
 import { applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, edgeCellScrollState } from "./grid-viewport-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
 import {
@@ -755,7 +755,15 @@ export class CanvasGrid {
   }
 
   moveSelectionBy(rowDelta, columnDelta) {
-    const { row, column } = movedCell(this.selection.focus, rowDelta, columnDelta, this.doc.rowCount, this.doc.columnCount);
+    const { row, column } = movementSelectionTarget({
+      focus: this.selection.focus,
+      rowDelta,
+      columnDelta,
+      rowCount: this.doc.rowCount,
+      columnCount: this.doc.columnCount,
+      hiddenRows: this.doc.hiddenRows,
+      hiddenColumns: this.doc.hiddenColumns
+    });
     this.selection.set(row, column);
     this.scrollCellIntoView(row, column);
     this.draw();
@@ -862,19 +870,14 @@ export class CanvasGrid {
   }
 }
 
-export function shouldDrawCellText(row, column, editingCell) {
-  return !editingCell || editingCell.row !== row || editingCell.column !== column;
-}
+export function shouldDrawCellText(row, column, editingCell) { return !editingCell || editingCell.row !== row || editingCell.column !== column; }
 
 export function normalizeVectorLspTooltip(value, hoverText) {
   return normalizeVectorLspTooltipPolicy(value, hoverText);
 }
 
 export function movedCell(focus, rowDelta, columnDelta, rowCount, columnCount) {
-  return {
-    row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)),
-    column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1))
-  };
+  return { row: clamp(focus.row + rowDelta, 0, Math.max(0, rowCount - 1)), column: clamp(focus.column + columnDelta, 0, Math.max(0, columnCount - 1)) };
 }
 
 export function centeredScrollOffset({ itemStart, itemSize, viewportSize, maxScroll }) {

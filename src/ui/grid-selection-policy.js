@@ -62,12 +62,42 @@ export function keyboardSelectionTarget({ key, shiftKey = false, ctrlKey = false
   else if (key === "ArrowRight") column = ctrlKey ? jumpColumn(column, columnDirection = 1) : column + (columnDirection = 1);
   else if (key === "ArrowLeft") column = ctrlKey ? jumpColumn(column, columnDirection = -1) : column + (columnDirection = -1);
   else return null;
-  row = visibleIndex(row, rowCount, hiddenRows, rowDirection, focus.row);
-  column = visibleIndex(column, columnCount, hiddenColumns, columnDirection, focus.column);
+  const target = visibleSelectionTarget({
+    row,
+    column,
+    rowDirection,
+    columnDirection,
+    focus,
+    rowCount,
+    columnCount,
+    hiddenRows,
+    hiddenColumns
+  });
   return {
-    row: clamp(row, 0, rowCount - 1),
-    column: clamp(column, 0, columnCount - 1),
+    row: target.row,
+    column: target.column,
     extend: Boolean(shiftKey && key !== "Tab")
+  };
+}
+
+export function movementSelectionTarget({ focus, rowDelta = 0, columnDelta = 0, rowCount, columnCount, hiddenRows = new Set(), hiddenColumns = new Set() }) {
+  return visibleSelectionTarget({
+    row: focus.row + rowDelta,
+    column: focus.column + columnDelta,
+    rowDirection: Math.sign(rowDelta),
+    columnDirection: Math.sign(columnDelta),
+    focus,
+    rowCount,
+    columnCount,
+    hiddenRows,
+    hiddenColumns
+  });
+}
+
+function visibleSelectionTarget({ row, column, rowDirection = 0, columnDirection = 0, focus, rowCount, columnCount, hiddenRows = new Set(), hiddenColumns = new Set() }) {
+  return {
+    row: clamp(visibleIndex(row, rowCount, hiddenRows, rowDirection, focus.row), 0, rowCount - 1),
+    column: clamp(visibleIndex(column, columnCount, hiddenColumns, columnDirection, focus.column), 0, columnCount - 1)
   };
 }
 

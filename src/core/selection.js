@@ -3,17 +3,20 @@ export class SelectionModel {
     this.anchor = { row: 0, column: 0 };
     this.focus = { row: 0, column: 0 };
     this.ranges = [makeRect(0, 0, 0, 0)];
+    this.selectionKind = "cell";
   }
 
   set(row, column) {
     this.anchor = { row, column };
     this.focus = { row, column };
     this.ranges = [makeRect(row, column, row, column)];
+    this.selectionKind = "cell";
   }
 
   extend(row, column) {
     this.focus = { row, column };
     this.ranges = [makeRect(this.anchor.row, this.anchor.column, row, column)];
+    this.selectionKind = "cell";
   }
 
   setRange(top, left, bottom, right, focus = { row: bottom, column: right }) {
@@ -21,42 +24,51 @@ export class SelectionModel {
     this.anchor = { row: rect.top, column: rect.left };
     this.focus = { row: focus.row, column: focus.column };
     this.ranges = [rect];
+    this.selectionKind = "cell";
   }
 
   extendRange(top, left, bottom, right, focus = { row: bottom, column: right }) {
     const anchor = this.anchor ?? { row: top, column: left };
     this.focus = { row: focus.row, column: focus.column };
     this.ranges = [makeRect(anchor.row, left, focus.row, right)];
+    this.selectionKind = "cell";
   }
 
   toggleCell(row, column) {
     this.toggleRange(makeRect(row, column, row, column), { row, column });
+    this.selectionKind = "cell";
   }
 
   setRow(row, columnCount) {
     this.setRange(row, 0, row, Math.max(0, columnCount - 1), { row, column: Math.max(0, columnCount - 1) });
+    this.selectionKind = "row";
   }
 
   extendRows(row, columnCount) {
     this.focus = { row, column: Math.max(0, columnCount - 1) };
     this.ranges = [makeRect(this.anchor.row, 0, row, Math.max(0, columnCount - 1))];
+    this.selectionKind = "row";
   }
 
   toggleRow(row, columnCount) {
     this.toggleRange(makeRect(row, 0, row, Math.max(0, columnCount - 1)), { row, column: Math.max(0, columnCount - 1) });
+    this.selectionKind = "row";
   }
 
   setColumn(column, rowCount) {
     this.setRange(0, column, Math.max(0, rowCount - 1), column, { row: Math.max(0, rowCount - 1), column });
+    this.selectionKind = "column";
   }
 
   extendColumns(column, rowCount) {
     this.focus = { row: Math.max(0, rowCount - 1), column };
     this.ranges = [makeRect(0, this.anchor.column, Math.max(0, rowCount - 1), column)];
+    this.selectionKind = "column";
   }
 
   toggleColumn(column, rowCount) {
     this.toggleRange(makeRect(0, column, Math.max(0, rowCount - 1), column), { row: Math.max(0, rowCount - 1), column });
+    this.selectionKind = "column";
   }
 
   toggleRange(rect, focus = { row: rect.bottom, column: rect.right }) {
@@ -99,6 +111,7 @@ export class SelectionModel {
     this.anchor = { row: 0, column: 0 };
     this.focus = { row: Math.max(0, rowCount - 1), column: Math.max(0, columnCount - 1) };
     this.ranges = [makeRect(0, 0, Math.max(0, rowCount - 1), Math.max(0, columnCount - 1))];
+    this.selectionKind = "all";
   }
 }
 
@@ -106,15 +119,24 @@ export function repairSelectionForDocument(selection, doc, { preferVisible = tru
   if (!selection || !doc) return;
   const rowMax = Math.max(0, (doc.rowCount ?? 1) - 1);
   const columnMax = Math.max(0, (doc.columnCount ?? 1) - 1);
-  selection.ranges = (selection.ranges ?? []).map((range) => makeRect(
+  const clampedRanges = (selection.ranges ?? []).map((range) => makeRect(
     clampIndex(range.top, rowMax),
     clampIndex(range.left, columnMax),
     clampIndex(range.bottom, rowMax),
     clampIndex(range.right, columnMax)
   ));
-  if (!selection.ranges.length) selection.ranges = [makeRect(0, 0, 0, 0)];
   const focus = normalizePoint(selection.focus, rowMax, columnMax);
+  const visibleRanges = preferVisible ? clampedRanges.filter((range) => rangeHasVisibleCell(range, doc)) : clampedRanges;
+  if (!visibleRanges.length) {
+    const fallback = nearestVisiblePoint(focus, doc, rowMax, columnMax) ?? firstCellInLastRange(clampedRanges) ?? { row: 0, column: 0 };
+    selection.ranges = [makeRect(fallback.row, fallback.column, fallback.row, fallback.column)];
+    selection.focus = fallback;
+    selection.anchor = fallback;
+    return;
+  }
+  selection.ranges = visibleRanges;
   const fallback = firstVisibleCellInRanges(selection.ranges, doc, preferVisible) ?? nearestVisiblePoint(focus, doc, rowMax, columnMax) ?? firstCellInLastRange(selection.ranges);
+  if (!pointInRanges(selection.ranges, fallback)) selection.ranges = [makeRect(fallback.row, fallback.column, fallback.row, fallback.column)];
   selection.focus = pointInRanges(selection.ranges, focus) && isVisiblePoint(focus, doc, preferVisible) ? focus : fallback;
   const anchor = normalizePoint(selection.anchor, rowMax, columnMax);
   selection.anchor = pointInRanges(selection.ranges, anchor) && isVisiblePoint(anchor, doc, preferVisible) ? anchor : selection.focus;
@@ -171,6 +193,11 @@ function firstVisibleCellInRanges(ranges, doc, preferVisible) {
     if (row !== null && column !== null) return { row, column };
   }
   return null;
+}
+
+function rangeHasVisibleCell(range, doc) {
+  return firstVisibleIndexInRange(range.top, range.bottom, doc.hiddenRows) !== null
+    && firstVisibleIndexInRange(range.left, range.right, doc.hiddenColumns) !== null;
 }
 
 function firstVisibleIndexInRange(start, end, hidden) {

@@ -50,7 +50,8 @@ import {
   applySelectionForHit,
   hasFullColumnRange,
   hasFullRowRange,
-  keyboardSelectionTarget
+  keyboardSelectionTarget,
+  movementSelectionTarget
 } from "../src/ui/grid-selection-policy.js";
 import {
   applyResizeDragState,
@@ -189,6 +190,29 @@ test("grid keyboard selection target skips hidden rows and columns", () => {
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowDown" }), { row: 3, column: 1, extend: false });
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowRight" }), { row: 1, column: 3, extend: false });
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "Tab" }), { row: 1, column: 3, extend: false });
+});
+
+test("editor commit movement shares hidden-aware keyboard navigation policy", () => {
+  const base = {
+    focus: { row: 1, column: 1 },
+    rowCount: 5,
+    columnCount: 5,
+    hiddenRows: new Set([2]),
+    hiddenColumns: new Set([2])
+  };
+  assert.deepEqual(movementSelectionTarget({ ...base, rowDelta: 1, columnDelta: 0 }), { row: 3, column: 1 });
+  assert.deepEqual(movementSelectionTarget({ ...base, rowDelta: 0, columnDelta: 1 }), { row: 1, column: 3 });
+  assert.deepEqual(movementSelectionTarget({ ...base, focus: { row: 4, column: 4 }, rowDelta: 1, columnDelta: 1 }), { row: 4, column: 4 });
+  const keyboardTarget = keyboardSelectionTarget({
+    ...base,
+    key: "ArrowDown",
+    jumpRow: (row, direction) => row + direction,
+    jumpColumn: (column, direction) => column + direction
+  });
+  assert.deepEqual(movementSelectionTarget({ ...base, rowDelta: 1, columnDelta: 0 }), {
+    row: keyboardTarget.row,
+    column: keyboardTarget.column
+  });
 });
 
 test("increment fill starts from the anchor and walks selected cells in deterministic grid order", () => {

@@ -60,6 +60,27 @@ function ruleIdsForProfile(profile) {
   return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
 }
 
+function assertVisibleSelection(selection, doc) {
+  assert.equal(doc.hiddenRows.has(selection.focus.row), false);
+  assert.equal(doc.hiddenColumns.has(selection.focus.column), false);
+  assert.equal(doc.hiddenRows.has(selection.anchor.row), false);
+  assert.equal(doc.hiddenColumns.has(selection.anchor.column), false);
+  assert.equal(selection.contains(selection.focus.row, selection.focus.column), true);
+  for (const range of selection.ranges) {
+    assert.equal(rangeHasVisibleCell(range, doc), true);
+  }
+}
+
+function rangeHasVisibleCell(range, doc) {
+  for (let row = range.top; row <= range.bottom; row++) {
+    if (doc.hiddenRows.has(row)) continue;
+    for (let column = range.left; column <= range.right; column++) {
+      if (!doc.hiddenColumns.has(column)) return true;
+    }
+  }
+  return false;
+}
+
 test("parses and serializes TSV while preserving CRLF and final newline", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\r\n1\t2\r\n");
   assert.equal(doc.rowCount, 2);
@@ -399,6 +420,66 @@ test("selection repair avoids deleted or hidden focus targets", () => {
   deleteRowsCommand(doc, 3, 1).redo(doc);
   repairSelectionForDocument(selection, doc);
   assert.deepEqual(selection.focus, { row: 1, column: 0 });
+  assertVisibleSelection(selection, doc);
+});
+
+test("selection repair collapses hidden-only row selections to a visible cell", () => {
+  const doc = TableDocument.fromText("x.txt", "h\na\nb");
+  const selection = new SelectionModel();
+  selection.setRow(1, doc.columnCount);
+  doc.setRowsHidden([1], true);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 0, column: 0 });
+  assert.deepEqual(selection.anchor, { row: 0, column: 0 });
+  assert.deepEqual(selection.ranges, [{ top: 0, left: 0, bottom: 0, right: 0 }]);
+  assertVisibleSelection(selection, doc);
+});
+
+test("selection repair collapses hidden-only column selections to a visible cell", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3");
+  const selection = new SelectionModel();
+  selection.setColumn(1, doc.rowCount);
+  doc.setColumnsHidden([1], true);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 1, column: 0 });
+  assert.deepEqual(selection.anchor, { row: 1, column: 0 });
+  assert.deepEqual(selection.ranges, [{ top: 1, left: 0, bottom: 1, right: 0 }]);
+  assertVisibleSelection(selection, doc);
+});
+
+test("selection repair keeps focus inside selection after a selected cell is deleted", () => {
+  const doc = TableDocument.fromText("x.txt", "a\n1\n2");
+  const selection = new SelectionModel();
+  selection.set(2, 0);
+  deleteRowsCommand(doc, 2, 1).redo(doc);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 1, column: 0 });
+  assert.deepEqual(selection.anchor, { row: 1, column: 0 });
+  assert.equal(selection.contains(selection.focus.row, selection.focus.column), true);
+});
+
+test("selection repair collapses a range when all cells become hidden", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4");
+  const selection = new SelectionModel();
+  selection.setRange(1, 0, 2, 1);
+  doc.setRowsHidden([1, 2], true);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 0, column: 1 });
+  assert.deepEqual(selection.anchor, { row: 0, column: 1 });
+  assert.deepEqual(selection.ranges, [{ top: 0, left: 1, bottom: 0, right: 1 }]);
+  assertVisibleSelection(selection, doc);
+});
+
+test("selection repair drops hidden-only ranges from mixed selections", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4");
+  const selection = new SelectionModel();
+  selection.set(1, 0);
+  selection.toggleCell(2, 1);
+  doc.setRowsHidden([2], true);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 1, column: 0 });
+  assert.deepEqual(selection.ranges, [{ top: 1, left: 0, bottom: 1, right: 0 }]);
+  assertVisibleSelection(selection, doc);
 });
 
 test("manual column width survives table shape refresh", () => {
