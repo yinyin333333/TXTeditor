@@ -39,7 +39,7 @@ export function createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
-  storage = localStorage
+  storage = globalThis.localStorage ?? null
 }) {
   const collapsedProblemFiles = new Set();
 
@@ -136,9 +136,9 @@ export function createDiagnosticsController({
 
   function scrollProblemsToActiveFile() {
     if (!state.problemsVisible || !els.problemsList) return;
-    const doc = activeDoc();
-    if (!doc?.name) return;
-    const target = els.problemsList.querySelector(`details[data-file-name="${CSS.escape(doc.name)}"]`);
+    const key = lintDocKey(activeDoc());
+    if (!key) return;
+    const target = els.problemsList.querySelector(`details[data-file-key="${CSS.escape(key)}"]`);
     if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
@@ -158,11 +158,18 @@ export function createDiagnosticsController({
       }
     }
     if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
-      const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
+      const [doc] = await openNativePaths([diagnostic.filePath], TableDocument).catch((error) => {
+        showError(`Diagnostic target could not be opened: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      });
       if (doc) {
         await addDocument(doc);
         index = state.active;
       }
+    }
+    if (index < 0) {
+      showError(`Diagnostic target could not be opened: ${diagnostic.filePath || diagnostic.fileName || diagnostic.fileKey}`);
+      return;
     }
     if (index >= 0) state.active = index;
     const gridRef = currentGrid();
@@ -202,11 +209,11 @@ export function createDiagnosticsController({
     }
     els.problemsList.innerHTML = renderProblemsPanel();
     els.problemsList.dataset.renderKey = key;
-    for (const details of els.problemsList.querySelectorAll("details[data-file-name]")) {
+    for (const details of els.problemsList.querySelectorAll("details[data-file-key]")) {
       details.addEventListener("toggle", () => {
-        const fn = details.dataset.fileName;
-        if (details.open) collapsedProblemFiles.delete(fn);
-        else collapsedProblemFiles.add(fn);
+        const key = details.dataset.fileKey;
+        if (details.open) collapsedProblemFiles.delete(key);
+        else collapsedProblemFiles.add(key);
       });
     }
     for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {

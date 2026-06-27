@@ -1,3 +1,5 @@
+import { normalizeFilePathKey } from "./file-identity.js";
+
 export function docToUri(doc) {
   if (!doc?.path) return null;
   const normalized = String(doc.path).replace(/\\/g, "/");
@@ -32,7 +34,7 @@ export function fileNameFromUri(uri) {
 }
 
 function defaultLspPathKey(pathValue) {
-  return String(pathValue || "").replace(/\\/g, "/").toLowerCase();
+  return normalizeFilePathKey(pathValue);
 }
 
 function encodeFilePath(pathValue) {

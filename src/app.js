@@ -1190,7 +1190,7 @@ function sortedUnique(values) {
 }
 
 function lintDocKey(doc) {
-  return lintPathKey(doc?.path || doc?.name || "");
+  return lintPathKey(doc?.fileKey || doc?.path || doc?.name || "");
 }
 
 function lintPathKey(path) {

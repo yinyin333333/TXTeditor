@@ -1,9 +1,11 @@
+import { lintDocumentKey, normalizeFilePathKey } from "./file-identity.js";
+
 export function documentKey(doc) {
-  return normalizePath(doc?.path || doc?.name || "");
+  return lintDocumentKey(doc);
 }
 
 export function normalizePath(value) {
-  return String(value).replace(/\\/g, "/").toLowerCase();
+  return normalizeFilePathKey(value);
 }
 
 export function baseName(path) {

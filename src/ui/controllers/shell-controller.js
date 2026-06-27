@@ -96,7 +96,7 @@ export function createShellController({
       problemBadgeForPath
     });
     els.fileList.innerHTML = state.docs
-      .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
+      .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.fileKey || doc.path || doc.name)}</button>`)
       .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
     renderProblemsPanelIfNeeded();
     for (const button of documentRef.querySelectorAll("[data-tab]")) {

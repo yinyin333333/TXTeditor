@@ -1,5 +1,8 @@
+import { documentFileKey } from "../core/file-identity.js";
+
 export function documentOpenPlan(docs, doc) {
-  const existingIndex = doc?.path ? docs.findIndex((openDoc) => openDoc.path === doc.path) : -1;
+  const key = documentFileKey(doc);
+  const existingIndex = key ? docs.findIndex((openDoc) => documentFileKey(openDoc) === key) : -1;
   if (existingIndex >= 0) return { action: "activate-existing", activeIndex: existingIndex };
   return { action: "add-new", activeIndex: docs.length };
 }

@@ -606,6 +606,87 @@ test("Vector-LSP stale close is skipped when a URI is reopened", async () => {
   }
 });
 
+test("Vector-LSP definition open failure does not navigate the active document", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "id\tref\n1\tmissing", { path: "E:\\Data\\skills.txt" });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          calls.push(command);
+          if (command === "lsp_definition") return { uri: "file:///E:/Data/missing.txt", line: 9, character: 4 };
+          if (command === "read_text_files") return [{ Err: "missing" }];
+          return undefined;
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: true },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    contextHit: null,
+    selection: {
+      focus: { row: 1, column: 1 },
+      set(row, column) {
+        this.focus = { row, column };
+      }
+    }
+  };
+  const errors = [];
+  const gridCalls = [];
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument: () => gridCalls.push("set-document"),
+        scrollCellIntoView: () => gridCalls.push("scroll"),
+        draw: () => gridCalls.push("draw")
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: (message) => errors.push(String(message)),
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async (newDoc) => {
+        state.docs.push(newDoc);
+        state.active = state.docs.length - 1;
+      },
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.goToDefinition();
+    assert.equal(state.active, 0);
+    assert.deepEqual(state.selection.focus, { row: 1, column: 1 });
+    assert.deepEqual(gridCalls, []);
+    assert.equal(errors.some((message) => message.includes("Definition target could not be opened")), true);
+    assert.deepEqual(calls, ["lsp_definition", "read_text_files"]);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("Vector-LSP superseded workspace start cannot publish stale state", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\Data\\skills.txt" });

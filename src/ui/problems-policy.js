@@ -110,10 +110,19 @@ export function diagnosticCounts(diagnostics = []) {
 export function groupDiagnosticsByFile(diagnostics = []) {
   const groups = new Map();
   for (const diagnostic of diagnostics) {
-    if (!groups.has(diagnostic.fileName)) groups.set(diagnostic.fileName, []);
-    groups.get(diagnostic.fileName).push(diagnostic);
+    const key = diagnostic.fileKey || diagnostic.filePath || diagnostic.fileName || "";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: diagnostic.fileName || diagnostic.filePath || key || "Unknown file",
+        diagnostics: []
+      });
+    }
+    groups.get(key).diagnostics.push(diagnostic);
   }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return [...groups.values()]
+    .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key))
+    .map((group) => [group.label, group.diagnostics, group.key]);
 }
 
 export function problemsPanelHtml({
@@ -128,8 +137,10 @@ export function problemsPanelHtml({
   if (vectorEngine && !lspStarted) return `<div class="empty-problems">Open a folder to enable linting.</div>`;
   if (!diagnostics.length) return `<div class="empty-problems">No problems.</div>`;
   const collapsed = collapsedFiles instanceof Set ? collapsedFiles : new Set(collapsedFiles);
-  return groupDiagnosticsByFile(diagnostics).map(([fileName, fileDiagnostics]) => `
-    <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsed.has(fileName) ? "" : " open"}>
+  return groupDiagnosticsByFile(diagnostics).map(([fileName, fileDiagnostics, fileKey]) => {
+    const isCollapsed = collapsed.has(fileKey) || collapsed.has(fileName);
+    return `
+    <details class="problem-file-group" data-file-key="${escapeHtml(fileKey)}" data-file-name="${escapeHtml(fileName)}"${isCollapsed ? "" : " open"}>
       <summary class="problem-file-header">${escapeHtml(fileName)} <span class="problem-file-count">(${fileDiagnostics.length})</span></summary>
       ${fileDiagnostics.map((diagnostic) => `
         <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}">
@@ -140,7 +151,8 @@ export function problemsPanelHtml({
         </button>
       `).join("")}
     </details>
-  `).join("");
+  `;
+  }).join("");
 }
 
 export function lintSummaryText({

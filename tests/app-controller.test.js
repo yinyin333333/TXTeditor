@@ -28,6 +28,7 @@ import {
   unsavedDocuments
 } from "../src/ui/document-lifecycle-policy.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
+import { createDiagnosticsController } from "../src/ui/controllers/diagnostics-controller.js";
 import { syncDockChildren } from "../src/ui/dock-sync.js";
 import {
   globalShortcutAction,
@@ -69,6 +70,8 @@ import {
 } from "../src/ui/panel-state-policy.js";
 import {
   lintDiagnosticsStateAfterUpdate,
+  groupDiagnosticsByFile,
+  problemsPanelHtml,
   problemsPanelRenderDecision,
   problemsPanelRenderKey,
   shouldRenderProblemsPanel
@@ -93,6 +96,14 @@ function lintDocs(docs, profile = "RotW") {
 
 function ruleIdsForProfile(profile) {
   return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 test("search wraps through the document", () => {
@@ -183,6 +194,10 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
     action: "activate-existing",
     activeIndex: 1
   });
+  assert.deepEqual(documentOpenPlan(docs, { name: "skills-copy.txt", path: "DATA\\SKILLS.TXT" }), {
+    action: "activate-existing",
+    activeIndex: 1
+  });
   assert.deepEqual(documentOpenPlan(docs, { name: "new.txt", path: "Data/new.txt" }), {
     action: "add-new",
     activeIndex: 3
@@ -196,6 +211,15 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 2, documentCount: 3 }), 0);
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 0, documentCount: 1 }), -1);
   assert.equal(closeDialogMessage(docs[1]), "skills.txt has unsaved changes.");
+
+  assert.deepEqual(documentOpenPlan([{ name: "same.txt", path: "", fileKey: "browser:1:same.txt" }], {
+    name: "same.txt",
+    path: "",
+    fileKey: "browser:2:same.txt"
+  }), {
+    action: "add-new",
+    activeIndex: 1
+  });
 });
 
 test("close tab commits active editor before unsaved prompt decisions", async () => {
@@ -626,6 +650,109 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
   }), ["legacy", "on", "stopped", "ready", "", "rules-open", "RotW", 7, "a.txt\u001fb.txt"].join("\u001e"));
   assert.equal(problemsPanelRenderDecision({ currentKey: "same", nextKey: "same" }), "cached");
   assert.equal(problemsPanelRenderDecision({ currentKey: "old", nextKey: "new" }), "render");
+});
+
+test("Problems panel groups duplicate basenames by file key", () => {
+  const diagnostics = [
+    { id: "a", fileName: "skills.txt", fileKey: "e:/mod-a/skills.txt", severity: "error", rowIndex: 0, columnIndex: 0, message: "A" },
+    { id: "b", fileName: "skills.txt", fileKey: "e:/mod-b/skills.txt", severity: "warning", rowIndex: 1, columnIndex: 0, message: "B" }
+  ];
+  const groups = groupDiagnosticsByFile(diagnostics);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map(([, items, key]) => [key, items.length]), [
+    ["e:/mod-a/skills.txt", 1],
+    ["e:/mod-b/skills.txt", 1]
+  ]);
+  const html = problemsPanelHtml({ lintEnabled: true, diagnostics });
+  assert.match(html, /data-file-key="e:\/mod-a\/skills\.txt"/);
+  assert.match(html, /data-file-key="e:\/mod-b\/skills\.txt"/);
+});
+
+test("diagnostic navigation failure leaves the active document and selection unchanged", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("active.txt", "id\n1", { path: "E:\\Data\\active.txt" });
+  const state = {
+    docs: [doc],
+    active: 0,
+    selection: new SelectionModel(),
+    problemsVisible: true,
+    bottomTab: "problems",
+    lint: {
+      enabled: true,
+      engine: "legacy",
+      diagnostics: [{
+        id: "missing",
+        fileName: "missing.txt",
+        filePath: "E:\\Data\\missing.txt",
+        fileKey: "e:/data/missing.txt",
+        rowIndex: 8,
+        columnIndex: 4,
+        severity: "error",
+        message: "missing"
+      }],
+      version: 1,
+      status: "",
+      legacy: {
+        status: "",
+        rulesOpen: false,
+        settings: { profile: "RotW" },
+        workspaceLoad: { status: "ready" },
+        workspaceDocs: []
+      }
+    },
+    lsp: { started: false }
+  };
+  state.selection.set(0, 0);
+  const errors = [];
+  const gridCalls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          if (command === "read_text_files") return [{ Err: "missing" }];
+          throw new Error(`unexpected ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+  try {
+    const controller = createDiagnosticsController({
+      state,
+      els: {
+        host: { getBoundingClientRect: () => ({ top: 0, height: 100 }), focus() {} },
+        overviewRuler: { style: {}, innerHTML: "" },
+        problemsList: null
+      },
+      grid: {
+        setDiagnostics() {},
+        setDocument: () => gridCalls.push("set-document"),
+        scrollCellIntoView: () => gridCalls.push("scroll"),
+        draw: () => gridCalls.push("draw")
+      },
+      activeDoc: () => state.docs[state.active],
+      hasOpenDocument: () => true,
+      addDocument: async (newDoc) => {
+        state.docs.push(newDoc);
+        state.active = state.docs.length - 1;
+      },
+      renderChrome() {},
+      recordUiPerf() {},
+      showError: (message) => errors.push(String(message)),
+      lintDocKey: (target) => String(target?.path || target?.name || "").replace(/\\/g, "/").toLowerCase(),
+      lintPathKey: (target) => String(target || "").replace(/\\/g, "/").toLowerCase(),
+      escapeHtml
+    });
+
+    await controller.goToDiagnostic("missing");
+    assert.equal(state.active, 0);
+    assert.deepEqual(state.selection.focus, { row: 0, column: 0 });
+    assert.deepEqual(gridCalls, []);
+    assert.equal(errors.some((message) => message.includes("Diagnostic target could not be opened")), true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("Find Next includes the current cell once when the query changes", () => {
