@@ -63,6 +63,8 @@ test("browser text codec preserves Windows-1252 and UTF-8 BOM semantics", () => 
   assert.deepEqual(decodeBuffer(legacy).encoding, "windows-1252");
   assert.equal(decodeBuffer(legacy).text, "\u201c\u20ac\u2026\u2014");
   assert.deepEqual([...encodeText("\u201c\u20ac\u2026\u2014", "windows-1252")], [0x93, 0x80, 0x85, 0x97]);
+  assert.deepEqual([...encodeText("\u0081\u008d\u008f\u0090\u009d", "windows-1252")], [0x81, 0x8D, 0x8F, 0x90, 0x9D]);
+  assert.equal(decodeBuffer(new Uint8Array([0x81, 0x8D, 0x8F, 0x90, 0x9D])).text, "\u0081\u008d\u008f\u0090\u009d");
   assert.throws(() => encodeText("\u{1F642}", "windows-1252"), /Windows-1252/);
   assert.deepEqual([...encodeText("id", "utf-8-bom")], [0xEF, 0xBB, 0xBF, 0x69, 0x64]);
 });

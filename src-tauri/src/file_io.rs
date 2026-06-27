@@ -72,25 +72,19 @@ pub(crate) fn write_text_file_safe(
     encoding: Option<String>,
 ) -> Result<SavePayload, String> {
     let target = PathBuf::from(&path);
-    let temp = unique_temp_path_for(&target)?;
+    let (temp, mut temp_file) = create_unique_temp_file_for(&target)?;
     let encoding = normalize_encoding(encoding.as_deref());
     let bytes = encode_text(&text, &encoding)?;
 
-    {
-        let write_result = (|| -> Result<(), String> {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
-                .map_err(|err| err.to_string())?;
-            file.write_all(&bytes).map_err(|err| err.to_string())?;
-            file.sync_all().map_err(|err| err.to_string())?;
-            Ok(())
-        })();
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&temp);
-            return Err(error);
-        }
+    let write_result = (|| -> Result<(), String> {
+        temp_file.write_all(&bytes).map_err(|err| err.to_string())?;
+        temp_file.sync_all().map_err(|err| err.to_string())?;
+        Ok(())
+    })();
+    drop(temp_file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
     }
 
     replace_file_with_temp(&target, &temp)?;
@@ -108,7 +102,7 @@ pub(crate) fn write_text_file_safe(
     })
 }
 
-fn unique_temp_path_for(target: &Path) -> Result<PathBuf, String> {
+fn create_unique_temp_file_for(target: &Path) -> Result<(PathBuf, fs::File), String> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()
@@ -125,10 +119,7 @@ fn unique_temp_path_for(target: &Path) -> Result<PathBuf, String> {
             .create_new(true)
             .open(&candidate)
         {
-            Ok(_) => {
-                let _ = fs::remove_file(&candidate);
-                return Ok(candidate);
-            }
+            Ok(file) => return Ok((candidate, file)),
             Err(error) => last_error = Some(error.to_string()),
         }
     }
@@ -260,7 +251,8 @@ fn encode_windows_1252(text: &str) -> Result<Vec<u8>, String> {
     text.chars()
         .map(|ch| {
             let code = ch as u32;
-            if code <= 0x7F || (0xA0..=0xFF).contains(&code) {
+            if code <= 0x7F || (0xA0..=0xFF).contains(&code) || is_windows_1252_undefined_c1(code)
+            {
                 Ok(code as u8)
             } else {
                 windows_1252_byte(code).ok_or_else(|| {
@@ -269,6 +261,10 @@ fn encode_windows_1252(text: &str) -> Result<Vec<u8>, String> {
             }
         })
         .collect()
+}
+
+fn is_windows_1252_undefined_c1(code: u32) -> bool {
+    matches!(code, 0x81 | 0x8D | 0x8F | 0x90 | 0x9D)
 }
 
 fn windows_1252_code_point(byte: u8) -> u32 {
@@ -377,6 +373,15 @@ mod tests {
         assert_eq!(
             encode_text("\u{201C}\u{20AC}\u{2026}\u{2014}", "windows-1252").unwrap(),
             vec![0x93, 0x80, 0x85, 0x97]
+        );
+        assert_eq!(
+            encode_text("\u{0081}\u{008D}\u{008F}\u{0090}\u{009D}", "windows-1252")
+                .unwrap(),
+            vec![0x81, 0x8D, 0x8F, 0x90, 0x9D]
+        );
+        assert_eq!(
+            decode_windows_1252(&[0x81, 0x8D, 0x8F, 0x90, 0x9D]),
+            "\u{0081}\u{008D}\u{008F}\u{0090}\u{009D}"
         );
         assert!(encode_text("\u{1F642}", "windows-1252")
             .unwrap_err()
@@ -508,6 +513,31 @@ mod tests {
         assert_eq!(payload.encoding, "windows-1252");
         assert_eq!(fs::read(&target).unwrap(), vec![0x93, 0x80, 0x85, 0x97]);
         assert_eq!(fs::read_to_string(&sibling_tmp).unwrap(), "do-not-touch");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_text_file_safe_skips_existing_numbered_temp_without_deleting_it() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-safe-write-temp-collision-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("items.txt");
+        let colliding_temp = dir.join(format!(".items.txt.{}.0.tmp", std::process::id()));
+        fs::write(&target, "old").unwrap();
+        fs::write(&colliding_temp, "owned-by-another-save").unwrap();
+        let target_string = target.to_string_lossy().to_string();
+
+        write_text_file_safe(target_string, "new".to_string(), None).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(
+            fs::read_to_string(&colliding_temp).unwrap(),
+            "owned-by-another-save"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

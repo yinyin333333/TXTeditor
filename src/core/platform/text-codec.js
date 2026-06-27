@@ -29,6 +29,7 @@ const WINDOWS_1252_DECODE = new Map([
 ]);
 
 const WINDOWS_1252_ENCODE = new Map([...WINDOWS_1252_DECODE.entries()].map(([byte, codePoint]) => [codePoint, byte]));
+const WINDOWS_1252_UNDEFINED_C1 = new Set([0x81, 0x8D, 0x8F, 0x90, 0x9D]);
 
 export function decodeBuffer(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -64,6 +65,8 @@ export function encodeWindows1252(text) {
   for (const char of String(text)) {
     const codePoint = char.codePointAt(0);
     if (codePoint <= 0x7F || (codePoint >= 0xA0 && codePoint <= 0xFF)) {
+      bytes.push(codePoint);
+    } else if (WINDOWS_1252_UNDEFINED_C1.has(codePoint)) {
       bytes.push(codePoint);
     } else if (WINDOWS_1252_ENCODE.has(codePoint)) {
       bytes.push(WINDOWS_1252_ENCODE.get(codePoint));
