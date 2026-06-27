@@ -114,7 +114,7 @@ function assertPlatformContract() {
   const rustLib = fs.readFileSync(path.join(ROOT, "src-tauri/src/lib.rs"), "utf8");
   const required = {
     lsp_start: ["workspacePath"],
-    lsp_open_file: ["uri", "text"],
+    lsp_open_file: ["uri", "text", "version"],
     lsp_update_file: ["uri", "version", "text"],
     lsp_update_file_incremental: ["uri", "version", "changes"],
     lsp_close_file: ["uri"],

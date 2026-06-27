@@ -323,7 +323,7 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
     assert.equal(gridCalls.filter((call) => call[0] === "hover").at(-1)[3], "SECOND");
     assert.deepEqual(tauriCalls, [
       ["lsp_start", { workspacePath: "E:\\Data" }],
-      ["lsp_open_file", { uri, text: doc.toText() }]
+      ["lsp_open_file", { uri, text: doc.toText(), version: 1 }]
     ]);
   } finally {
     resetLspDocumentState(doc);
@@ -909,6 +909,8 @@ test("Vector-LSP serializes close before reopening the same URI", async () => {
     await controller.openDoc(reopened);
     await closePromise;
     assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file", "lsp_close_file", "lsp_open_file"]);
+    assert.equal(calls[0][1].version, 1);
+    assert.ok(calls[2][1].version > calls[0][1].version);
     assert.equal(calls[2][1].text, reopened.toText());
     assert.equal(state.lsp.openFileCount, 1);
   } finally {
@@ -992,9 +994,95 @@ test("Vector-LSP serializes close intent before a pending same-URI didOpen compl
 
     assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file", "lsp_close_file", "lsp_open_file"]);
     assert.equal(calls[0][1].text, first.toText());
+    assert.equal(calls[0][1].version, 1);
     assert.equal(calls[2][1].text, reopened.toText());
+    assert.ok(calls[2][1].version > calls[0][1].version);
     assert.equal(state.lsp.openFileCount, 1);
     assert.equal(lspDocumentState(reopened).opened, true);
+  } finally {
+    resetLspDocumentState(first);
+    resetLspDocumentState(reopened);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Vector-LSP drops stale diagnostics from a previous same-URI open lifetime", async () => {
+  const originalWindow = globalThis.window;
+  const first = TableDocument.fromText("skills.txt", "id\tvalue\n1\told", { path: "E:\\Data\\skills.txt" });
+  const reopened = TableDocument.fromText("skills.txt", "id\tvalue\n1\tnew", { path: "E:\\Data\\skills.txt" });
+  const uri = docToUri(first);
+  const calls = [];
+  const diagnosticResponses = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: { invoke: async (command, args) => {
+        calls.push([command, args]);
+        if (command === "lsp_get_diagnostics") return diagnosticResponses.shift();
+        return undefined;
+      } },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [first],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: true, openFileCount: 0 },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async () => {},
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.openDoc(first);
+    const firstVersion = calls[0][1].version;
+    const closePromise = controller.closeDoc(first);
+    state.docs = [reopened];
+    await controller.openDoc(reopened);
+    await closePromise;
+    const reopenedVersion = calls.findLast(([command]) => command === "lsp_open_file")[1].version;
+    assert.ok(reopenedVersion > firstVersion);
+
+    diagnosticResponses.push({ version: firstVersion, diagnostics: [{ row: 1, col: 1, message: "old lifetime" }] });
+    await controller.handleDiagnosticsChanged(uri);
+    assert.equal(state.lint.diagnostics.length, 0);
+    assert.equal(lspDocumentState(reopened).hoverReady, false);
+
+    diagnosticResponses.push({ version: reopenedVersion, diagnostics: [{ row: 1, col: 1, message: "current lifetime" }] });
+    await controller.handleDiagnosticsChanged(uri);
+    assert.equal(state.lint.diagnostics.length, 1);
+    assert.equal(state.lint.diagnostics[0].message, "current lifetime");
+    assert.equal(lspDocumentState(reopened).hoverReady, true);
   } finally {
     resetLspDocumentState(first);
     resetLspDocumentState(reopened);

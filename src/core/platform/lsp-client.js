@@ -6,10 +6,10 @@ export async function lspStart(workspacePath) {
   await api.invoke("lsp_start", { workspacePath });
 }
 
-export async function lspOpenFile(uri, text) {
+export async function lspOpenFile(uri, text, version) {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
-  await api.invoke("lsp_open_file", { uri, text });
+  await api.invoke("lsp_open_file", { uri, text, version });
 }
 
 export async function lspUpdateFile(uri, version, text) {

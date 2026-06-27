@@ -375,7 +375,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
     await lspStart("E:\\Workspace");
-    await lspOpenFile("file:///items.txt", "id\n1");
+    await lspOpenFile("file:///items.txt", "id\n1", 1);
     await lspUpdateFile("file:///items.txt", 2, "id\n2");
     await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }]);
     await lspCloseFile("file:///items.txt");
@@ -405,7 +405,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace" }],
-      ["invoke", "lsp_open_file", { uri: "file:///items.txt", text: "id\n1" }],
+      ["invoke", "lsp_open_file", { uri: "file:///items.txt", text: "id\n1", version: 1 }],
       ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2" }],
       ["invoke", "lsp_update_file_incremental", { uri: "file:///items.txt", version: 3, changes: [{ range: { start: { line: 0, character: 0 } }, text: "id" }] }],
       ["invoke", "lsp_close_file", { uri: "file:///items.txt" }],

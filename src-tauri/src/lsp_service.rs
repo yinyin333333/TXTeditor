@@ -546,10 +546,11 @@ pub(crate) async fn lsp_start(
 pub(crate) fn lsp_open_file(
     uri: String,
     text: String,
+    version: u32,
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state)?;
-    track_file_text(&proc, uri.clone(), &text, 1);
+    track_file_text(&proc, uri.clone(), &text, version);
     let mut stdin = proc.stdin.lock().unwrap();
     send_lsp_msg(
         &mut stdin,
@@ -557,7 +558,7 @@ pub(crate) fn lsp_open_file(
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
             "params": {
-                "textDocument": { "uri": uri, "languageId": "plaintext", "version": 1, "text": text }
+                "textDocument": { "uri": uri, "languageId": "plaintext", "version": version, "text": text }
             }
         }),
     )
@@ -1040,6 +1041,19 @@ mod tests {
         assert!(!proc.document_versions.lock().unwrap().contains_key(uri));
         assert_eq!(diagnostics_payload_for(&proc, uri), empty_diagnostics_payload());
         kill_and_wait_child(&mut child);
+    }
+
+    #[test]
+    fn did_open_uses_supplied_document_version() {
+        let source = include_str!("lsp_service.rs");
+        let start = source.find("pub(crate) fn lsp_open_file(").unwrap();
+        let end = source.find("pub(crate) fn lsp_update_file(").unwrap();
+        let body = &source[start..end];
+        assert!(body.contains("version: u32"));
+        assert!(body.contains("track_file_text(&proc, uri.clone(), &text, version)"));
+        assert!(body.contains("\"version\": version"));
+        assert!(!body.contains("\"version\": 1"));
+        assert!(!body.contains("&text, 1"));
     }
 
     #[test]

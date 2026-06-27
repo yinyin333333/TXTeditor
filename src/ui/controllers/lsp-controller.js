@@ -205,6 +205,7 @@ export function createLspController({
   let startGeneration = 0;
   const uriOpenGenerations = new Map();
   const uriClosePromises = new Map();
+  const uriDocumentVersions = new Map();
   const hoverController = createLspHoverController({
     state,
     grid,
@@ -268,6 +269,7 @@ export function createLspController({
     hoverController.invalidateHover(true, "workspace-start");
     uriOpenGenerations.clear();
     uriClosePromises.clear();
+    uriDocumentVersions.clear();
     state.lspLogs = [];
     if (els.logList) els.logList.innerHTML = "";
     state.lint.status = "Connecting to linter...";
@@ -322,13 +324,13 @@ export function createLspController({
     if (!isTrackedDocument(doc)) return;
     const uri = docToUri(doc);
     const docState = lspDocumentState(doc);
-    const version = ensureLspDocumentVersion(doc);
+    const baseVersion = ensureLspDocumentVersion(doc);
     const policy = lspOpenDocumentPolicy({
       vectorEngine: isVectorLintEngine(),
       lspStarted: state.lsp.started,
       uri,
       docState,
-      version
+      version: baseVersion
     });
     if (policy.action === "skip-legacy") {
       recordLintEngineEvent("vector-open-skipped-legacy", { fileName: doc?.name });
@@ -341,6 +343,7 @@ export function createLspController({
       await pendingClose.catch(() => {});
       if (!isTrackedDocument(doc)) return;
     }
+    const version = claimUriDocumentVersion(doc, uri);
     clearHoverReadyFallback(doc);
     const openGeneration = nextUriOpenGeneration(uri);
     docState.openGeneration = openGeneration;
@@ -351,7 +354,7 @@ export function createLspController({
     docState.openPromise = (async () => {
       recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
       recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
-      await lspOpenFile(uri, doc.toText());
+      await lspOpenFile(uri, doc.toText(), version);
       if (!isTrackedDocument(doc) || !isCurrentUriOpenGeneration(uri, openGeneration)) return;
       docState.opened = true;
       docState.openedUri = uri;
@@ -424,6 +427,7 @@ export function createLspController({
     if (!isTrackedDocument(doc)) return;
     hoverController.clearHoverCacheForUri(uri);
     const version = nextLspDocumentVersion(doc);
+    rememberUriDocumentVersion(uri, version);
     hoverController.invalidateHover(false, "document-version-changed");
     docState.ready = false;
     docState.diagnosticsReady = false;
@@ -757,15 +761,15 @@ export function createLspController({
     return Boolean(docToUri(activeDoc()));
   }
 
-  function nextUriOpenGeneration(uri) {
-    const generation = (uriOpenGenerations.get(uri) ?? 0) + 1;
-    uriOpenGenerations.set(uri, generation);
-    return generation;
+  function nextUriOpenGeneration(uri) { const generation = (uriOpenGenerations.get(uri) ?? 0) + 1; uriOpenGenerations.set(uri, generation); return generation; }
+
+  function claimUriDocumentVersion(doc, uri) {
+    const version = Math.max(ensureLspDocumentVersion(doc), (uriDocumentVersions.get(uri) ?? 0) + 1, 1);
+    lspDocumentState(doc).version = version; rememberUriDocumentVersion(uri, version); return version;
   }
 
-  function isCurrentUriOpenGeneration(uri, generation) {
-    return generation > 0 && uriOpenGenerations.get(uri) === generation;
-  }
+  function rememberUriDocumentVersion(uri, version) { uriDocumentVersions.set(uri, Math.max(uriDocumentVersions.get(uri) ?? 0, version)); }
+  function isCurrentUriOpenGeneration(uri, generation) { return generation > 0 && uriOpenGenerations.get(uri) === generation; }
 
   function lspDocumentIsCurrentForUri(doc, uri, { generation = null, version = null } = {}) {
     const docState = lspDocumentState(doc);
@@ -776,11 +780,7 @@ export function createLspController({
       && (version == null || docState.version === version);
   }
 
-  function supersedeUriOpenGeneration(uri, generation) {
-    const next = generation + 1;
-    uriOpenGenerations.set(uri, next);
-    return next;
-  }
+  function supersedeUriOpenGeneration(uri, generation) { const next = generation + 1; uriOpenGenerations.set(uri, next); return next; }
 
   function isTrackedDocument(doc) {
     return Boolean(doc && state.docs.includes(doc));
