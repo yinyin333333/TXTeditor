@@ -21,8 +21,9 @@ struct LspProcess {
     stdin: Mutex<ChildStdin>,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Option<Value>, String>>>>,
-    diagnostics: Mutex<HashMap<String, Vec<LspDiagnostic>>>,
+    diagnostics: Mutex<HashMap<String, LspDiagnosticsPayload>>,
     file_lines: Mutex<HashMap<String, Vec<String>>>,
+    document_versions: Mutex<HashMap<String, u32>>,
 }
 
 pub(crate) struct LspManager {
@@ -91,6 +92,81 @@ impl Drop for LspManager {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LspDiagnosticsPayload {
+    pub(crate) version: Option<u32>,
+    pub(crate) diagnostics: Vec<LspDiagnostic>,
+}
+
+fn empty_diagnostics_payload() -> LspDiagnosticsPayload {
+    LspDiagnosticsPayload {
+        version: None,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn diagnostics_payload_for(proc: &LspProcess, uri: &str) -> LspDiagnosticsPayload {
+    proc.diagnostics
+        .lock()
+        .unwrap()
+        .get(uri)
+        .cloned()
+        .unwrap_or_else(empty_diagnostics_payload)
+}
+
+fn track_file_text(proc: &LspProcess, uri: String, text: &str, version: u32) {
+    proc.file_lines
+        .lock()
+        .unwrap()
+        .insert(uri.clone(), text.lines().map(String::from).collect());
+    proc.document_versions.lock().unwrap().insert(uri, version);
+}
+
+fn clear_file_state(proc: &LspProcess, uri: &str) {
+    proc.file_lines.lock().unwrap().remove(uri);
+    proc.diagnostics.lock().unwrap().remove(uri);
+    proc.document_versions.lock().unwrap().remove(uri);
+}
+
+fn store_published_diagnostics(
+    proc: &LspProcess,
+    uri: &str,
+    raw: &[Value],
+    publish_version: Option<u32>,
+) -> bool {
+    let lines = {
+        let file_lines = proc.file_lines.lock().unwrap();
+        let Some(lines) = file_lines.get(uri).cloned() else {
+            proc.diagnostics.lock().unwrap().remove(uri);
+            return true;
+        };
+        lines
+    };
+
+    if let Some(version) = publish_version {
+        let current_version = proc.document_versions.lock().unwrap().get(uri).copied();
+        if current_version != Some(version) {
+            return false;
+        }
+    } else {
+        // Vector-LSP must include publishDiagnostics.params.version for complete stale-publish
+        // rejection. Unversioned publishes are still accepted, but the JS side cannot prove
+        // whether they belong to the currently opened document version.
+    }
+
+    let diagnostics = diagnostics_from_lsp_publish(raw, &lines);
+
+    proc.diagnostics.lock().unwrap().insert(
+        uri.to_string(),
+        LspDiagnosticsPayload {
+            version: publish_version,
+            diagnostics,
+        },
+    );
+    true
 }
 
 fn vector_lsp_binary_candidates(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
@@ -276,24 +352,14 @@ fn run_lsp_reader(
             .and_then(|d| d.as_array())
             .cloned()
             .unwrap_or_default();
+        let publish_version = params
+            .get("version")
+            .and_then(|version| version.as_u64())
+            .map(|version| version.min(u64::from(u32::MAX)) as u32);
 
-        let lines = {
-            let file_lines = proc.file_lines.lock().unwrap();
-            let Some(lines) = file_lines.get(&uri).cloned() else {
-                proc.diagnostics.lock().unwrap().remove(&uri);
-                let _ = app.emit("lsp-diagnostics-changed", &uri);
-                continue;
-            };
-            lines
-        };
-
-        let diagnostics = diagnostics_from_lsp_publish(&raw, &lines);
-
-        proc.diagnostics
-            .lock()
-            .unwrap()
-            .insert(uri.clone(), diagnostics);
-        let _ = app.emit("lsp-diagnostics-changed", &uri);
+        if store_published_diagnostics(&proc, &uri, &raw, publish_version) {
+            let _ = app.emit("lsp-diagnostics-changed", &uri);
+        }
     }
     drain_pending_requests(&proc.pending, "LSP reader stopped");
 }
@@ -445,6 +511,7 @@ pub(crate) async fn lsp_start(
         pending: Mutex::new(HashMap::new()),
         diagnostics: Mutex::new(HashMap::new()),
         file_lines: Mutex::new(HashMap::new()),
+        document_versions: Mutex::new(HashMap::new()),
     });
 
     if !state.publish_started_process(session_id, Arc::clone(&proc), child) {
@@ -482,10 +549,7 @@ pub(crate) fn lsp_open_file(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state)?;
-    proc.file_lines
-        .lock()
-        .unwrap()
-        .insert(uri.clone(), text.lines().map(String::from).collect());
+    track_file_text(&proc, uri.clone(), &text, 1);
     let mut stdin = proc.stdin.lock().unwrap();
     send_lsp_msg(
         &mut stdin,
@@ -507,10 +571,7 @@ pub(crate) fn lsp_update_file(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state)?;
-    proc.file_lines
-        .lock()
-        .unwrap()
-        .insert(uri.clone(), text.lines().map(String::from).collect());
+    track_file_text(&proc, uri.clone(), &text, version);
     let mut stdin = proc.stdin.lock().unwrap();
     send_lsp_msg(
         &mut stdin,
@@ -541,6 +602,10 @@ pub(crate) fn lsp_update_file_incremental(
             }
         }
     }
+    proc.document_versions
+        .lock()
+        .unwrap()
+        .insert(uri.clone(), version);
     let content_changes: Vec<Value> = changes
         .iter()
         .map(|c| {
@@ -573,8 +638,7 @@ pub(crate) fn lsp_close_file(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state)?;
-    proc.file_lines.lock().unwrap().remove(&uri);
-    proc.diagnostics.lock().unwrap().remove(&uri);
+    clear_file_state(&proc, &uri);
     let mut stdin = proc.stdin.lock().unwrap();
     send_lsp_msg(
         &mut stdin,
@@ -590,14 +654,14 @@ pub(crate) fn lsp_close_file(
 pub(crate) fn lsp_get_diagnostics(
     uri: String,
     state: tauri::State<'_, LspManager>,
-) -> Vec<LspDiagnostic> {
+) -> LspDiagnosticsPayload {
     state
         .process
         .lock()
         .unwrap()
         .as_ref()
-        .and_then(|proc| proc.diagnostics.lock().unwrap().get(&uri).cloned())
-        .unwrap_or_default()
+        .map(|proc| diagnostics_payload_for(proc, &uri))
+        .unwrap_or_else(empty_diagnostics_payload)
 }
 
 #[tauri::command]
@@ -913,6 +977,72 @@ mod tests {
     }
 
     #[test]
+    fn versioned_publish_does_not_overwrite_newer_tracked_document() {
+        let (proc, mut child) = test_lsp_process(1);
+        let uri = "file:///E:/Data/items.txt";
+        track_file_text(&proc, uri.to_string(), "id\tvalue\n1\tfresh", 2);
+
+        assert!(store_published_diagnostics(
+            &proc,
+            uri,
+            &[raw_diagnostic("fresh")],
+            Some(2)
+        ));
+        assert!(!store_published_diagnostics(
+            &proc,
+            uri,
+            &[raw_diagnostic("stale")],
+            Some(1)
+        ));
+
+        let payload = diagnostics_payload_for(&proc, uri);
+        assert_eq!(payload.version, Some(2));
+        assert_eq!(payload.diagnostics.len(), 1);
+        assert_eq!(payload.diagnostics[0].message, "fresh");
+        kill_and_wait_child(&mut child);
+    }
+
+    #[test]
+    fn versioned_publish_payload_is_returned_with_version() {
+        let (proc, mut child) = test_lsp_process(1);
+        let uri = "file:///E:/Data/items.txt";
+        track_file_text(&proc, uri.to_string(), "id\tvalue\n1\tfresh", 2);
+
+        assert!(store_published_diagnostics(
+            &proc,
+            uri,
+            &[raw_diagnostic("fresh")],
+            Some(2)
+        ));
+
+        let payload = diagnostics_payload_for(&proc, uri);
+        assert_eq!(payload.version, Some(2));
+        assert_eq!(payload.diagnostics.len(), 1);
+        assert_eq!(payload.diagnostics[0].message, "fresh");
+        kill_and_wait_child(&mut child);
+    }
+
+    #[test]
+    fn clear_file_state_removes_diagnostics_and_tracked_version() {
+        let (proc, mut child) = test_lsp_process(1);
+        let uri = "file:///E:/Data/items.txt";
+        track_file_text(&proc, uri.to_string(), "id\tvalue\n1\tfresh", 2);
+        assert!(store_published_diagnostics(
+            &proc,
+            uri,
+            &[raw_diagnostic("fresh")],
+            Some(2)
+        ));
+
+        clear_file_state(&proc, uri);
+
+        assert!(!proc.file_lines.lock().unwrap().contains_key(uri));
+        assert!(!proc.document_versions.lock().unwrap().contains_key(uri));
+        assert_eq!(diagnostics_payload_for(&proc, uri), empty_diagnostics_payload());
+        kill_and_wait_child(&mut child);
+    }
+
+    #[test]
     fn publication_guard_rejects_stale_session_and_reaps_child() {
         let manager = LspManager::new();
         let (first_session, _, _) = manager.begin_start_session();
@@ -929,6 +1059,7 @@ mod tests {
             pending: Mutex::new(HashMap::new()),
             diagnostics: Mutex::new(HashMap::new()),
             file_lines: Mutex::new(HashMap::new()),
+            document_versions: Mutex::new(HashMap::new()),
         });
         let (tx, mut rx) = oneshot::channel();
         proc.pending.lock().unwrap().insert(7, tx);
@@ -976,6 +1107,34 @@ mod tests {
         let mut child = spawn_long_running_child();
         kill_and_wait_child(&mut child);
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    fn raw_diagnostic(message: &str) -> Value {
+        json!({
+            "range": {
+                "start": { "line": 1, "character": 2 },
+                "end": { "line": 1, "character": 7 }
+            },
+            "severity": 2,
+            "message": message
+        })
+    }
+
+    fn test_lsp_process(session_id: u64) -> (Arc<LspProcess>, std::process::Child) {
+        let mut child = spawn_long_running_child();
+        let stdin = child.stdin.take().unwrap();
+        (
+            Arc::new(LspProcess {
+                session_id,
+                stdin: Mutex::new(stdin),
+                next_id: AtomicU64::new(100),
+                pending: Mutex::new(HashMap::new()),
+                diagnostics: Mutex::new(HashMap::new()),
+                file_lines: Mutex::new(HashMap::new()),
+                document_versions: Mutex::new(HashMap::new()),
+            }),
+            child,
+        )
     }
 
     #[cfg(windows)]

@@ -80,6 +80,11 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
   };
 }
 
+function normalizeDiagnosticsPayload(payload) {
+  if (Array.isArray(payload)) return { version: null, diagnostics: payload };
+  return { version: Number.isInteger(payload?.version) ? payload.version : null, diagnostics: Array.isArray(payload?.diagnostics) ? payload.diagnostics : [] };
+}
+
 function knownCellValue(doc, rowIndex, columnIndex) {
   if (!doc || typeof doc.getCell !== "function") return null;
   if (!Number.isInteger(rowIndex) || !Number.isInteger(columnIndex)) return null;
@@ -465,36 +470,50 @@ export function createLspController({
     if (!uri) return;
     const docState = lspDocumentState(doc);
     const openGeneration = docState.openGeneration || uriOpenGenerations.get(uri) || 0;
-    if (docState.openPromise) await docState.openPromise.catch(() => {});
-    if (!isCurrentUriOpenGeneration(uri, openGeneration)) {
-      recordLintEngineEvent("vector-close-superseded", { fileName: doc?.name, uri });
-      return;
-    }
-    const closeGeneration = supersedeUriOpenGeneration(uri, openGeneration);
-    docState.ready = false;
-    docState.opened = false;
-    docState.hoverReady = false;
-    refreshOpenFileCount();
-    const fileKey = uriToFileKey(uri);
-    setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
-    updateGridDiagnostics();
-    recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
-    const closePromise = lspCloseFile(uri);
+    const existingClose = uriClosePromises.get(uri);
+    if (existingClose) return existingClose;
+    const pendingOpen = docState.openPromise;
+    let resolveClose;
+    let rejectClose;
+    const closePromise = new Promise((resolve, reject) => {
+      resolveClose = resolve;
+      rejectClose = reject;
+    });
     uriClosePromises.set(uri, closePromise);
-    try {
-      await closePromise;
-    } finally {
-      if (uriClosePromises.get(uri) === closePromise) uriClosePromises.delete(uri);
-    }
-    if (!isCurrentUriOpenGeneration(uri, closeGeneration)) {
-      recordLintEngineEvent("vector-close-result-superseded", { fileName: doc?.name, uri });
-      return;
-    }
-    uriOpenGenerations.delete(uri);
-    resetLspDocumentState(doc);
-    refreshOpenFileCount();
-    hoverController.clearHoverCacheForUri(uri);
-    hoverController.invalidateHover(false, "file-closed");
+    (async () => {
+      try {
+        const openSucceeded = pendingOpen ? await pendingOpen.then(() => true, () => false) : true;
+        const closeGeneration = supersedeUriOpenGeneration(uri, Math.max(openGeneration, uriOpenGenerations.get(uri) ?? 0));
+        const shouldClose = openSucceeded && (Boolean(pendingOpen) || docState.opened || docState.openedUri === uri);
+        docState.ready = false;
+        docState.opened = false;
+        docState.hoverReady = false;
+        refreshOpenFileCount();
+        const fileKey = uriToFileKey(uri);
+        setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
+        updateGridDiagnostics();
+        if (shouldClose) {
+          recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
+          await lspCloseFile(uri);
+        }
+        if (!isCurrentUriOpenGeneration(uri, closeGeneration)) {
+          recordLintEngineEvent("vector-close-result-superseded", { fileName: doc?.name, uri });
+          resolveClose();
+          return;
+        }
+        uriOpenGenerations.delete(uri);
+        resetLspDocumentState(doc);
+        refreshOpenFileCount();
+        hoverController.clearHoverCacheForUri(uri);
+        hoverController.invalidateHover(false, "file-closed");
+        resolveClose();
+      } catch (error) {
+        rejectClose(error);
+      } finally {
+        if (uriClosePromises.get(uri) === closePromise) uriClosePromises.delete(uri);
+      }
+    })();
+    return closePromise;
   }
 
   function reportCloseFailure(doc, error, context) {
@@ -557,7 +576,7 @@ export function createLspController({
     const fileName = doc?.name ?? fileNameFromUri(uri);
     const filePath = doc?.path ?? pathFromUri(uri);
     recordLspTraffic(uri, "lsp_get_diagnostics");
-    const rawDiags = await lspGetDiagnostics(uri).catch((error) => {
+    const diagnosticsPayload = normalizeDiagnosticsPayload(await lspGetDiagnostics(uri).catch((error) => {
       reportLspRequestFailure({
         uri,
         operation: "get diagnostics",
@@ -568,12 +587,19 @@ export function createLspController({
         recordLspTraffic,
         appendLspLog
       });
-      return [];
-    });
+      return { version: null, diagnostics: [] };
+    }));
     if (!lspDocumentIsCurrentForUri(doc, uri, { generation: requestOpenGeneration, version: requestVersion })) {
       recordLintEngineEvent("vector-diagnostics-stale-result-dropped", { uri, fileKey, requestVersion });
       return;
     }
+    const publishVersion = diagnosticsPayload.version;
+    const currentVersion = lspDocumentState(doc).version;
+    if (publishVersion != null && publishVersion !== currentVersion) {
+      recordLintEngineEvent("vector-diagnostics-stale-publish-dropped", { uri, fileKey, publishVersion, currentVersion });
+      return;
+    }
+    const rawDiags = diagnosticsPayload.diagnostics;
     recordLspReadiness(uri, "firstDiagnosticsReceived", { fileName, activeFile: activeDoc()?.name ?? "", diagnosticCount: rawDiags.length });
 
     const displayDiags = rawDiags.map((d, i) => mapLspDiagnosticToDisplay(d, {

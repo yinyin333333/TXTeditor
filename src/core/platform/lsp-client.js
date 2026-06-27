@@ -31,7 +31,7 @@ export async function lspCloseFile(uri) {
 }
 
 export async function lspGetDiagnostics(uri) {
-  if (!isTauriRuntime()) return [];
+  if (!isTauriRuntime()) return { version: null, diagnostics: [] };
   const api = await tauriApi();
   return api.invoke("lsp_get_diagnostics", { uri });
 }

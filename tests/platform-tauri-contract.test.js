@@ -324,7 +324,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     ["open_folder_dialog", ["E:\\PickedFolder", "E:\\Workspace"]],
     ["list_workspace_files", [{ path: "E:\\Workspace", files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }] }]],
     ["save_file_dialog", ["E:\\SavedAs.txt", "E:\\Export.txt"]],
-    ["lsp_get_diagnostics", [[{ row: 1, column: 2, message: "warn" }]]],
+    ["lsp_get_diagnostics", [{ version: 2, diagnostics: [{ row: 1, column: 2, message: "warn" }] }]],
     ["lsp_hover", [{ contents: "hover" }]],
     ["lsp_definition", [{ uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } }]]
   ]);
@@ -379,7 +379,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     await lspUpdateFile("file:///items.txt", 2, "id\n2");
     await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }]);
     await lspCloseFile("file:///items.txt");
-    assert.deepEqual(await lspGetDiagnostics("file:///items.txt"), [{ row: 1, column: 2, message: "warn" }]);
+    assert.deepEqual(await lspGetDiagnostics("file:///items.txt"), { version: 2, diagnostics: [{ row: 1, column: 2, message: "warn" }] });
     assert.deepEqual(await lspHover("file:///items.txt", 4, 5), { contents: "hover" });
     assert.deepEqual(await lspDefinition("file:///items.txt", 6, 7), { uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } });
     const diagnosticsEvents = [];
