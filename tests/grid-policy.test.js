@@ -34,6 +34,9 @@ import {
   columnIndexLabel,
   columnIndexRenderState,
   createGridRenderStats,
+  cellTextRenderPlan,
+  diagnosticMarkerState,
+  diagnosticTextOverlayPlan,
   frozenHorizontalEdgeRects,
   frozenVerticalEdgeRects,
   initialColumnFitWidth,
@@ -595,6 +598,253 @@ test("theme gridline tokens are clearer and mode-appropriate", () => {
   assert.ok(lightRgb.every((channel) => channel >= 185 && channel <= 204));
   assert.notEqual(darkLine.toLowerCase(), lightLine.toLowerCase());
   assert.ok(darkRgb.every((channel) => channel >= 60 && channel <= 95));
+  assert.equal(cssVariable(css, ":root", "--grid-diagnostic-range-error"), "#ff5f6d");
+  assert.equal(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-diagnostic-range-error"), "#c92f3f");
+});
+
+test("diagnostic text overlay policy plans active hovered and current-problem precise markers only", () => {
+  const measureText = (value) => String(value).length * 7;
+  const rangeDiagnostic = {
+    severity: "error",
+    hasPreciseRange: true,
+    localStart: 2,
+    localEnd: 4
+  };
+  const activePlan = diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdefg",
+    active: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  });
+  assert.deepEqual(activePlan, {
+    kind: "range",
+    severity: "error",
+    color: "diagnosticRangeError",
+    x: 114,
+    y: 40,
+    width: 14,
+    lineWidth: 2
+  });
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{ ...rangeDiagnostic, hasPreciseRange: false }],
+    value: "abcdef",
+    active: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    hovered: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  })?.kind, "range");
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    currentProblem: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  })?.kind, "range");
+});
+
+test("diagnostic text overlay policy handles insertion points and clipped text", () => {
+  const measureText = (value) => String(value).length * 7;
+  assert.deepEqual(cellTextRenderPlan({
+    text: "abcdefg",
+    maxWidth: 42,
+    measureText
+  }), {
+    text: "abc...",
+    sourceLength: 3,
+    clipped: true
+  });
+  assert.deepEqual(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "warning",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 100,
+    measureText
+  }), {
+    kind: "insertion",
+    severity: "warning",
+    color: "diagnosticInsertionCaretWarning",
+    x: 31,
+    top: 35,
+    bottom: 49,
+    lineWidth: 2
+  });
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      localStart: 4,
+      localEnd: 5
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 42,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 42,
+    measureText
+  }), null);
+  assert.deepEqual(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 49,
+    measureText
+  }), {
+    kind: "insertion",
+    severity: "error",
+    color: "diagnosticInsertionCaretError",
+    x: 31,
+    top: 35,
+    bottom: 49,
+    lineWidth: 2
+  });
+});
+
+test("diagnostic corner marker remains separate from precise text overlay", () => {
+  assert.equal(diagnosticMarkerState([], { x: 10, y: 20, width: 40, height: 26 }), null);
+  assert.deepEqual(diagnosticMarkerState([{ severity: "warning", hasPreciseRange: true }], { x: 10, y: 20, width: 40, height: 26 }), {
+    severity: "warning",
+    color: "#cca700",
+    points: [[40, 45], [49, 45], [49, 36]]
+  });
+});
+
+test("active cell renderer draws precise diagnostic overlay before active border", () => {
+  const operations = [];
+  let fillStyle = "";
+  let strokeStyle = "";
+  let lineWidth = 1;
+  let path = [];
+  const ctx = {
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    set lineWidth(value) {
+      lineWidth = value;
+    },
+    get lineWidth() {
+      return lineWidth;
+    },
+    fillRect: (x, y, width, height) => operations.push({ kind: "fillRect", fillStyle, x, y, width, height }),
+    strokeRect: (x, y, width, height) => operations.push({ kind: "strokeRect", strokeStyle, lineWidth, x, y, width, height }),
+    save: () => operations.push({ kind: "save" }),
+    restore: () => operations.push({ kind: "restore" }),
+    rect: (x, y, width, height) => operations.push({ kind: "rect", x, y, width, height }),
+    clip: () => operations.push({ kind: "clip" }),
+    beginPath: () => {
+      path = [];
+      operations.push({ kind: "beginPath" });
+    },
+    moveTo: (x, y) => path.push(["M", x, y]),
+    lineTo: (x, y) => path.push(["L", x, y]),
+    stroke: () => operations.push({ kind: "stroke", strokeStyle, lineWidth, path }),
+    measureText: (value) => ({ width: String(value).length * 7 }),
+    fillText: (text, x, y) => operations.push({ kind: "text", text, x, y })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 2, column: 1 },
+      contains: () => false
+    },
+    doc: {
+      columnCount: 3,
+      getCell: () => "abcdef"
+    },
+    diagnosticsByCell: new Map([["2:1", [{
+      severity: "error",
+      hasPreciseRange: true,
+      localStart: 1,
+      localEnd: 3
+    }]]]),
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText: (...args) => operations.push({ kind: "gridText", args }),
+    drawDiagnosticMarker: () => operations.push({ kind: "cornerMarker" })
+  };
+
+  CanvasGrid.prototype.drawCell.call(grid, 2, 1, 100, 200, 80, 30);
+
+  const overlayStroke = operations.find((operation) => operation.kind === "stroke" && operation.strokeStyle === gridColor("diagnosticRangeError"));
+  assert.deepEqual(overlayStroke.path, [["M", 115, 224], ["L", 129, 224]]);
+  assert.ok(operations.findIndex((operation) => operation === overlayStroke) < operations.findIndex((operation) => operation.kind === "cornerMarker"));
+  assert.ok(operations.findIndex((operation) => operation.kind === "cornerMarker") < operations.findIndex((operation) => operation.kind === "strokeRect" && operation.lineWidth === 2));
 });
 
 test("cell selection fills are restored to the original 0.4.4 style", () => {

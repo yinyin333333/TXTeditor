@@ -158,31 +158,72 @@ pub(crate) struct LspContentChange {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct LspDiagnostic {
     pub(crate) row: u32,
     pub(crate) col: u32,
+    pub(crate) start_character: u32,
+    pub(crate) end_character: u32,
+    pub(crate) cell_start_character: u32,
+    pub(crate) cell_end_character: u32,
     pub(crate) severity: String,
     pub(crate) message: String,
     pub(crate) code: Option<String>,
+    pub(crate) data: Option<Value>,
 }
 
-fn count_tabs_before(line: &str, char_offset: usize) -> usize {
-    line.get(..char_offset.min(line.len()))
-        .unwrap_or("")
-        .chars()
-        .filter(|&c| c == '\t')
-        .count()
+fn json_u32(value: &Value) -> Option<u32> {
+    value.as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32)
+}
+
+#[cfg(test)]
+fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count().min(u32::MAX as usize) as u32
+}
+
+fn utf16_offset_to_byte_index(line: &str, utf16_offset: u32) -> usize {
+    let mut offset = 0u32;
+    for (byte_index, ch) in line.char_indices() {
+        if offset >= utf16_offset {
+            return byte_index;
+        }
+        let next_offset = offset.saturating_add(ch.len_utf16() as u32);
+        if next_offset > utf16_offset {
+            return byte_index;
+        }
+        offset = next_offset;
+    }
+    line.len()
+}
+
+fn cell_bounds_for_utf16_offset(line: &str, utf16_offset: u32) -> (u32, u32, u32) {
+    let mut col = 0u32;
+    let mut cell_start = 0u32;
+    let mut offset = 0u32;
+    for ch in line.chars() {
+        if ch == '\t' {
+            if utf16_offset <= offset {
+                return (col, cell_start, offset);
+            }
+            col = col.saturating_add(1);
+            cell_start = offset.saturating_add(1);
+        }
+        offset = offset.saturating_add(ch.len_utf16() as u32);
+    }
+    (col, cell_start.min(offset), offset)
 }
 
 pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> Vec<LspDiagnostic> {
     raw.iter()
         .filter_map(|d| {
-            let line = d["range"]["start"]["line"].as_u64()? as u32;
-            let character = d["range"]["start"]["character"].as_u64()? as usize;
-            let col = lines
+            let line = json_u32(&d["range"]["start"]["line"])?;
+            let start_character = json_u32(&d["range"]["start"]["character"])?;
+            let end_character =
+                json_u32(&d["range"]["end"]["character"]).unwrap_or(start_character);
+            let (col, cell_start_character, cell_end_character) = lines
                 .get(line as usize)
-                .map(|l| count_tabs_before(l, character) as u32)
-                .unwrap_or(0);
+                .map(|l| cell_bounds_for_utf16_offset(l, start_character))
+                .unwrap_or((0, 0, 0));
             let severity = match d["severity"].as_u64().unwrap_or(2) {
                 1 => "error",
                 3 | 4 => "info",
@@ -194,12 +235,18 @@ pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> V
                 .as_str()
                 .map(String::from)
                 .or_else(|| d["code"].as_u64().map(|n| n.to_string()));
+            let data = d.get("data").filter(|value| !value.is_null()).cloned();
             Some(LspDiagnostic {
                 row: line,
                 col,
+                start_character,
+                end_character,
+                cell_start_character,
+                cell_end_character,
                 severity,
                 message,
                 code,
+                data,
             })
         })
         .collect()
@@ -207,17 +254,15 @@ pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> V
 
 pub(crate) fn apply_line_change(lines: &mut Vec<String>, range: &LspRange, new_text: &str) {
     let sl = range.start.line as usize;
-    let sc = range.start.character as usize;
     let el = range.end.line as usize;
-    let ec = range.end.character as usize;
 
     let prefix: String = lines
         .get(sl)
-        .map(|l| l.chars().take(sc).collect())
+        .map(|l| l[..utf16_offset_to_byte_index(l, range.start.character)].to_string())
         .unwrap_or_default();
     let suffix: String = lines
         .get(el)
-        .map(|l| l.chars().skip(ec.min(l.chars().count())).collect())
+        .map(|l| l[utf16_offset_to_byte_index(l, range.end.character)..].to_string())
         .unwrap_or_default();
 
     let new_lines: Vec<&str> = new_text.split('\n').collect();
@@ -410,6 +455,23 @@ mod tests {
             "A\nB",
         );
         assert_eq!(lines, vec!["alphaA".to_string(), "B\tthree".to_string()]);
+
+        let mut unicode_lines = vec!["a\u{1F642}c".to_string()];
+        apply_line_change(
+            &mut unicode_lines,
+            &LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 1,
+                },
+                end: LspPosition {
+                    line: 0,
+                    character: 3,
+                },
+            },
+            "B",
+        );
+        assert_eq!(unicode_lines, vec!["aBc".to_string()]);
     }
 
     #[test]
@@ -437,19 +499,174 @@ mod tests {
                 LspDiagnostic {
                     row: 0,
                     col: 2,
+                    start_character: 10,
+                    end_character: 10,
+                    cell_start_character: 10,
+                    cell_end_character: 15,
                     severity: "error".to_string(),
                     message: "bad value".to_string(),
                     code: Some("42".to_string()),
+                    data: None,
                 },
                 LspDiagnostic {
                     row: 1,
                     col: 0,
+                    start_character: 3,
+                    end_character: 3,
+                    cell_start_character: 0,
+                    cell_end_character: 5,
                     severity: "info".to_string(),
                     message: "note".to_string(),
                     code: Some("hint".to_string()),
+                    data: None,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn diagnostics_from_lsp_publish_preserves_precise_cell_ranges() {
+        let line = "description\tcalc\tskill('A'.blvl)+skill(B'.blvl)".to_string();
+        let start = utf16_len("description\tcalc\tskill('A'.blvl)+skill(B");
+        let end = start + 1;
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 0, "character": start },
+                "end": { "line": 0, "character": end }
+            },
+            "severity": 1,
+            "message": "Invalid calc formula",
+            "code": "calcCheck"
+        })];
+
+        let diagnostics = diagnostics_from_lsp_publish(&raw, &[line.clone()]);
+
+        assert_eq!(
+            diagnostics,
+            vec![LspDiagnostic {
+                row: 0,
+                col: 2,
+                start_character: start,
+                end_character: end,
+                cell_start_character: utf16_len("description\tcalc\t"),
+                cell_end_character: utf16_len(&line),
+                severity: "error".to_string(),
+                message: "Invalid calc formula".to_string(),
+                code: Some("calcCheck".to_string()),
+                data: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn diagnostics_from_lsp_publish_supports_full_cell_ranges() {
+        let line = "code\tvalue".to_string();
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 0, "character": utf16_len("code\t") },
+                "end": { "line": 0, "character": utf16_len(&line) }
+            },
+            "message": "full cell"
+        })];
+
+        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line]).remove(0);
+
+        assert_eq!(diagnostic.col, 1);
+        assert_eq!(diagnostic.start_character, 5);
+        assert_eq!(diagnostic.end_character, 10);
+        assert_eq!(diagnostic.cell_start_character, 5);
+        assert_eq!(diagnostic.cell_end_character, 10);
+        assert_eq!(diagnostic.severity, "warning");
+        assert_eq!(diagnostic.data, None);
+    }
+
+    #[test]
+    fn diagnostics_from_lsp_publish_preserves_structured_data() {
+        let line = "code\tmin(5,1+skill('Fire Ball'.blvl)/5".to_string();
+        let insertion = utf16_len(&line);
+        let data = serde_json::json!({
+            "rule": "calcCheck",
+            "kind": "missing-token",
+            "expected": ")",
+            "actual": "EOF",
+            "insertionPoint": insertion,
+            "insertText": ")",
+            "hint": "Insert ')' at the end of this expression."
+        });
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 0, "character": insertion },
+                "end": { "line": 0, "character": insertion }
+            },
+            "severity": 1,
+            "message": "calcCheck: Missing ')' before end of formula",
+            "code": "calc.expected-rparen.eof",
+            "data": data
+        })];
+
+        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+
+        assert_eq!(diagnostic.col, 1);
+        assert_eq!(diagnostic.start_character, insertion);
+        assert_eq!(diagnostic.end_character, insertion);
+        assert_eq!(diagnostic.cell_start_character, utf16_len("code\t"));
+        assert_eq!(diagnostic.cell_end_character, utf16_len(&line));
+        assert_eq!(
+            diagnostic.data,
+            Some(serde_json::json!({
+                "rule": "calcCheck",
+                "kind": "missing-token",
+                "expected": ")",
+                "actual": "EOF",
+                "insertionPoint": insertion,
+                "insertText": ")",
+                "hint": "Insert ')' at the end of this expression."
+            }))
+        );
+    }
+
+    #[test]
+    fn diagnostics_from_lsp_publish_handles_utf16_offsets_with_non_ascii_text() {
+        let line = "\u{D55C}\u{AE00}\tcalc\t\u{AC12}\u{1F642}tail".to_string();
+        let cell_start = utf16_len("\u{D55C}\u{AE00}\tcalc\t");
+        let start = cell_start + utf16_len("\u{AC12}\u{1F642}");
+        let end = start + utf16_len("t");
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 0, "character": start },
+                "end": { "line": 0, "character": end }
+            },
+            "message": "unicode range"
+        })];
+
+        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+
+        assert_eq!(diagnostic.col, 2);
+        assert_eq!(diagnostic.start_character, 11);
+        assert_eq!(diagnostic.end_character, 12);
+        assert_eq!(diagnostic.cell_start_character, cell_start);
+        assert_eq!(diagnostic.cell_end_character, utf16_len(&line));
+        assert_eq!(diagnostic.data, None);
+    }
+
+    #[test]
+    fn diagnostics_from_lsp_publish_clamps_malformed_offsets_to_cell_boundaries() {
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 0, "character": 99 },
+                "end": { "line": 0, "character": 1 }
+            },
+            "message": "out of range"
+        })];
+
+        let diagnostic = diagnostics_from_lsp_publish(&raw, &["a\tb".to_string()]).remove(0);
+
+        assert_eq!(diagnostic.col, 1);
+        assert_eq!(diagnostic.start_character, 99);
+        assert_eq!(diagnostic.end_character, 1);
+        assert_eq!(diagnostic.cell_start_character, 2);
+        assert_eq!(diagnostic.cell_end_character, 3);
+        assert_eq!(diagnostic.data, None);
     }
 
     #[test]

@@ -104,6 +104,12 @@
   --grid-frozen-edge-highlight: rgba(255, 255, 255, .18);
   --grid-frozen-edge-shadow: rgba(0, 0, 0, .34);
   --grid-frozen-edge-ambient: rgba(0, 0, 0, .12);
+  --grid-diagnostic-range-error: #ff5f6d;
+  --grid-diagnostic-range-warning: #d9a400;
+  --grid-diagnostic-range-info: #3794ff;
+  --grid-diagnostic-insertion-caret-error: #ff5f6d;
+  --grid-diagnostic-insertion-caret-warning: #d9a400;
+  --grid-diagnostic-insertion-caret-info: #3794ff;
   --grid-font: Consolas, "Cascadia Mono", monospace;
   --sidebar-width: 260px;
   --sidebar-height: 260px;
@@ -223,6 +229,12 @@
   --grid-frozen-edge-highlight: rgba(255, 255, 255, .78);
   --grid-frozen-edge-shadow: rgba(67, 92, 122, .26);
   --grid-frozen-edge-ambient: rgba(67, 92, 122, .10);
+  --grid-diagnostic-range-error: #c92f3f;
+  --grid-diagnostic-range-warning: #9b6a00;
+  --grid-diagnostic-range-info: #005fb8;
+  --grid-diagnostic-insertion-caret-error: #c92f3f;
+  --grid-diagnostic-insertion-caret-warning: #9b6a00;
+  --grid-diagnostic-insertion-caret-info: #005fb8;
 }
 
 * {
@@ -798,6 +810,8 @@ button.active {
 .cell-tooltip-diag {
   margin-top: 2px;
   font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .cell-tooltip-diag-error { color: #f14c4c; }
