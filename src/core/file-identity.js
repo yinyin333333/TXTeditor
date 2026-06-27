@@ -3,8 +3,8 @@ export function normalizeFilePathKey(value) {
 }
 
 export function documentFileKey(doc) {
-  if (doc?.fileKey) return normalizeFilePathKey(doc.fileKey);
   if (doc?.path) return normalizeFilePathKey(doc.path);
+  if (doc?.fileKey) return normalizeFilePathKey(doc.fileKey);
   return "";
 }
 

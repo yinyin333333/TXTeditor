@@ -5,6 +5,8 @@ import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
 import { findInTable } from "../src/core/search.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
+import { documentFileKey } from "../src/core/file-identity.js";
+import { applySavedTextPayload } from "../src/core/platform/file-payloads.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import {
   canRunCommandWithoutDocument,
@@ -30,6 +32,7 @@ import {
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { createCommandController } from "../src/ui/controllers/command-controller.js";
 import { createDiagnosticsController } from "../src/ui/controllers/diagnostics-controller.js";
+import { createShellController } from "../src/ui/controllers/shell-controller.js";
 import { syncDockChildren } from "../src/ui/dock-sync.js";
 import {
   globalShortcutAction,
@@ -105,6 +108,22 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function fakeElement(extra = {}) {
+  return {
+    innerHTML: "",
+    textContent: "",
+    style: {},
+    dataset: {},
+    classList: {
+      toggle() {},
+      add() {},
+      remove() {}
+    },
+    querySelectorAll: () => [],
+    ...extra
+  };
 }
 
 test("search wraps through the document", () => {
@@ -226,6 +245,36 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
     path: "",
     fileKey: "browser:2:same.txt"
   }), {
+    action: "add-new",
+    activeIndex: 1
+  });
+
+  const browserDoc = TableDocument.fromText("same.txt", "a", {
+    fileKey: "browser:1:same.txt:1:1",
+    path: ""
+  });
+  assert.equal(documentFileKey(browserDoc), "browser:1:same.txt:1:1");
+  applySavedTextPayload(browserDoc, {
+    path: "E:\\dir\\same.txt",
+    name: "same.txt",
+    encoding: "utf-8"
+  });
+  const nativeDoc = TableDocument.fromText("same.txt", "a", {
+    path: "E:\\dir\\same.txt"
+  });
+  assert.equal(documentFileKey(browserDoc), "e:/dir/same.txt");
+  assert.deepEqual(documentOpenPlan([browserDoc], nativeDoc), {
+    action: "activate-existing",
+    activeIndex: 0
+  });
+  applySavedTextPayload(browserDoc, {
+    path: "E:\\dir\\renamed.txt",
+    name: "renamed.txt",
+    encoding: "utf-8"
+  });
+  assert.deepEqual(documentOpenPlan([browserDoc], TableDocument.fromText("renamed.txt", "a", {
+    path: "E:\\other\\renamed.txt"
+  })), {
     action: "add-new",
     activeIndex: 1
   });
@@ -353,6 +402,120 @@ test("save file commits active editor before serializing document text", async (
   assert.equal(await controller.saveFile(), true);
   assert.deepEqual(writes, ["id\nedited"]);
   assert.equal(doc.dirty, false);
+});
+
+test("browser save encodes before opening writable streams", async () => {
+  let createWritableCalls = 0;
+  const errors = [];
+  const doc = TableDocument.fromText("items.txt", "id\nemoji-\u{1F642}", {
+    dirty: true,
+    encoding: "windows-1252",
+    handle: {
+      async createWritable() {
+        createWritableCalls += 1;
+        throw new Error("stream should not open");
+      }
+    }
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "legacy" }
+  };
+  const controller = createDocumentController({
+    state,
+    els: { closeDialogText: {}, closeDialog: { classList: { add() {}, remove() {} } } },
+    grid: { draw() {}, setDocument() {} },
+    emptyDoc: TableDocument.fromText("Empty", ""),
+    activeDoc: () => state.docs[state.active] ?? TableDocument.fromText("Empty", ""),
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError: (error) => errors.push(error instanceof Error ? error.message : String(error)),
+    reportWindowCloseFailure() {},
+    lspOpenDoc() {},
+    reportLspOpenFailure() {},
+    lspCloseDoc() {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace() {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {},
+    commitActiveCellEditor() {}
+  });
+
+  assert.equal(await controller.saveFile(), false);
+  assert.equal(createWritableCalls, 0);
+  assert.equal(doc.dirty, true);
+  assert.match(errors[0], /cannot be saved as Windows-1252/);
+});
+
+test("browser save aborts writable streams after write failures", async () => {
+  const calls = [];
+  const doc = TableDocument.fromText("items.txt", "id\n1", {
+    dirty: true,
+    handle: {
+      async createWritable() {
+        calls.push("create");
+        return {
+          async write() {
+            calls.push("write");
+            throw new Error("disk full");
+          },
+          async close() {
+            calls.push("close");
+          },
+          async abort() {
+            calls.push("abort");
+          }
+        };
+      }
+    }
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "legacy" }
+  };
+  const errors = [];
+  const controller = createDocumentController({
+    state,
+    els: { closeDialogText: {}, closeDialog: { classList: { add() {}, remove() {} } } },
+    grid: { draw() {}, setDocument() {} },
+    emptyDoc: TableDocument.fromText("Empty", ""),
+    activeDoc: () => state.docs[state.active] ?? TableDocument.fromText("Empty", ""),
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError: (error) => errors.push(error instanceof Error ? error.message : String(error)),
+    reportWindowCloseFailure() {},
+    lspOpenDoc() {},
+    reportLspOpenFailure() {},
+    lspCloseDoc() {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace() {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {},
+    commitActiveCellEditor() {}
+  });
+
+  assert.equal(await controller.saveFile(), false);
+  assert.deepEqual(calls, ["create", "write", "abort"]);
+  assert.equal(doc.dirty, true);
+  assert.equal(errors[0], "disk full");
 });
 
 test("context menu command item registries preserve expected command groups", () => {
@@ -610,7 +773,7 @@ test("row context menu orders Clone Row after hide and delete without changing c
 });
 
 test("row commands protect the header row while allowing mixed body-row selections", () => {
-  const doc = TableDocument.fromText("x.txt", "header\nbody");
+  const doc = TableDocument.fromText("x.txt", "header1\theader2\nbody1\tbody2");
   const state = { selection: new SelectionModel() };
   const errors = [];
   const controller = createCommandController({
@@ -637,14 +800,34 @@ test("row commands protect the header row while allowing mixed body-row selectio
   controller.runCommand("hide-row");
   controller.runCommand("clear-row");
   assert.equal(doc.rowCount, 2);
-  assert.equal(doc.getCell(0, 0), "header");
+  assert.equal(doc.getCell(0, 0), "header1");
   assert.equal(doc.hiddenRows.has(0), false);
   assert.equal(errors.length, 3);
 
-  state.selection.setRange(0, 0, 1, 0);
+  state.selection.setRange(0, 0, 1, 1);
   controller.runCommand("clear-row");
-  assert.equal(doc.getCell(0, 0), "header");
+  assert.deepEqual(doc.rows[0], ["header1", "header2"]);
+  assert.deepEqual(doc.rows[1], ["", ""]);
+
+  doc.setCell(1, 0, "body1");
+  doc.setCell(1, 1, "body2");
+  state.selection.setRow(0, doc.columnCount);
+  controller.runCommand("clear-selection");
+  assert.deepEqual(doc.rows[0], ["header1", "header2"]);
+  assert.deepEqual(doc.rows[1], ["body1", "body2"]);
+  assert.equal(errors.at(-1), "Header row cannot be cleared as a row.");
+
+  state.selection.set(0, 0);
+  controller.runCommand("clear-selection");
+  assert.deepEqual(doc.rows[0], ["", "header2"]);
+
+  doc.setCell(0, 0, "header1");
+  state.selection.setRow(0, doc.columnCount);
+  state.selection.extendRows(1, doc.columnCount);
+  controller.runCommand("clear-selection");
+  assert.deepEqual(doc.rows[0], ["header1", "header2"]);
   assert.equal(doc.getCell(1, 0), "");
+  assert.equal(doc.getCell(1, 1), "");
 });
 
 test("Settings modal exposes immediate visual settings without save cancel apply", () => {
@@ -713,6 +896,110 @@ test("Problems panel groups duplicate basenames by file key", () => {
   const html = problemsPanelHtml({ lintEnabled: true, diagnostics });
   assert.match(html, /data-file-key="e:\/mod-a\/skills\.txt"/);
   assert.match(html, /data-file-key="e:\/mod-b\/skills\.txt"/);
+});
+
+test("diagnostic severity styles tabs by the active diagnostics for each document", () => {
+  const docA = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\mod-a\\skills.txt" });
+  const docB = TableDocument.fromText("skills.txt", "id\n2", { path: "E:\\mod-b\\skills.txt" });
+  const state = {
+    docs: [docA, docB],
+    active: 0,
+    problemsVisible: true,
+    bottomTab: "problems",
+    sidebarVisible: true,
+    freezeRow: false,
+    freezeColumn: false,
+    colorizeColumns: false,
+    workspace: null,
+    lint: {
+      enabled: true,
+      engine: "vector-lsp",
+      diagnostics: [
+        { id: "a", fileKey: "e:/mod-a/skills.txt", fileName: "skills.txt", severity: "error", rowIndex: 0, columnIndex: 0, message: "A" },
+        { id: "b", fileKey: "e:/mod-b/skills.txt", fileName: "skills.txt", severity: "warning", rowIndex: 0, columnIndex: 0, message: "B" }
+      ],
+      version: 1,
+      status: "",
+      legacy: {
+        status: "",
+        rulesOpen: false,
+        settings: { profile: "RotW" },
+        workspaceLoad: { status: "ready" }
+      }
+    },
+    lsp: { started: true, openFileCount: 2 }
+  };
+  const diagnostics = createDiagnosticsController({
+    state,
+    els: {
+      host: { getBoundingClientRect: () => ({ top: 0, height: 100 }) },
+      overviewRuler: fakeElement(),
+      problemsList: null
+    },
+    grid: { setDiagnostics() {} },
+    activeDoc: () => state.docs[state.active],
+    hasOpenDocument: () => true,
+    addDocument: async () => {},
+    renderChrome() {},
+    recordUiPerf() {},
+    showError() {},
+    lintDocKey: (target) => documentFileKey(target),
+    lintPathKey: (target) => String(target || "").replace(/\\/g, "/").toLowerCase(),
+    escapeHtml
+  });
+
+  assert.equal(diagnostics.docDiagnosticSeverity(docA), "error");
+  assert.equal(diagnostics.docDiagnosticSeverity(docB), "warning");
+
+  const els = {
+    shell: fakeElement(),
+    sidebar: fakeElement(),
+    problemsPanel: fakeElement(),
+    problemsList: null,
+    logList: null,
+    emptyState: fakeElement(),
+    tabs: fakeElement(),
+    fileList: fakeElement(),
+    lintSummary: fakeElement()
+  };
+  const shell = createShellController({
+    state,
+    els,
+    grid: { setDocument() {} },
+    activeDoc: () => state.docs[state.active],
+    hasOpenDocument: () => true,
+    applyFreezeToDoc() {},
+    closeTab: async () => {},
+    openDroppedNativePaths: async () => {},
+    updateGridDiagnostics() {},
+    renderProblemsPanelIfNeeded() {},
+    scrollProblemsToActiveFile() {},
+    docDiagnosticSeverity: diagnostics.docDiagnosticSeverity,
+    lintSummaryText: diagnostics.lintSummaryText,
+    problemBadgeForPath: diagnostics.problemBadgeForPath,
+    lintNotificationCount: diagnostics.lintNotificationCount,
+    renderLintControls() {},
+    syncDockLayout() {},
+    syncProblemsHeaderLayout() {},
+    scheduleHoverPrewarm() {},
+    commitActiveCellEditor() {},
+    recordUiPerf() {},
+    perfNow: () => 0,
+    showError() {},
+    lintPathKey: (target) => String(target || "").replace(/\\/g, "/").toLowerCase(),
+    escapeHtml,
+    documentRef: { querySelectorAll: () => [] }
+  });
+  shell.renderChrome();
+  assert.match(els.tabs.innerHTML, /tab-title tab-title-error/);
+  assert.match(els.tabs.innerHTML, /tab-title tab-title-warning/);
+
+  state.lint.enabled = false;
+  shell.renderChrome();
+  assert.doesNotMatch(els.tabs.innerHTML, /tab-title-(error|warning)/);
+  state.lint.enabled = true;
+  state.lint.diagnostics = [];
+  assert.equal(diagnostics.docDiagnosticSeverity(docA), null);
 });
 
 test("diagnostic navigation failure leaves the active document and selection unchanged", async () => {

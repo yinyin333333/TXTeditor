@@ -1,3 +1,5 @@
+import { normalizeFilePathKey } from "../file-identity.js";
+
 export function normalizeNativeReadResult(entry, fallbackPath, bulkRead) {
   if (entry?.Ok) return { path: entry.Ok.path ?? fallbackPath, payload: entry.Ok, bulkRead };
   if (entry?.Err) return { path: fallbackPath, error: String(entry.Err), bulkRead };
@@ -42,6 +44,7 @@ export function documentOpenResultFromNativeRead(result, DocumentType, { now = d
 export function applySavedTextPayload(doc, payload) {
   doc.path = payload.path;
   doc.name = payload.name;
+  if (payload.path) doc.fileKey = normalizeFilePathKey(payload.path);
   if (payload.encoding) doc.encoding = payload.encoding;
   doc.dirty = false;
   return doc;

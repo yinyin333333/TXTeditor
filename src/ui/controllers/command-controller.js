@@ -52,7 +52,7 @@ export function createCommandController({
   }
 
   function executeCommandAction(name, doc, rect) {
-    if (name === "clearSelection") return execute(clearRangesCommand(doc, state.selection.ranges));
+    if (name === "clearSelection") return runClearSelectionCommand(doc);
     if (name === "insertRow") return execute(insertRowCommand(doc, Math.max(1, rect.top)));
     if (name === "deleteRow") return runBodyRowCommand(rect, (bodyRect) => execute(deleteRowsCommand(doc, bodyRect.top, bodyRect.bottom - bodyRect.top + 1)), "Header row cannot be deleted.");
     if (name === "clearRow") return runBodyRowCommand(rect, (bodyRect) => execute(clearRangeCommand(doc, { top: bodyRect.top, bottom: bodyRect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row")), "Header row cannot be cleared as a row.");
@@ -77,6 +77,19 @@ export function createCommandController({
     const targets = rows.filter((row) => row > 0);
     if (!targets.length) return showError(error);
     return run(targets);
+  }
+
+  function runClearSelectionCommand(doc) {
+    if (state.selection.selectionKind !== "row") return execute(clearRangesCommand(doc, state.selection.ranges));
+    const ranges = bodyRangesFromRowHeaderSelection(state.selection.ranges);
+    if (!ranges.length) return showError("Header row cannot be cleared as a row.");
+    return execute(clearRangesCommand(doc, ranges));
+  }
+
+  function bodyRangesFromRowHeaderSelection(ranges) {
+    return ranges
+      .map((range) => ({ ...range, top: Math.max(1, range.top) }))
+      .filter((range) => range.top <= range.bottom);
   }
 
   return {

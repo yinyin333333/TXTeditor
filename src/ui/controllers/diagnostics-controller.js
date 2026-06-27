@@ -130,8 +130,13 @@ export function createDiagnosticsController({
     recordUiPerf("update-overview-ruler", started, { marks: seenRows.size });
   }
 
-  function docDiagnosticSeverity(_doc) {
-    return null;
+  function docDiagnosticSeverity(doc) {
+    if (!lintActive()) return null;
+    let highest = null;
+    for (const diagnostic of diagnosticsForDocument(state.lint.diagnostics, doc)) {
+      if (!highest || severityOrder(diagnostic.severity) > severityOrder(highest)) highest = diagnostic.severity;
+    }
+    return highest;
   }
 
   function scrollProblemsToActiveFile() {

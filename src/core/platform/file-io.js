@@ -97,3 +97,28 @@ function browserFileId(file) {
 export function encodedDocumentBytes(doc) {
   return encodeText(doc.toText(), doc.encoding);
 }
+
+export async function writeBytesToFileHandle(handle, bytes) {
+  const writable = await handle.createWritable();
+  let closed = false;
+  try {
+    await writable.write(bytes);
+    await writable.close();
+    closed = true;
+  } catch (error) {
+    if (!closed) await abortOrCloseWritable(writable);
+    throw error;
+  }
+}
+
+async function abortOrCloseWritable(writable) {
+  try {
+    if (typeof writable?.abort === "function") {
+      await writable.abort();
+    } else if (typeof writable?.close === "function") {
+      await writable.close();
+    }
+  } catch {
+    // Preserve the original save failure.
+  }
+}

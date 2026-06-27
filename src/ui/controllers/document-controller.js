@@ -9,7 +9,8 @@ import {
   readFileAsDocument,
   saveDocumentNative,
   encodedDocumentBytes,
-  downloadBytes
+  downloadBytes,
+  writeBytesToFileHandle
 } from "../../core/io.js";
 import {
   LINT_ENGINE_VECTOR,
@@ -199,9 +200,8 @@ export function createDocumentController({
         return true;
       }
       if (doc.handle?.createWritable) {
-        const writable = await doc.handle.createWritable();
-        await writable.write(encodedDocumentBytes(doc));
-        await writable.close();
+        const bytes = encodedDocumentBytes(doc);
+        await writeBytesToFileHandle(doc.handle, bytes);
         doc.dirty = false;
         renderChrome();
         return true;
@@ -229,9 +229,8 @@ export function createDocumentController({
         return true;
       } else if ("showSaveFilePicker" in window) {
         const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
-        const writable = await handle.createWritable();
-        await writable.write(encodedDocumentBytes(doc));
-        await writable.close();
+        const bytes = encodedDocumentBytes(doc);
+        await writeBytesToFileHandle(handle, bytes);
         doc.handle = handle;
         doc.name = handle.name ?? doc.name;
         doc.dirty = false;
