@@ -129,6 +129,15 @@ function ruleIdsForProfile(profile) {
   return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
 }
 
+async function waitFor(predicate, label = "condition") {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.ok(predicate(), `timed out waiting for ${label}`);
+}
+
 test("JS LSP URI policy encodes and decodes path edge cases", () => {
   const lintPathKey = (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase();
   const windowsPath = "E:\\Game Data\\skills#100%\\한글.txt";
@@ -449,6 +458,226 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
     assert.deepEqual(state.selection.focus, { row: 1, column: 0 });
     assert.equal(state.lint.diagnostics.length, 0);
     assert.equal(renderStatuses.includes("Connecting to linter..."), true);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Vector-LSP update waits for didOpen before sending didChange", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\Data\\skills.txt" });
+  const uri = docToUri(doc);
+  const calls = [];
+  let resolveOpen;
+  const openGate = new Promise((resolve) => { resolveOpen = resolve; });
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_open_file") await openGate;
+          return undefined;
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: true },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => doc,
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async () => {},
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    const openPromise = controller.openDoc(doc);
+    const updatePromise = controller.updateDoc(doc, [1]);
+    await waitFor(() => calls.length === 1, "initial lsp_open_file");
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file"]);
+    resolveOpen();
+    await openPromise;
+    await updatePromise;
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file", "lsp_update_file_incremental"]);
+    assert.equal(calls[1][1].uri, uri);
+    assert.equal(calls[1][1].version, 2);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Vector-LSP stale close is skipped when a URI is reopened", async () => {
+  const originalWindow = globalThis.window;
+  const first = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\Data\\skills.txt" });
+  const reopened = TableDocument.fromText("skills.txt", "id\n2", { path: "E:\\Data\\skills.txt" });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: { invoke: async (command, args) => calls.push([command, args]) },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [first],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: true },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async () => {},
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.openDoc(first);
+    const closePromise = controller.closeDoc(first);
+    state.docs = [reopened];
+    await controller.openDoc(reopened);
+    await closePromise;
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file", "lsp_open_file"]);
+  } finally {
+    resetLspDocumentState(first);
+    resetLspDocumentState(reopened);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Vector-LSP superseded workspace start cannot publish stale state", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\Data\\skills.txt" });
+  const calls = [];
+  const startResolvers = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_start") {
+            await new Promise((resolve) => startResolvers.push(resolve));
+          }
+          return undefined;
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: false },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => doc,
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async () => {},
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    const firstStart = controller.startWorkspace("E:\\Old");
+    const secondStart = controller.startWorkspace("E:\\New");
+    await waitFor(() => startResolvers.length === 2, "both lsp_start calls");
+    startResolvers[1]();
+    await secondStart;
+    startResolvers[0]();
+    await firstStart;
+    assert.deepEqual(calls.map(([command, args]) => [command, args?.workspacePath ?? args?.uri]), [
+      ["lsp_start", "E:\\Old"],
+      ["lsp_start", "E:\\New"],
+      ["lsp_open_file", docToUri(doc)]
+    ]);
+    assert.equal(state.lsp.started, true);
   } finally {
     resetLspDocumentState(doc);
     if (originalWindow === undefined) delete globalThis.window;
@@ -1705,7 +1934,14 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
   try {
     const state = {
       docs: [],
-      lint: { engine: LINT_ENGINE_VECTOR, status: "", diagnostics: [] },
+      lint: {
+        engine: LINT_ENGINE_VECTOR,
+        status: "",
+        diagnostics: [
+          { id: "lsp:file:///old.txt:0:0:0", fileKey: "old.txt" },
+          { id: "legacy:kept", fileKey: "kept.txt" }
+        ]
+      },
       lsp: { started: false, openFileCount: 0 },
       lspLogs: [],
       bottomTab: "problems",
@@ -1744,6 +1980,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
     assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace" }]]);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
+    assert.deepEqual(state.lint.diagnostics, [{ id: "legacy:kept", fileKey: "kept.txt" }]);
     assert.equal(state.lint.status, "Vector-LSP startup failed");
     assert.equal(renderStatuses.includes("Connecting to linter..."), true);
     assert.equal(renderStatuses.at(-1), "Vector-LSP startup failed");

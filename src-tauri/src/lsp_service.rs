@@ -375,6 +375,10 @@ pub(crate) async fn lsp_start(
     if let Err(error) = validate_initialize_response(&initialize_response) {
         return Err(cleanup_startup_failure(&mut child, error));
     }
+    if !is_current_session(&state.active_session, session_id) {
+        kill_and_wait_child(&mut child);
+        return Ok(());
+    }
 
     if let Err(error) = send_lsp_msg(
         &mut stdin,
@@ -388,6 +392,10 @@ pub(crate) async fn lsp_start(
             &mut child,
             format!("Failed to send LSP initialized notification: {error}"),
         ));
+    }
+    if !is_current_session(&state.active_session, session_id) {
+        kill_and_wait_child(&mut child);
+        return Ok(());
     }
 
     let proc = Arc::new(LspProcess {
@@ -824,6 +832,17 @@ mod tests {
         let forbidden_handoff = format!("{}{}", "run_lsp_reader(", "reader.into_inner()");
         assert!(source.contains("fn run_lsp_reader(\n    mut reader: BufReader<ChildStdout>,"));
         assert!(!source.contains(&forbidden_handoff));
+    }
+
+    #[test]
+    fn production_startup_rechecks_session_before_publishing_process() {
+        let source = include_str!("lsp_service.rs");
+        let publish = source.find("*state.process.lock().unwrap() = Some").unwrap();
+        let before_publish = &source[..publish];
+        let guard_count = before_publish
+            .matches("if !is_current_session(&state.active_session, session_id)")
+            .count();
+        assert!(guard_count >= 2);
     }
 
     #[test]

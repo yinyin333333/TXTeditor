@@ -9,6 +9,7 @@ function createLspDocumentState() {
     hoverReady: false,
     openedUri: null,
     openedVersion: null,
+    openGeneration: 0,
     openPromise: null,
     hoverReadyTimer: null
   };

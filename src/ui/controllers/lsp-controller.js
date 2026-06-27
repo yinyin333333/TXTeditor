@@ -197,6 +197,8 @@ export function createLspController({
 }) {
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
+  let startGeneration = 0;
+  const uriOpenGenerations = new Map();
   const hoverController = createLspHoverController({
     state,
     grid,
@@ -255,18 +257,27 @@ export function createLspController({
       recordLintEngineEvent("vector-start-skipped", { workspacePath });
       return;
     }
+    const generation = startGeneration + 1;
+    startGeneration = generation;
     hoverController.invalidateHover(true, "workspace-start");
     state.lspLogs = [];
     if (els.logList) els.logList.innerHTML = "";
     state.lint.status = "Connecting to linter...";
-    renderChrome();
     state.lsp.started = false;
+    state.lsp.openFileCount = 0;
+    clearVectorDiagnostics("workspace-start");
+    renderChrome();
     try {
       await lspStart(workspacePath);
+      if (generation !== startGeneration) {
+        recordLintEngineEvent("vector-start-superseded", { workspacePath, generation });
+        return;
+      }
       state.lsp.started = true;
       state.lsp.openFileCount = 0;
       const docsWithPaths = state.docs.filter((d) => docToUri(d));
       for (const doc of docsWithPaths) {
+        if (generation !== startGeneration) return;
         resetLspDocumentState(doc, { version: 1 });
         await openDoc(doc).catch((error) => reportOpenFailure(doc, error, "workspace-start"));
       }
@@ -275,8 +286,13 @@ export function createLspController({
       hoverController.retryQueuedHover("workspace-ready");
       hoverController.scheduleHoverPrewarm("workspace-ready");
     } catch (error) {
+      if (generation !== startGeneration) {
+        recordLintEngineEvent("vector-start-error-superseded", { workspacePath, generation });
+        return;
+      }
       state.lsp.started = false;
       state.lsp.openFileCount = 0;
+      clearVectorDiagnostics("workspace-start-failed");
       reportStartupFailure("Vector-LSP startup", error);
       throw error;
     }
@@ -311,6 +327,8 @@ export function createLspController({
     if (policy.action === "skip-not-started" || policy.action === "skip-no-uri" || policy.action === "already-open") return;
     if (policy.action === "reuse-open-promise") return policy.promise;
     clearHoverReadyFallback(doc);
+    const openGeneration = nextUriOpenGeneration(uri);
+    docState.openGeneration = openGeneration;
     docState.ready = false;
     docState.opened = false;
     docState.diagnosticsReady = diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
@@ -319,6 +337,7 @@ export function createLspController({
       recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
       recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
       await lspOpenFile(uri, doc.toText());
+      if (!isCurrentUriOpenGeneration(uri, openGeneration)) return;
       docState.opened = true;
       docState.openedUri = uri;
       docState.openedVersion = version;
@@ -374,6 +393,14 @@ export function createLspController({
     }
     if (policy.action === "skip-not-started" || policy.action === "skip-no-uri") return;
     const docState = lspDocumentState(doc);
+    if (docState.openPromise) await docState.openPromise;
+    if (!docState.opened || docState.openedUri !== uri) {
+      await openDoc(doc);
+      if (docState.openPromise) await docState.openPromise;
+      if (!docState.opened || docState.openedUri !== uri) {
+        throw new Error(`Vector-LSP didOpen did not complete for ${doc?.name || uri}.`);
+      }
+    }
     hoverController.clearHoverCacheForUri(uri);
     const version = nextLspDocumentVersion(doc);
     hoverController.invalidateHover(false, "document-version-changed");
@@ -420,8 +447,21 @@ export function createLspController({
     if (!state.lsp.started) return;
     const uri = docToUri(doc);
     if (!uri) return;
+    const docState = lspDocumentState(doc);
+    const openGeneration = docState.openGeneration || uriOpenGenerations.get(uri) || 0;
+    if (docState.openPromise) await docState.openPromise.catch(() => {});
+    await Promise.resolve();
+    if (!isCurrentUriOpenGeneration(uri, openGeneration)) {
+      recordLintEngineEvent("vector-close-superseded", { fileName: doc?.name, uri });
+      return;
+    }
     recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
     await lspCloseFile(uri);
+    if (!isCurrentUriOpenGeneration(uri, openGeneration)) {
+      recordLintEngineEvent("vector-close-result-superseded", { fileName: doc?.name, uri });
+      return;
+    }
+    uriOpenGenerations.delete(uri);
     resetLspDocumentState(doc);
     hoverController.clearHoverCacheForUri(uri);
     hoverController.invalidateHover(false, "file-closed");
@@ -624,6 +664,10 @@ export function createLspController({
         index = state.active;
       }
     }
+    if (index < 0) {
+      showError(`Definition target could not be opened: ${targetPath}`);
+      return;
+    }
     if (index >= 0 && index !== state.active) {
       state.active = index;
       applyFreezeToDoc(activeDoc());
@@ -644,6 +688,26 @@ export function createLspController({
   function cellHasReference(_row, _col) {
     if (!isVectorLintEngine() || !state.lsp.started) return false;
     return Boolean(docToUri(activeDoc()));
+  }
+
+  function nextUriOpenGeneration(uri) {
+    const generation = (uriOpenGenerations.get(uri) ?? 0) + 1;
+    uriOpenGenerations.set(uri, generation);
+    return generation;
+  }
+
+  function isCurrentUriOpenGeneration(uri, generation) {
+    return generation > 0 && uriOpenGenerations.get(uri) === generation;
+  }
+
+  function clearVectorDiagnostics(reason) {
+    const diagnostics = state.lint.diagnostics ?? [];
+    const kept = diagnostics.filter((diagnostic) => !String(diagnostic?.id ?? "").startsWith("lsp:"));
+    if (kept.length === diagnostics.length) return false;
+    setLintDiagnostics(kept);
+    updateGridDiagnostics();
+    recordLintEngineEvent("vector-diagnostics-cleared", { reason, cleared: diagnostics.length - kept.length });
+    return true;
   }
 
   function startListeners() {
