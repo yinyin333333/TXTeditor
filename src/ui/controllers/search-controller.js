@@ -22,7 +22,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   function findNext() {
     const query = els.searchInput.value;
     const includeStart = searchShouldIncludeStart(query, state.search.lastQuery);
-    const found = findInTable(activeDoc(), query, state.selection.focus, { includeStart });
+    const found = findInTable(activeDoc(), query, state.selection.focus, { includeStart, skipHidden: true });
     if (!found) {
       els.searchStatus.textContent = "No results";
       return;

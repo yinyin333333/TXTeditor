@@ -8,6 +8,7 @@ export function findInTable(doc, query, start = { row: 0, column: 0 }, options =
     const index = (startIndex + step) % total;
     const row = Math.floor(index / doc.columnCount);
     const column = index % doc.columnCount;
+    if (options.skipHidden && (doc.hiddenRows?.has(row) || doc.hiddenColumns?.has(column))) continue;
     const raw = doc.getCell(row, column);
     const hay = searchableText(raw, options);
     if (hay.includes(needle)) return { row, column };

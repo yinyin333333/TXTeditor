@@ -176,6 +176,21 @@ test("grid keyboard selection target preserves tab and arrow navigation semantic
   assert.equal(keyboardSelectionTarget({ ...base, key: "Escape" }), null);
 });
 
+test("grid keyboard selection target skips hidden rows and columns", () => {
+  const base = {
+    focus: { row: 1, column: 1 },
+    rowCount: 5,
+    columnCount: 5,
+    jumpRow: (row, direction) => row + direction,
+    jumpColumn: (column, direction) => column + direction,
+    hiddenRows: new Set([2]),
+    hiddenColumns: new Set([2])
+  };
+  assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowDown" }), { row: 3, column: 1, extend: false });
+  assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowRight" }), { row: 1, column: 3, extend: false });
+  assert.deepEqual(keyboardSelectionTarget({ ...base, key: "Tab" }), { row: 1, column: 3, extend: false });
+});
+
 test("increment fill starts from the anchor and walks selected cells in deterministic grid order", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\tco7\t3\n4\t5\t6");
   const selection = new SelectionModel();
@@ -1530,4 +1545,27 @@ test("editor presentation policy preserves overlay geometry and cell state", () 
     firstColumnLabel: false,
     fontWeight: "400"
   });
+});
+
+test("editor overlay follows visible cells and cancels hidden targets", () => {
+  const doc = TableDocument.fromText("x.txt", "a\nbody");
+  let canceled = false;
+  const grid = {
+    doc,
+    editor: { style: {} },
+    host: { getBoundingClientRect: () => ({ left: 10, top: 20 }) },
+    editingCell: () => ({ row: 1, column: 0 }),
+    cellBox: () => ({ left: 30, top: 40, width: 100, height: 30 }),
+    isCellEditable: CanvasGrid.prototype.isCellEditable,
+    zoom: 1,
+    cancelEdit() {
+      canceled = true;
+    }
+  };
+
+  CanvasGrid.prototype.syncEditorOverlay.call(grid);
+  assert.deepEqual(grid.editor.style, { left: "41px", top: "61px", width: "98px", height: "28px", fontSize: "12px" });
+  doc.hiddenRows.add(1);
+  CanvasGrid.prototype.syncEditorOverlay.call(grid);
+  assert.equal(canceled, true);
 });

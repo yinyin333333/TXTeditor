@@ -53,10 +53,10 @@ export function createCommandController({
 
   function executeCommandAction(name, doc, rect) {
     if (name === "clearSelection") return execute(clearRangesCommand(doc, state.selection.ranges));
-    if (name === "insertRow") return execute(insertRowCommand(doc, rect.top));
-    if (name === "deleteRow") return execute(deleteRowsCommand(doc, rect.top, rect.bottom - rect.top + 1));
-    if (name === "clearRow") return execute(clearRangeCommand(doc, { top: rect.top, bottom: rect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row"));
-    if (name === "hideRow") return execute(hiddenRowsCommand(rowsFromSelection(), true));
+    if (name === "insertRow") return execute(insertRowCommand(doc, Math.max(1, rect.top)));
+    if (name === "deleteRow") return runBodyRowCommand(rect, (bodyRect) => execute(deleteRowsCommand(doc, bodyRect.top, bodyRect.bottom - bodyRect.top + 1)), "Header row cannot be deleted.");
+    if (name === "clearRow") return runBodyRowCommand(rect, (bodyRect) => execute(clearRangeCommand(doc, { top: bodyRect.top, bottom: bodyRect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row")), "Header row cannot be cleared as a row.");
+    if (name === "hideRow") return runBodyRowsCommand(rowsFromSelection(), (rows) => execute(hiddenRowsCommand(rows, true)), "Header row cannot be hidden.");
     if (name === "unhideRows") return execute(hiddenRowsCommand([...doc.hiddenRows], false));
     if (name === "insertColumn") return execute(insertColumnCommand(doc, rect.left));
     if (name === "deleteColumn") return execute(deleteColumnsCommand(doc, rect.left, rect.right - rect.left + 1));
@@ -65,6 +65,18 @@ export function createCommandController({
     if (name === "unhideColumns") return execute(hiddenColumnsCommand([...doc.hiddenColumns], false));
     if (name === "fill") return execute(fillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
     if (name === "incrementFill") return execute(incrementFillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
+  }
+
+  function runBodyRowCommand(rect, run, error) {
+    const bodyRect = { ...rect, top: Math.max(1, rect.top) };
+    if (bodyRect.top > bodyRect.bottom) return showError(error);
+    return run(bodyRect);
+  }
+
+  function runBodyRowsCommand(rows, run, error) {
+    const targets = rows.filter((row) => row > 0);
+    if (!targets.length) return showError(error);
+    return run(targets);
   }
 
   return {

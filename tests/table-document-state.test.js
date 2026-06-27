@@ -12,7 +12,7 @@ import {
 } from "../src/core/table-sizing.js";
 import { tableFileState } from "../src/core/table-file-state.js";
 import { tableViewState } from "../src/core/table-view-state.js";
-import { SelectionModel } from "../src/core/selection.js";
+import { SelectionModel, repairSelectionForDocument } from "../src/core/selection.js";
 import {
   UndoManager,
   makeCellCommand
@@ -27,6 +27,8 @@ import {
   deleteRowsCommand,
   fillSelectedCellsCommand,
   fillSelectionCommand,
+  hiddenColumnsCommand,
+  hiddenRowsCommand,
   incrementFillCommand,
   insertColumnCommand,
   insertRowCommand,
@@ -152,6 +154,8 @@ test("selection supports ctrl-style multi-range toggles", () => {
   selection.toggleCell(1, 1);
   assert.equal(selection.contains(1, 1), false);
   assert.equal(selection.contains(4, 3), true);
+  assert.deepEqual(selection.focus, { row: 4, column: 3 });
+  assert.deepEqual(selection.anchor, { row: 4, column: 3 });
 });
 
 test("row index highlight is reserved for full-row selection", () => {
@@ -332,16 +336,69 @@ test("resize commands are undoable without table snapshots", () => {
   col.redo(doc);
   undo.push(col);
   assert.equal(doc.columnWidths[1], 240);
+  assert.equal(doc.dirty, false);
   undo.undo(doc);
   assert.notEqual(doc.columnWidths[1], 240);
+  assert.equal(doc.dirty, false);
 
   const beforeHeight = doc.rowHeights[1];
   const row = resizeRowCommand(1, beforeHeight, 44);
   row.redo(doc);
   undo.push(row);
   assert.equal(doc.rowHeights[1], 44);
+  assert.equal(doc.dirty, false);
   undo.undo(doc);
   assert.equal(doc.rowHeights[1], beforeHeight);
+  assert.equal(doc.dirty, false);
+});
+
+test("hidden rows and columns are undoable view state without save dirtiness", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
+  const undo = new UndoManager();
+  const rows = hiddenRowsCommand([1], true);
+  rows.redo(doc);
+  undo.push(rows);
+  assert.equal(doc.hiddenRows.has(1), true);
+  assert.equal(doc.dirty, false);
+  undo.undo(doc);
+  assert.equal(doc.hiddenRows.has(1), false);
+  assert.equal(doc.dirty, false);
+
+  const columns = hiddenColumnsCommand([2], true);
+  columns.redo(doc);
+  undo.push(columns);
+  assert.equal(doc.hiddenColumns.has(2), true);
+  assert.equal(doc.dirty, false);
+  undo.undo(doc);
+  assert.equal(doc.hiddenColumns.has(2), false);
+  assert.equal(doc.dirty, false);
+});
+
+test("hidden membership survives delete undo for rows and columns", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6\n7\t8\t9");
+  doc.hiddenRows.add(2);
+  const rowDelete = deleteRowsCommand(doc, 1, 2);
+  rowDelete.redo(doc);
+  assert.equal(doc.hiddenRows.has(2), false);
+  rowDelete.undo(doc);
+  assert.equal(doc.hiddenRows.has(2), true);
+
+  doc.hiddenColumns.add(1);
+  const columnDelete = deleteColumnsCommand(doc, 0, 2);
+  columnDelete.redo(doc);
+  assert.equal(doc.hiddenColumns.has(1), false);
+  columnDelete.undo(doc);
+  assert.equal(doc.hiddenColumns.has(1), true);
+});
+
+test("selection repair avoids deleted or hidden focus targets", () => {
+  const doc = TableDocument.fromText("x.txt", "a\n1\n2\n3");
+  const selection = new SelectionModel();
+  selection.set(3, 0);
+  doc.hiddenRows.add(2);
+  deleteRowsCommand(doc, 3, 1).redo(doc);
+  repairSelectionForDocument(selection, doc);
+  assert.deepEqual(selection.focus, { row: 1, column: 0 });
 });
 
 test("manual column width survives table shape refresh", () => {

@@ -61,13 +61,14 @@ export class SelectionModel {
 
   toggleRange(rect, focus = { row: rect.bottom, column: rect.right }) {
     const target = normalizeRect(rect);
-    this.focus = { row: focus.row, column: focus.column };
     if (rangeContains(this.ranges, target)) {
       this.ranges = subtractFromRanges(this.ranges, target);
     } else {
       this.ranges = [...this.ranges, target];
     }
     if (!this.ranges.length) this.ranges = [makeRect(focus.row, focus.column, focus.row, focus.column)];
+    this.focus = pointInRanges(this.ranges, focus) ? { row: focus.row, column: focus.column } : firstCellInLastRange(this.ranges);
+    this.anchor = pointInRanges(this.ranges, this.anchor) ? this.anchor : this.focus;
   }
 
   get rect() {
@@ -99,6 +100,24 @@ export class SelectionModel {
     this.focus = { row: Math.max(0, rowCount - 1), column: Math.max(0, columnCount - 1) };
     this.ranges = [makeRect(0, 0, Math.max(0, rowCount - 1), Math.max(0, columnCount - 1))];
   }
+}
+
+export function repairSelectionForDocument(selection, doc, { preferVisible = true } = {}) {
+  if (!selection || !doc) return;
+  const rowMax = Math.max(0, (doc.rowCount ?? 1) - 1);
+  const columnMax = Math.max(0, (doc.columnCount ?? 1) - 1);
+  selection.ranges = (selection.ranges ?? []).map((range) => makeRect(
+    clampIndex(range.top, rowMax),
+    clampIndex(range.left, columnMax),
+    clampIndex(range.bottom, rowMax),
+    clampIndex(range.right, columnMax)
+  ));
+  if (!selection.ranges.length) selection.ranges = [makeRect(0, 0, 0, 0)];
+  const focus = normalizePoint(selection.focus, rowMax, columnMax);
+  const fallback = firstVisibleCellInRanges(selection.ranges, doc, preferVisible) ?? nearestVisiblePoint(focus, doc, rowMax, columnMax) ?? firstCellInLastRange(selection.ranges);
+  selection.focus = pointInRanges(selection.ranges, focus) && isVisiblePoint(focus, doc, preferVisible) ? focus : fallback;
+  const anchor = normalizePoint(selection.anchor, rowMax, columnMax);
+  selection.anchor = pointInRanges(selection.ranges, anchor) && isVisiblePoint(anchor, doc, preferVisible) ? anchor : selection.focus;
 }
 
 function makeRect(rowA, columnA, rowB, columnB) {
@@ -133,6 +152,59 @@ function unionRect(ranges) {
 
 function rangeContains(ranges, target) {
   return ranges.some((r) => r.top <= target.top && r.left <= target.left && r.bottom >= target.bottom && r.right >= target.right);
+}
+
+function pointInRanges(ranges, point) {
+  return ranges.some((r) => point.row >= r.top && point.row <= r.bottom && point.column >= r.left && point.column <= r.right);
+}
+
+function firstCellInLastRange(ranges) {
+  const range = ranges.at(-1) ?? makeRect(0, 0, 0, 0);
+  return { row: range.top, column: range.left };
+}
+
+function firstVisibleCellInRanges(ranges, doc, preferVisible) {
+  if (!preferVisible) return null;
+  for (const range of ranges) {
+    const row = firstVisibleIndexInRange(range.top, range.bottom, doc.hiddenRows);
+    const column = firstVisibleIndexInRange(range.left, range.right, doc.hiddenColumns);
+    if (row !== null && column !== null) return { row, column };
+  }
+  return null;
+}
+
+function firstVisibleIndexInRange(start, end, hidden) {
+  for (let index = start; index <= end; index++) {
+    if (!hidden?.has(index)) return index;
+  }
+  return null;
+}
+
+function isVisiblePoint(point, doc, preferVisible) {
+  return !preferVisible || (!doc.hiddenRows?.has(point.row) && !doc.hiddenColumns?.has(point.column));
+}
+
+function normalizePoint(point = {}, rowMax, columnMax) {
+  return { row: clampIndex(point.row, rowMax), column: clampIndex(point.column, columnMax) };
+}
+
+function clampIndex(value, max) {
+  return Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0));
+}
+
+function nearestVisiblePoint(point, doc, rowMax, columnMax) {
+  const row = nearestVisibleIndex(point.row, rowMax, doc.hiddenRows);
+  const column = nearestVisibleIndex(point.column, columnMax, doc.hiddenColumns);
+  return row === null || column === null ? null : { row, column };
+}
+
+function nearestVisibleIndex(value, max, hidden) {
+  if (!hidden?.has(value)) return value;
+  for (let offset = 1; offset <= max; offset++) {
+    if (value - offset >= 0 && !hidden.has(value - offset)) return value - offset;
+    if (value + offset <= max && !hidden.has(value + offset)) return value + offset;
+  }
+  return null;
 }
 
 function subtractFromRanges(ranges, target) {

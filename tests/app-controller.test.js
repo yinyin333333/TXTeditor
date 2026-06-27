@@ -28,6 +28,7 @@ import {
   unsavedDocuments
 } from "../src/ui/document-lifecycle-policy.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
+import { createCommandController } from "../src/ui/controllers/command-controller.js";
 import { createDiagnosticsController } from "../src/ui/controllers/diagnostics-controller.js";
 import { syncDockChildren } from "../src/ui/dock-sync.js";
 import {
@@ -119,6 +120,14 @@ test("search finds first-row header names as normal cells", () => {
 test("search includes the first real data column", () => {
   const doc = TableDocument.fromText("skills.txt", "skill\tid\tdesc\nbash\t1\tmelee\nwarcry\t2\tbuff");
   assert.deepEqual(findInTable(doc, "warcry", { row: 0, column: 0 }), { row: 2, column: 0 });
+});
+
+test("search can skip hidden rows and columns", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\nhidden-row\tvisible\nvisible\thidden-column");
+  doc.hiddenRows.add(1);
+  doc.hiddenColumns.add(1);
+  assert.deepEqual(findInTable(doc, "hidden", { row: 0, column: 0 }), { row: 1, column: 0 });
+  assert.equal(findInTable(doc, "hidden", { row: 0, column: 0 }, { skipHidden: true }), null);
 });
 
 test("search can land on the current first-column cell for a changed query", () => {
@@ -598,6 +607,44 @@ test("row context menu orders Clone Row after hide and delete without changing c
   const ids = rowItems.map((item) => item.id);
   assert.deepEqual(ids, ["add-row", "insert-row", "hide-row", "delete-row", "clone-row"]);
   assert.deepEqual(rowItems.at(-1), { id: "clone-row", label: "Clone Row", disabled: true });
+});
+
+test("row commands protect the header row while allowing mixed body-row selections", () => {
+  const doc = TableDocument.fromText("x.txt", "header\nbody");
+  const state = { selection: new SelectionModel() };
+  const errors = [];
+  const controller = createCommandController({
+    isDevelopmentMode: false,
+    state,
+    activeDoc: () => doc,
+    hasOpenDocument: () => true,
+    execute(command) {
+      command.redo(doc);
+    },
+    rowsFromSelection: () => {
+      const rows = [];
+      const rect = state.selection.rect;
+      for (let row = rect.top; row <= rect.bottom; row++) rows.push(row);
+      return rows;
+    },
+    columnsFromSelection: () => [state.selection.focus.column],
+    showError: (message) => errors.push(message),
+    handlers: {}
+  });
+
+  state.selection.set(0, 0);
+  controller.runCommand("delete-row");
+  controller.runCommand("hide-row");
+  controller.runCommand("clear-row");
+  assert.equal(doc.rowCount, 2);
+  assert.equal(doc.getCell(0, 0), "header");
+  assert.equal(doc.hiddenRows.has(0), false);
+  assert.equal(errors.length, 3);
+
+  state.selection.setRange(0, 0, 1, 0);
+  controller.runCommand("clear-row");
+  assert.equal(doc.getCell(0, 0), "header");
+  assert.equal(doc.getCell(1, 0), "");
 });
 
 test("Settings modal exposes immediate visual settings without save cancel apply", () => {

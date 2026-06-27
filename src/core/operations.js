@@ -227,7 +227,7 @@ export function deleteRowsCommand(doc, index, count = 1) {
       deleted = target.deleteRows(at, count);
     },
     undo(target) {
-      target.restoreRows(at, deleted.rows, deleted.rowHeights);
+      target.restoreRows(at, deleted.rows, deleted.rowHeights, deleted.hiddenRows);
     }
   });
 }
@@ -265,7 +265,7 @@ export function deleteColumnsCommand(doc, index, count = 1) {
       deleted = target.deleteColumns(at, count);
     },
     undo(target) {
-      target.restoreColumns(at, deleted.columns, deleted.columnWidths);
+      target.restoreColumns(at, deleted.columns, deleted.columnWidths, deleted.hiddenColumns);
     }
   });
 }

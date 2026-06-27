@@ -190,13 +190,14 @@ export class TableDocument {
   deleteRows(start, count = 1) {
     const at = clamp(start, 0, Math.max(0, this.rows.length - 1));
     const safeCount = Math.min(Math.max(1, count), this.rows.length - at);
+    const removedHiddenRows = hiddenOffsetsInRange(this.hiddenRows, at, safeCount);
     const removed = this.rows.splice(at, safeCount);
     const removedHeights = this.rowHeights.splice(at, safeCount);
     this.hiddenRows = shiftSetForDelete(this.hiddenRows, at, safeCount);
     if (!this.rows.length) this.rows.push([]);
     markTableContentDirty(this);
     this.refreshShape();
-    return { type: "delete-rows", index: at, rows: removed, rowHeights: removedHeights };
+    return { type: "delete-rows", index: at, rows: removed, rowHeights: removedHeights, hiddenRows: removedHiddenRows };
   }
 
   insertColumn(index, name = "") {
@@ -214,18 +215,20 @@ export class TableDocument {
   deleteColumns(start, count = 1) {
     const at = clamp(start, 0, Math.max(0, this.columnCount - 1));
     const safeCount = Math.min(Math.max(1, count), this.columnCount - at);
+    const removedHiddenColumns = hiddenOffsetsInRange(this.hiddenColumns, at, safeCount);
     const removed = this.rows.map((row) => row.splice(at, safeCount));
     const removedWidths = this.columnWidths.splice(at, safeCount);
     this.hiddenColumns = shiftSetForDelete(this.hiddenColumns, at, safeCount);
     markTableContentDirty(this);
     this.refreshShape();
-    return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths };
+    return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths, hiddenColumns: removedHiddenColumns };
   }
 
-  restoreRows(index, rows, rowHeights = []) {
+  restoreRows(index, rows, rowHeights = [], hiddenRows = []) {
     this.rows.splice(index, 0, ...rows.map((row) => [...row]));
     this.rowHeights.splice(index, 0, ...rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
     this.hiddenRows = shiftSetForInsert(this.hiddenRows, index, rows.length);
+    for (const offset of hiddenRows) this.hiddenRows.add(index + offset);
     markTableContentDirty(this);
     this.refreshShape();
   }
@@ -234,12 +237,13 @@ export class TableDocument {
     return this.deleteRows(index, count);
   }
 
-  restoreColumns(index, columns, widths = []) {
+  restoreColumns(index, columns, widths = [], hiddenColumns = []) {
     for (let row = 0; row < this.rows.length; row++) {
       this.rows[row].splice(index, 0, ...(columns[row] ?? []).map((value) => value ?? ""));
     }
     this.columnWidths.splice(index, 0, ...columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
     this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, index, columns[0]?.length ?? 0);
+    for (const offset of hiddenColumns) this.hiddenColumns.add(index + offset);
     markTableContentDirty(this);
     this.refreshShape();
   }
@@ -253,7 +257,6 @@ export class TableDocument {
       if (hidden) this.hiddenRows.add(row);
       else this.hiddenRows.delete(row);
     }
-    markTableContentDirty(this);
   }
 
   setColumnsHidden(columns, hidden) {
@@ -261,18 +264,15 @@ export class TableDocument {
       if (hidden) this.hiddenColumns.add(column);
       else this.hiddenColumns.delete(column);
     }
-    markTableContentDirty(this);
   }
 
   setColumnWidth(column, width) {
     this.columnWidths[column] = clamp(Math.round(width), 36, 2000);
-    markTableContentDirty(this);
   }
 
   setRowHeight(row, height) {
     this.rowHeights[row] = clamp(Math.round(height), 18, 240);
     this.hasCustomRowHeights = true;
-    markTableContentDirty(this);
   }
 
   resetRowHeights() {
@@ -325,4 +325,12 @@ function shiftSetForDelete(set, index, count) {
     else if (value >= index + count) shifted.add(value - count);
   }
   return shifted;
+}
+
+function hiddenOffsetsInRange(set, index, count) {
+  const offsets = [];
+  for (const value of set) {
+    if (value >= index && value < index + count) offsets.push(value - index);
+  }
+  return offsets.sort((a, b) => a - b);
 }

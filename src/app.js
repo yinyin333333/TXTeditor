@@ -1,5 +1,5 @@
 import { TableDocument, clamp } from "./core/table-model.js";
-import { SelectionModel } from "./core/selection.js";
+import { SelectionModel, repairSelectionForDocument } from "./core/selection.js";
 import { makeCellCommand, makeCustomCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument, undoManagerForDocument } from "./core/document-undo-state.js";
 import {
@@ -527,7 +527,7 @@ function execute(command, changedRows = null) {
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
-  command.redo(activeDoc());
+  command.redo(doc); repairSelectionForDocument(state.selection, doc);
   markLegacyLintDocChanged(doc);
   activeUndo().push(command);
   grid.layout();
@@ -677,7 +677,7 @@ async function loadFixture(size) {
 function undo() {
   const doc = activeDoc();
   if (activeUndo().undo(doc)) {
-    markLegacyLintDocChanged(doc);
+    repairSelectionForDocument(state.selection, doc); markLegacyLintDocChanged(doc);
     grid.layout();
     if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "undo"));
     else scheduleLegacyLintForEdit(doc);
@@ -688,7 +688,7 @@ function undo() {
 function redo() {
   const doc = activeDoc();
   if (activeUndo().redo(doc)) {
-    markLegacyLintDocChanged(doc);
+    repairSelectionForDocument(state.selection, doc); markLegacyLintDocChanged(doc);
     grid.layout();
     if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "redo"));
     else scheduleLegacyLintForEdit(doc);
@@ -1101,7 +1101,7 @@ function cloneRows() {
 
 function commitResize(resize) {
   if (!resize || resize.before === resize.current) return;
-  renderChrome();
+  execute(resize.kind === "column" ? resizeColumnCommand(resize.index, resize.before, resize.current) : resizeRowCommand(resize.index, resize.before, resize.current));
 }
 
 function showPalette() {

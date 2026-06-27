@@ -124,10 +124,7 @@ export class CanvasGrid {
     this.layout();
   }
 
-  setColorizeColumns(enabled) {
-    this.colorizeColumns = Boolean(enabled);
-    this.draw();
-  }
+  setColorizeColumns(enabled) { this.colorizeColumns = Boolean(enabled); this.draw(); }
 
   setVectorLspHoverEnabled(enabled) {
     this.vectorLspHoverEnabled = Boolean(enabled);
@@ -135,10 +132,7 @@ export class CanvasGrid {
     this.requestRender("vector-lsp-hover");
   }
 
-  setHoverSuspended(suspended) {
-    this.hoverSuspended = Boolean(suspended);
-    if (this.hoverSuspended) this.clearHoverState();
-  }
+  setHoverSuspended(suspended) { this.hoverSuspended = Boolean(suspended); if (this.hoverSuspended) this.clearHoverState(); }
 
   isHoverAllowed() {
     return isGridHoverAllowed({
@@ -178,6 +172,7 @@ export class CanvasGrid {
         requestRender: (reason) => this.requestRender(reason),
         onViewportChanged: this.onViewportChanged
       });
+      this.syncEditorOverlay();
     });
     this._tooltip = document.createElement("div");
     this._tooltip.className = "cell-tooltip";
@@ -208,6 +203,7 @@ export class CanvasGrid {
     this.layoutCanvas(this.canvas, this.ctx, rect);
     this.layoutCanvas(this.frozenCanvas, this.frozenCtx, rect);
     this.positionCanvases(rect);
+    this.syncEditorOverlay?.();
     this.scrollSurface.style.width = `${this.rowHeaderWidth + this.frozenColumnWidth() + this.scrollableColumnWidth()}px`;
     this.scrollSurface.style.height = `${this.headerHeight + this.frozenRowHeight() + this.scrollableRowsHeight()}px`;
     this.draw();
@@ -653,7 +649,8 @@ export class CanvasGrid {
       rowCount: this.doc.rowCount,
       columnCount: this.doc.columnCount,
       jumpRow: (row, direction) => this.jumpRow(row, direction),
-      jumpColumn: (column, direction) => this.jumpColumn(column, direction)
+      jumpColumn: (column, direction) => this.jumpColumn(column, direction),
+      hiddenRows: this.doc.hiddenRows, hiddenColumns: this.doc.hiddenColumns
     });
     if (!target) return;
     if (target.extend) this.selection.extend(target.row, target.column);
@@ -670,8 +667,8 @@ export class CanvasGrid {
     let next = row;
     while (next + direction >= 0 && next + direction < this.doc.rowCount) {
       next += direction;
-      const filled = this.doc.getCell(next, column) !== "";
-      if (filled !== startFilled) return next;
+      if (this.doc.hiddenRows.has(next)) continue;
+      if ((this.doc.getCell(next, column) !== "") !== startFilled) return next;
     }
     return next;
   }
@@ -682,8 +679,8 @@ export class CanvasGrid {
     let next = column;
     while (next + direction >= 0 && next + direction < this.doc.columnCount) {
       next += direction;
-      const filled = this.doc.getCell(row, next) !== "";
-      if (filled !== startFilled) return next;
+      if (this.doc.hiddenColumns.has(next)) continue;
+      if ((this.doc.getCell(row, next) !== "") !== startFilled) return next;
     }
     return next;
   }
@@ -720,9 +717,8 @@ export class CanvasGrid {
   startEdit(initialText = null, replace = false, mode = replace ? "quick" : "explicit") {
     if (this.editing && replace) return;
     const { row, column } = this.selection.focus;
-    const box = this.cellBox(row, column);
-    const hostBox = this.host.getBoundingClientRect();
-    const boxStyle = editorBoxStyle({ hostBox, cellBox: box, zoom: this.zoom });
+    if (!this.isCellEditable(row, column)) return;
+    const boxStyle = editorBoxStyle({ hostBox: this.host.getBoundingClientRect(), cellBox: this.cellBox(row, column), zoom: this.zoom });
     this.editor.value = replace ? initialText : this.doc.getCell(row, column);
     Object.assign(this.editor.style, boxStyle);
     this.editor.dataset.row = String(row);
@@ -745,7 +741,7 @@ export class CanvasGrid {
     this.editing = false;
     this.editMode = null;
     this.editor.classList.remove("active");
-    this.onEdit?.([{ row, column, value: this.editor.value }], "Edit Cell");
+    if (this.isCellEditable(row, column)) this.onEdit?.([{ row, column, value: this.editor.value }], "Edit Cell");
     this.draw();
     this.notifySelectionChanged("edit-commit");
   }
@@ -774,13 +770,12 @@ export class CanvasGrid {
     return { row, column };
   }
 
+  syncEditorOverlay() { const cell = this.editingCell(); if (!cell) return; if (!this.isCellEditable(cell.row, cell.column)) return this.cancelEdit(); Object.assign(this.editor.style, editorBoxStyle({ hostBox: this.host.getBoundingClientRect(), cellBox: this.cellBox(cell.row, cell.column), zoom: this.zoom })); }
+
+  isCellEditable(row, column) { return row >= 0 && row < this.doc.rowCount && column >= 0 && column < this.doc.columnCount && !this.doc.hiddenRows.has(row) && !this.doc.hiddenColumns.has(column); }
+
   styleEditorForCell(row, column) {
-    const cellState = editorCellState({
-      row,
-      column,
-      freezeFirstRow: this.doc.freezeFirstRow,
-      freezeFirstColumn: this.doc.freezeFirstColumn
-    });
+    const cellState = editorCellState({ row, column, freezeFirstRow: this.doc.freezeFirstRow, freezeFirstColumn: this.doc.freezeFirstColumn });
     const { frozen, firstColumnLabel } = cellState;
     const unselectedBackground = cellBackground(row, false, frozen, firstColumnLabel);
     this.editor.style.backgroundColor = unselectedBackground;
@@ -823,6 +818,7 @@ export class CanvasGrid {
   }
 
   scrollCellIntoView(row, column) {
+    if (this.doc.hiddenRows.has(row) || this.doc.hiddenColumns.has(column)) return;
     const scrollState = edgeCellScrollState({
       row,
       column,
