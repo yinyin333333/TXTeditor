@@ -455,9 +455,16 @@ export function createLspController({
       recordLintEngineEvent("vector-close-superseded", { fileName: doc?.name, uri });
       return;
     }
+    const closeGeneration = supersedeUriOpenGeneration(uri, openGeneration);
+    docState.ready = false;
+    docState.opened = false;
+    docState.hoverReady = false;
+    const fileKey = uriToFileKey(uri);
+    setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
+    updateGridDiagnostics();
     recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
     await lspCloseFile(uri);
-    if (!isCurrentUriOpenGeneration(uri, openGeneration)) {
+    if (!isCurrentUriOpenGeneration(uri, closeGeneration)) {
       recordLintEngineEvent("vector-close-result-superseded", { fileName: doc?.name, uri });
       return;
     }
@@ -465,9 +472,6 @@ export function createLspController({
     resetLspDocumentState(doc);
     hoverController.clearHoverCacheForUri(uri);
     hoverController.invalidateHover(false, "file-closed");
-    const fileKey = uriToFileKey(uri);
-    setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
-    updateGridDiagnostics();
   }
 
   function reportCloseFailure(doc, error, context) {
@@ -515,11 +519,18 @@ export function createLspController({
       return;
     }
     recordLspTraffic(uri, "diagnostics_changed");
-    recordLspTraffic(uri, "lsp_get_diagnostics");
     const fileKey = uriToFileKey(uri);
     const doc = state.docs.find((d) => uriToFileKey(docToUri(d)) === fileKey);
+    if (!doc || !lspDocumentIsCurrentForUri(doc, uri)) {
+      setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
+      updateGridDiagnostics();
+      renderChrome();
+      recordLintEngineEvent("vector-diagnostics-stale-uri-cleared", { uri, fileKey });
+      return;
+    }
     const fileName = doc?.name ?? fileNameFromUri(uri);
     const filePath = doc?.path ?? pathFromUri(uri);
+    recordLspTraffic(uri, "lsp_get_diagnostics");
     const rawDiags = await lspGetDiagnostics(uri).catch((error) => {
       reportLspRequestFailure({
         uri,
@@ -698,6 +709,17 @@ export function createLspController({
 
   function isCurrentUriOpenGeneration(uri, generation) {
     return generation > 0 && uriOpenGenerations.get(uri) === generation;
+  }
+
+  function lspDocumentIsCurrentForUri(doc, uri) {
+    const docState = lspDocumentState(doc);
+    return docToUri(doc) === uri && isCurrentUriOpenGeneration(uri, docState.openGeneration);
+  }
+
+  function supersedeUriOpenGeneration(uri, generation) {
+    const next = generation + 1;
+    uriOpenGenerations.set(uri, next);
+    return next;
   }
 
   function clearVectorDiagnostics(reason) {

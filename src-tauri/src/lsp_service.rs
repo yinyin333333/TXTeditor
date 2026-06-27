@@ -1,7 +1,7 @@
 use crate::config::AppConfigState;
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
-    strip_markdown_for_tooltip, uri_to_path, LspContentChange, LspDiagnostic,
+    strip_markdown_for_tooltip, LspContentChange, LspDiagnostic,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -29,6 +29,7 @@ pub(crate) struct LspManager {
     process: Mutex<Option<Arc<LspProcess>>>,
     child: Mutex<Option<std::process::Child>>,
     active_session: Arc<AtomicU64>,
+    publication: Mutex<()>,
 }
 
 impl LspManager {
@@ -37,7 +38,42 @@ impl LspManager {
             process: Mutex::new(None),
             child: Mutex::new(None),
             active_session: Arc::new(AtomicU64::new(0)),
+            publication: Mutex::new(()),
         }
+    }
+
+    fn begin_start_session(&self) -> (u64, Option<Arc<LspProcess>>, Option<std::process::Child>) {
+        let _publication = self.publication.lock().unwrap();
+        let session_id = self.active_session.fetch_add(1, Ordering::SeqCst) + 1;
+        let old_proc = self.process.lock().unwrap().take();
+        let old_child = self.child.lock().unwrap().take();
+        (session_id, old_proc, old_child)
+    }
+
+    fn publish_started_process(
+        &self,
+        session_id: u64,
+        proc: Arc<LspProcess>,
+        mut child: std::process::Child,
+    ) -> bool {
+        let (old_proc, old_child) = {
+            let _publication = self.publication.lock().unwrap();
+            if !is_current_session(&self.active_session, session_id) {
+                drain_pending_requests(&proc.pending, "stale LSP session");
+                kill_and_wait_child(&mut child);
+                return false;
+            }
+            let old_proc = self.process.lock().unwrap().replace(Arc::clone(&proc));
+            let old_child = self.child.lock().unwrap().replace(child);
+            (old_proc, old_child)
+        };
+        if let Some(old_proc) = old_proc {
+            drain_pending_requests(&old_proc.pending, "LSP session replaced");
+        }
+        if let Some(mut old_child) = old_child {
+            kill_and_wait_child(&mut old_child);
+        }
+        true
     }
 }
 
@@ -241,21 +277,15 @@ fn run_lsp_reader(
             .cloned()
             .unwrap_or_default();
 
-        let lines = proc
-            .file_lines
-            .lock()
-            .unwrap()
-            .get(&uri)
-            .cloned()
-            .unwrap_or_else(|| {
-                uri_to_path(&uri)
-                    .ok()
-                    .and_then(|path| std::fs::read_to_string(path).ok())
-                    .unwrap_or_default()
-                    .lines()
-                    .map(String::from)
-                    .collect()
-            });
+        let lines = {
+            let file_lines = proc.file_lines.lock().unwrap();
+            let Some(lines) = file_lines.get(&uri).cloned() else {
+                proc.diagnostics.lock().unwrap().remove(&uri);
+                let _ = app.emit("lsp-diagnostics-changed", &uri);
+                continue;
+            };
+            lines
+        };
 
         let diagnostics = diagnostics_from_lsp_publish(&raw, &lines);
 
@@ -285,15 +315,12 @@ pub(crate) async fn lsp_start(
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    let session_id = state.active_session.fetch_add(1, Ordering::SeqCst) + 1;
-    if let Some(old_proc) = state.process.lock().unwrap().take() {
+    let (session_id, old_proc, old_child) = state.begin_start_session();
+    if let Some(old_proc) = old_proc {
         drain_pending_requests(&old_proc.pending, "LSP session restarted");
     }
-    {
-        let mut child_lock = state.child.lock().unwrap();
-        if let Some(mut old_child) = child_lock.take() {
-            kill_and_wait_child(&mut old_child);
-        }
+    if let Some(mut old_child) = old_child {
+        kill_and_wait_child(&mut old_child);
     }
 
     let (binary, lint_mode, schema_version, schema_path, plugin_path, debug_logging) = {
@@ -420,8 +447,9 @@ pub(crate) async fn lsp_start(
         file_lines: Mutex::new(HashMap::new()),
     });
 
-    *state.process.lock().unwrap() = Some(Arc::clone(&proc));
-    *state.child.lock().unwrap() = Some(child);
+    if !state.publish_started_process(session_id, Arc::clone(&proc), child) {
+        return Ok(());
+    }
 
     let app_clone = app_handle.clone();
     let active_session = Arc::clone(&state.active_session);
@@ -871,14 +899,45 @@ mod tests {
     #[test]
     fn production_startup_rechecks_session_before_publishing_process() {
         let source = include_str!("lsp_service.rs");
-        let publish = source
-            .find("*state.process.lock().unwrap() = Some")
-            .unwrap();
-        let before_publish = &source[..publish];
-        let guard_count = before_publish
-            .matches("if !is_current_session(&state.active_session, session_id)")
-            .count();
-        assert!(guard_count >= 2);
+        let production = &source[..source.find("#[cfg(test)]").unwrap()];
+        assert!(production.contains("fn publish_started_process("));
+        assert!(production.contains(
+            "state.publish_started_process(session_id, Arc::clone(&proc), child)"
+        ));
+        assert!(production.contains("let _publication = self.publication.lock().unwrap();"));
+        let forbidden_process_publish =
+            format!("{}{}", "*state.process.lock().unwrap()", " = Some");
+        let forbidden_child_publish = format!("{}{}", "*state.child.lock().unwrap()", " = Some");
+        assert!(!production.contains(&forbidden_process_publish));
+        assert!(!production.contains(&forbidden_child_publish));
+    }
+
+    #[test]
+    fn publication_guard_rejects_stale_session_and_reaps_child() {
+        let manager = LspManager::new();
+        let (first_session, _, _) = manager.begin_start_session();
+        let (second_session, _, _) = manager.begin_start_session();
+        assert_eq!(first_session, 1);
+        assert_eq!(second_session, 2);
+
+        let mut child = spawn_long_running_child();
+        let stdin = child.stdin.take().unwrap();
+        let proc = Arc::new(LspProcess {
+            session_id: first_session,
+            stdin: Mutex::new(stdin),
+            next_id: AtomicU64::new(100),
+            pending: Mutex::new(HashMap::new()),
+            diagnostics: Mutex::new(HashMap::new()),
+            file_lines: Mutex::new(HashMap::new()),
+        });
+        let (tx, mut rx) = oneshot::channel();
+        proc.pending.lock().unwrap().insert(7, tx);
+
+        assert!(!manager.publish_started_process(first_session, Arc::clone(&proc), child));
+        assert!(manager.process.lock().unwrap().is_none());
+        assert!(manager.child.lock().unwrap().is_none());
+        assert!(proc.pending.lock().unwrap().is_empty());
+        assert_eq!(rx.try_recv().unwrap().unwrap_err(), "stale LSP session");
     }
 
     #[test]
@@ -923,7 +982,7 @@ mod tests {
     fn spawn_long_running_child() -> std::process::Child {
         Command::new("cmd")
             .args(["/C", "ping -n 30 127.0.0.1 > NUL"])
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -934,7 +993,7 @@ mod tests {
     fn spawn_long_running_child() -> std::process::Child {
         Command::new("sh")
             .args(["-c", "sleep 30"])
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

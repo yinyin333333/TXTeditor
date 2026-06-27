@@ -606,6 +606,80 @@ test("Vector-LSP stale close is skipped when a URI is reopened", async () => {
   }
 });
 
+test("Vector-LSP ignores stale diagnostics after a document is closed", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "id\n1", { path: "E:\\Data\\skills.txt" });
+  const uri = docToUri(doc);
+  const calls = [];
+  const lintEvents = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: { invoke: async (command, args) => calls.push([command, args]) },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: {
+      enabled: true,
+      engine: LINT_ENGINE_VECTOR,
+      diagnostics: [{ id: "lsp:old", fileKey: "e:/data/skills.txt" }],
+      status: ""
+    },
+    lsp: { started: true },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: (name, details) => lintEvents.push([name, details]),
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics() {},
+      renderChrome() {},
+      addDocument: async () => {},
+      applyFreezeToDoc() {},
+      updateActiveProblemHighlight() {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.openDoc(doc);
+    await controller.closeDoc(doc);
+    assert.deepEqual(state.lint.diagnostics, []);
+
+    await controller.handleDiagnosticsChanged(uri);
+
+    assert.equal(calls.some(([command]) => command === "lsp_get_diagnostics"), false);
+    assert.deepEqual(state.lint.diagnostics, []);
+    assert.equal(lintEvents.some(([name]) => name === "vector-diagnostics-stale-uri-cleared"), true);
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_open_file", "lsp_close_file"]);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("Vector-LSP definition open failure does not navigate the active document", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("skills.txt", "id\tref\n1\tmissing", { path: "E:\\Data\\skills.txt" });

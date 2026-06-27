@@ -66,6 +66,7 @@ fn encode_file_uri_path(path: &str) -> String {
     encoded
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn uri_to_path(uri: &str) -> Result<PathBuf, String> {
     let Some(rest) = uri.trim().strip_prefix("file://") else {
         return Err("Only file:// URIs can be converted to paths".to_string());
@@ -98,11 +99,13 @@ pub(crate) fn uri_to_path(uri: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(unc_path))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn is_windows_drive_path(path: &str) -> bool {
     let bytes = path.as_bytes();
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn decode_file_uri_component(value: &str) -> Result<String, String> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -130,6 +133,7 @@ fn decode_file_uri_component(value: &str) -> Result<String, String> {
         .map_err(|_| "file URI contains invalid UTF-8 percent encoding".to_string())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
