@@ -72,9 +72,9 @@ pub(crate) fn write_text_file_safe(
     encoding: Option<String>,
 ) -> Result<SavePayload, String> {
     let target = PathBuf::from(&path);
-    let (temp, mut temp_file) = create_unique_temp_file_for(&target)?;
     let encoding = normalize_encoding(encoding.as_deref());
     let bytes = encode_text(&text, &encoding)?;
+    let (temp, mut temp_file) = create_unique_temp_file_for(&target)?;
 
     let write_result = (|| -> Result<(), String> {
         temp_file.write_all(&bytes).map_err(|err| err.to_string())?;
@@ -513,6 +513,40 @@ mod tests {
         assert_eq!(payload.encoding, "windows-1252");
         assert_eq!(fs::read(&target).unwrap(), vec![0x93, 0x80, 0x85, 0x97]);
         assert_eq!(fs::read_to_string(&sibling_tmp).unwrap(), "do-not-touch");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_text_file_safe_does_not_create_temp_when_encoding_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-safe-write-encoding-failure-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("legacy.txt");
+        fs::write(&target, "old").unwrap();
+        let target_string = target.to_string_lossy().to_string();
+
+        let result = write_text_file_safe(
+            target_string,
+            "emoji-\u{C17D}".to_string(),
+            Some("windows-1252".to_string()),
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("Windows-1252"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        let temp_prefix = format!(".legacy.txt.{}.", std::process::id());
+        let leaked_temps: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with(&temp_prefix) && name.ends_with(".tmp"))
+            .collect();
+        assert_eq!(leaked_temps, Vec::<String>::new());
 
         let _ = fs::remove_dir_all(&dir);
     }
