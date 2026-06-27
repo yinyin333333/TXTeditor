@@ -16,15 +16,22 @@ pub(crate) fn collect_text_files(
     files: &mut Vec<WorkspaceFile>,
     depth: usize,
 ) -> Result<(), String> {
-    if depth > 4 {
-        return Ok(());
-    }
-    for entry in fs::read_dir(path).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(err) if depth == 0 => return Err(err.to_string()),
+        Err(_) => return Ok(()),
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
         let entry_path = entry.path();
-        if entry_path.is_dir() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_text_files(&entry_path, files, depth + 1)?;
-        } else if is_text_like(&entry_path) {
+        } else if file_type.is_file() && is_text_like(&entry_path) {
             files.push(workspace_file_from_entry_path(
                 &entry_path,
                 entry.metadata().ok(),
@@ -107,6 +114,29 @@ mod tests {
 
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(names, vec!["a.txt".to_string(), "c.csv".to_string()]);
+    }
+
+    #[test]
+    fn collect_text_files_includes_deep_supported_files() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "txteditor-collect-deep-text-files-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let deep = root.join("a").join("b").join("c").join("d").join("e");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("deep.tsv"), "deep").unwrap();
+
+        let mut files = Vec::new();
+        collect_text_files(&root, &mut files, 0).unwrap();
+        let names: Vec<String> = files.into_iter().map(|file| file.name).collect();
+
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(names, vec!["deep.tsv".to_string()]);
     }
 
     #[test]

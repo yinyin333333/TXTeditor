@@ -1,16 +1,23 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { TableDocument } from "../src/core/table-model.js";
 import { findInTable } from "../src/core/search.js";
 import { makeCellCommand, UndoManager } from "../src/core/undo.js";
 
 const size = Number(process.argv[2] ?? 20000);
-const fixture = join(process.cwd(), "fixtures", `d2_${size / 1000}k.tsv`);
+const sizeLabel = size % 1000 === 0 ? `${size / 1000}k` : String(size);
+const fixtureName = `d2_${sizeLabel}.tsv`;
+const fixture = join(process.cwd(), "fixtures", fixtureName);
+if (!existsSync(fixture)) {
+  const result = spawnSync(process.execPath, [join(process.cwd(), "scripts", "generate-fixture.js"), String(size)], { stdio: "inherit" });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
 const text = readFileSync(fixture, "utf8");
 
 const t0 = performance.now();
-const doc = TableDocument.fromText("d2_20k.tsv", text);
+const doc = TableDocument.fromText(fixtureName, text);
 const t1 = performance.now();
 
 const renderReady = estimateVisibleCells(doc, { width: 1500, height: 900, scrollTop: 0, scrollLeft: 0 });
@@ -32,7 +39,7 @@ undo.redo(doc);
 const t3 = performance.now();
 
 mkdirSync(join(process.cwd(), "tmp"), { recursive: true });
-writeFileSync(join(process.cwd(), "tmp", "d2_20k.saved.tsv"), doc.toText(), "utf8");
+writeFileSync(join(process.cwd(), "tmp", `d2_${sizeLabel}.saved.tsv`), doc.toText(), "utf8");
 const t4 = performance.now();
 
 console.log(JSON.stringify({

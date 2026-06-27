@@ -17,6 +17,7 @@
     "test": "node --test \"tests/*.test.js\"",
     "test:baseline-contract": "node scripts/baseline-contract.mjs",
     "test:vector-lsp-smoke": "node scripts/vector-lsp-runtime-smoke.mjs",
+    "test:vector-lsp-smoke:optional": "node scripts/vector-lsp-runtime-smoke.mjs",
     "test:vector-lsp-smoke:required": "node scripts/vector-lsp-runtime-smoke.mjs --require-real",
     "lint:compare": "node scripts/lint-compare.js",
     "perf": "node scripts/perf-test.js 20000",

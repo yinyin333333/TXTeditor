@@ -59,7 +59,7 @@ export function lintCubeOutputs(index, ctx) {
     for (const propColumn of CUBE_OUTPUT_MOD_COLUMNS) {
       if (!table.hasColumn(propColumn)) continue;
       const property = clean(row.get(propColumn));
-      if (property && index.hasWorkspace && index.tablesByName.has("properties.txt") && !index.properties.has(property) && !index.propertyGroups.has(property)) {
+      if (property && index.hasWorkspace && index.tablesByName.has("properties.txt") && !index.allProperties.has(property)) {
         ctx.add(table, row.rowIndex, propColumn, `Unknown cube output property "${property}".`, {
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid property '${property}' for '${propColumn}' in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
         });

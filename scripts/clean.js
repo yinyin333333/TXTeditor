@@ -11,6 +11,7 @@ const buildTargets = [
   "fixtures/d2_20k.tsv",
   "fixtures/d2_200k.tsv",
   "fixtures/generated",
+  ".runtime-smoke",
   "TXTeditor_lint_result_RotW_d2rlint_compatible.txt",
   "tmp",
   "temp"

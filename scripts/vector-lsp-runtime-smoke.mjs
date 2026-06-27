@@ -3,37 +3,43 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
-export const NO_VECTOR_LSP_EXE_MESSAGE = "REAL VECTOR-LSP SMOKE NOT RUN: no existing vector-lsp executable found, and building E:\\vector-lsp is forbidden.";
+export const NO_VECTOR_LSP_EXE_MESSAGE = "REAL VECTOR-LSP SMOKE NOT RUN: no existing vector-lsp executable found. Pass --vector-lsp-root or --vector-lsp-exe, or use test:vector-lsp-smoke:required for required CI/release validation.";
+
+export function defaultVectorLspRoot(repoRoot = process.cwd()) {
+  return path.resolve(repoRoot, "..", "vector-lsp");
+}
 
 export function missingVectorLspExecutableMessage(vectorLspExe = "") {
   if (vectorLspExe) {
-    return `REAL VECTOR-LSP SMOKE NOT RUN: supplied vector-lsp executable does not exist: ${path.resolve(vectorLspExe)}. Building E:\\vector-lsp is forbidden.`;
+    return `REAL VECTOR-LSP SMOKE NOT RUN: supplied vector-lsp executable does not exist: ${path.resolve(vectorLspExe)}.`;
   }
   return NO_VECTOR_LSP_EXE_MESSAGE;
 }
 
 export function missingVectorLspContribMessage(contribSource) {
-  return `REAL VECTOR-LSP SMOKE NOT RUN: required contrib directory is missing: ${contribSource}. The runtime set is txteditor.exe + vector-lsp.exe + contrib\\. Building E:\\vector-lsp is forbidden.`;
+  return `REAL VECTOR-LSP SMOKE NOT RUN: required contrib directory is missing: ${contribSource}. The runtime set is txteditor.exe + vector-lsp.exe + contrib\\.`;
 }
 
 export function vectorLspExecutableName(platform = process.platform) {
   return platform === "win32" ? "vector-lsp.exe" : "vector-lsp";
 }
 
-export function vectorLspExecutableCandidates(vectorRoot = "E:\\vector-lsp", { platform = process.platform } = {}) {
+export function vectorLspExecutableCandidates(vectorRoot = defaultVectorLspRoot(), { platform = process.platform } = {}) {
   const exeName = vectorLspExecutableName(platform);
   return [
     path.join(vectorRoot, exeName),
     path.join(vectorRoot, "target", "release", exeName),
-    path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", exeName)
+    path.join(vectorRoot, "target", "debug", exeName),
+    path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", exeName),
+    path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "debug", exeName)
   ];
 }
 
-export function findExistingVectorLspExecutable(vectorRoot = "E:\\vector-lsp", exists = fs.existsSync, options = {}) {
+export function findExistingVectorLspExecutable(vectorRoot = defaultVectorLspRoot(), exists = fs.existsSync, options = {}) {
   return vectorLspExecutableCandidates(vectorRoot, options).find((candidate) => exists(candidate)) ?? null;
 }
 
-export function resolveVectorLspExecutable({ vectorRoot = "E:\\vector-lsp", vectorLspExe = "", exists = fs.existsSync, platform = process.platform } = {}) {
+export function resolveVectorLspExecutable({ vectorRoot = defaultVectorLspRoot(), vectorLspExe = "", exists = fs.existsSync, platform = process.platform } = {}) {
   if (vectorLspExe) {
     const explicit = path.resolve(vectorLspExe);
     return exists(explicit) ? explicit : null;
@@ -41,7 +47,7 @@ export function resolveVectorLspExecutable({ vectorRoot = "E:\\vector-lsp", vect
   return findExistingVectorLspExecutable(vectorRoot, exists, { platform });
 }
 
-export function smokePaths({ repoRoot = process.cwd(), vectorRoot = "E:\\vector-lsp" } = {}) {
+export function smokePaths({ repoRoot = process.cwd(), vectorRoot = defaultVectorLspRoot(repoRoot) } = {}) {
   const runtimeRoot = path.join(repoRoot, ".runtime-smoke");
   return {
     repoRoot,
@@ -336,7 +342,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
 
 export async function runVectorLspRuntimeSmoke({
   repoRoot = process.cwd(),
-  vectorRoot = "E:\\vector-lsp",
+  vectorRoot = defaultVectorLspRoot(repoRoot),
   vectorLspExe = "",
   schemaVariant = "3.2",
   timeoutMs = 10000,
@@ -402,9 +408,10 @@ export async function runVectorLspRuntimeSmoke({
 }
 
 async function main() {
+  const repoRoot = path.resolve(optionValue("--repo-root", process.cwd()));
   const result = await runVectorLspRuntimeSmoke({
-    repoRoot: path.resolve(optionValue("--repo-root", process.cwd())),
-    vectorRoot: path.resolve(optionValue("--vector-lsp-root", "E:\\vector-lsp")),
+    repoRoot,
+    vectorRoot: path.resolve(optionValue("--vector-lsp-root", defaultVectorLspRoot(repoRoot))),
     vectorLspExe: optionValue("--vector-lsp-exe", ""),
     schemaVariant: optionValue("--schema-variant", "3.2"),
     timeoutMs: Number(optionValue("--timeout-ms", "10000")),

@@ -781,6 +781,8 @@ test("cube output lint resolves quoted items and property group output mods", ()
   ];
   const diagnostics = lintDocs(docs).filter((item) => item.ruleId === "Cube/ValidOutputs");
   assert.equal(diagnostics.length, 0);
+  const d24Diagnostics = lintDocs(docs, "2.4").filter((item) => item.ruleId === "Cube/ValidOutputs");
+  assert.equal(d24Diagnostics.some((item) => item.columnName === "b mod 1" && item.message.includes("known-group")), true);
 });
 
 test("valid stat parameter lint follows d2rlint file scope and ignores cubemain mods", () => {

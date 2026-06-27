@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   NO_VECTOR_LSP_EXE_MESSAGE,
+  defaultVectorLspRoot,
   findExistingVectorLspExecutable,
   missingVectorLspContribMessage,
   prepareStaging,
@@ -20,16 +21,21 @@ test("Vector-LSP runtime smoke executable candidates are platform-aware", () => 
     assert.deepEqual(vectorLspExecutableCandidates(vectorRoot, { platform: "win32" }), [
       path.join(vectorRoot, "vector-lsp.exe"),
       path.join(vectorRoot, "target", "release", "vector-lsp.exe"),
-      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", "vector-lsp.exe")
+      path.join(vectorRoot, "target", "debug", "vector-lsp.exe"),
+      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", "vector-lsp.exe"),
+      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "debug", "vector-lsp.exe")
     ]);
     assert.deepEqual(vectorLspExecutableCandidates(vectorRoot, { platform: "linux" }), [
       path.join(vectorRoot, "vector-lsp"),
       path.join(vectorRoot, "target", "release", "vector-lsp"),
-      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", "vector-lsp")
+      path.join(vectorRoot, "target", "debug", "vector-lsp"),
+      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "release", "vector-lsp"),
+      path.join(vectorRoot, "target", "x86_64-pc-windows-msvc", "debug", "vector-lsp")
     ]);
     const releaseCandidate = path.join(vectorRoot, "target", "release", "vector-lsp");
     assert.equal(findExistingVectorLspExecutable(vectorRoot, (candidate) => candidate === releaseCandidate, { platform: "linux" }), releaseCandidate);
     assert.equal(resolveVectorLspExecutable({ vectorRoot, exists: (candidate) => candidate === releaseCandidate, platform: "linux" }), releaseCandidate);
+    assert.equal(defaultVectorLspRoot(repoRoot), path.resolve(repoRoot, "..", "vector-lsp"));
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -40,7 +46,8 @@ test("Vector-LSP no-executable diagnostic text is explicit without running optio
   assert.equal(findExistingVectorLspExecutable(vectorRoot), null);
   assert.equal(resolveVectorLspExecutable({ vectorRoot }), null);
   assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /^REAL VECTOR-LSP SMOKE NOT RUN:/);
-  assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /building E:\\vector-lsp is forbidden/);
+  assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /test:vector-lsp-smoke:required/);
+  assert.doesNotMatch(NO_VECTOR_LSP_EXE_MESSAGE, /E:\\vector-lsp/);
 });
 
 test("Vector-LSP required runtime smoke fails nonzero semantics when executable is missing", async () => {
@@ -49,7 +56,7 @@ test("Vector-LSP required runtime smoke fails nonzero semantics when executable 
   try {
     await assert.rejects(
       () => runVectorLspRuntimeSmoke({ repoRoot, vectorRoot, requireReal: true }),
-      /building E:\\vector-lsp is forbidden/
+      /no existing vector-lsp executable found/
     );
     assert.equal(existsSync(path.join(repoRoot, ".runtime-smoke", "vector-lsp-smoke-result.json")), false);
   } finally {

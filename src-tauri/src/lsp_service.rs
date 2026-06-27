@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::sync::oneshot;
 
 struct LspProcess {
@@ -57,21 +57,34 @@ impl Drop for LspManager {
     }
 }
 
-fn find_vector_lsp_binary() -> Result<PathBuf, String> {
+fn vector_lsp_binary_candidates(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
     let exe = if cfg!(windows) {
         "vector-lsp.exe"
     } else {
         "vector-lsp"
     };
-
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(dir) = current_exe.parent() {
             candidates.push(dir.join(exe));
         }
     }
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join(exe));
+    }
     candidates.push(PathBuf::from(format!("../vector-lsp/target/release/{exe}")));
     candidates.push(PathBuf::from(format!("../vector-lsp/target/debug/{exe}")));
+    candidates.push(PathBuf::from(format!(
+        "../vector-lsp/target/x86_64-pc-windows-msvc/release/{exe}"
+    )));
+    candidates.push(PathBuf::from(format!(
+        "../vector-lsp/target/x86_64-pc-windows-msvc/debug/{exe}"
+    )));
+    candidates
+}
+
+fn find_vector_lsp_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let candidates = vector_lsp_binary_candidates(app_handle.path().resource_dir().ok());
 
     for path in &candidates {
         if path.exists() {
@@ -294,7 +307,7 @@ pub(crate) async fn lsp_start(
                     return Err(format!("Configured vector-lsp path does not exist: {path}. Update it in Lint Options."));
                 }
             }
-            None => find_vector_lsp_binary()?,
+            None => find_vector_lsp_binary(&app_handle)?,
         };
         let lint_mode = config
             .lint_mode
@@ -690,6 +703,27 @@ mod tests {
     }
 
     #[test]
+    fn vector_lsp_runtime_candidates_include_packaged_and_target_triple_paths() {
+        let resource_dir = PathBuf::from("bundle-resources");
+        let candidates = vector_lsp_binary_candidates(Some(resource_dir.clone()));
+        let rendered = candidates
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(candidates.iter().any(|path| path
+            == &resource_dir.join(if cfg!(windows) {
+                "vector-lsp.exe"
+            } else {
+                "vector-lsp"
+            })));
+        assert!(rendered.contains("../vector-lsp/target/release/vector-lsp"));
+        assert!(rendered.contains("../vector-lsp/target/debug/vector-lsp"));
+        assert!(rendered.contains("../vector-lsp/target/x86_64-pc-windows-msvc/release/vector-lsp"));
+        assert!(rendered.contains("../vector-lsp/target/x86_64-pc-windows-msvc/debug/vector-lsp"));
+    }
+
+    #[test]
     fn pending_requests_are_completed_with_failure_when_drained() {
         let pending = Mutex::new(HashMap::new());
         let (tx, mut rx) = oneshot::channel();
@@ -837,7 +871,9 @@ mod tests {
     #[test]
     fn production_startup_rechecks_session_before_publishing_process() {
         let source = include_str!("lsp_service.rs");
-        let publish = source.find("*state.process.lock().unwrap() = Some").unwrap();
+        let publish = source
+            .find("*state.process.lock().unwrap() = Some")
+            .unwrap();
         let before_publish = &source[..publish];
         let guard_count = before_publish
             .matches("if !is_current_session(&state.active_session, session_id)")

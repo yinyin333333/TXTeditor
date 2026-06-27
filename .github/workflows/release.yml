@@ -15,6 +15,9 @@ on:
         type: string
         default: "v0.0.0-dry-run"
 
+env:
+  VECTOR_LSP_REF: ff93bdb5954fffbe8d231902efe05f7181085afa
+
 jobs:
   build:
     runs-on: windows-latest
@@ -29,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: eezstreet/vector-lsp
+          ref: ${{ env.VECTOR_LSP_REF }}
           path: vector-lsp
 
       - name: Resolve version
@@ -111,8 +115,12 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.VERSION }}"
+          $txteditorExe = "src-tauri\target\release\txteditor.exe"
           $vlspExe = "vector-lsp\target\x86_64-pc-windows-msvc\release\vector-lsp.exe"
           $vlspContrib = "vector-lsp\contrib"
+          if (-not (Test-Path $txteditorExe -PathType Leaf)) {
+            throw "Required TXTeditor executable is missing: $txteditorExe"
+          }
           if (-not (Test-Path $vlspExe -PathType Leaf)) {
             throw "Required vector-lsp executable is missing: $vlspExe"
           }
@@ -122,7 +130,7 @@ jobs:
 
           # ── Portable zip ────────────────────────────────────────────────────
           $portableDir = New-Item -ItemType Directory -Force "staging\portable"
-          Copy-Item "src-tauri\target\release\TXTeditor.exe" $portableDir
+          Copy-Item $txteditorExe "$portableDir\TXTeditor.exe"
           Copy-Item $vlspExe $portableDir
           Copy-Item $vlspContrib "$portableDir\contrib" -Recurse
           $portableZip = "TXTeditor-${version}-windows-x64-portable.zip"
@@ -167,6 +175,8 @@ jobs:
             ${{ steps.artifacts.outputs.INSTALLER }}
             ${{ steps.artifacts.outputs.PORTABLE_ZIP }}
           body: |
+            Vector-LSP ref: `${{ env.VECTOR_LSP_REF }}`
+
             ## Downloads
 
             | File | Description |

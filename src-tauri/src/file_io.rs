@@ -116,16 +116,15 @@ fn unique_temp_path_for(target: &Path) -> Result<PathBuf, String> {
         .unwrap_or("txteditor");
     let mut last_error = None;
     for attempt in 0..1000 {
-        let candidate = parent.join(format!(
-            ".{}.{}.{}.tmp",
-            name,
-            std::process::id(),
-            attempt
-        ));
+        let candidate = parent.join(format!(".{}.{}.{}.tmp", name, std::process::id(), attempt));
         if candidate.exists() {
             continue;
         }
-        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
             Ok(_) => {
                 let _ = fs::remove_file(&candidate);
                 return Ok(candidate);
@@ -382,7 +381,10 @@ mod tests {
         assert!(encode_text("\u{1F642}", "windows-1252")
             .unwrap_err()
             .contains("Windows-1252"));
-        assert_eq!(encode_text("id", "utf-8-bom").unwrap(), vec![0xEF, 0xBB, 0xBF, b'i', b'd']);
+        assert_eq!(
+            encode_text("id", "utf-8-bom").unwrap(),
+            vec![0xEF, 0xBB, 0xBF, b'i', b'd']
+        );
     }
 
     #[test]
@@ -442,7 +444,8 @@ mod tests {
         fs::write(&target, "old").unwrap();
         let target_string = target.to_string_lossy().to_string();
 
-        let first = write_text_file_safe(target_string.clone(), "id\n1\n".to_string(), None).unwrap();
+        let first =
+            write_text_file_safe(target_string.clone(), "id\n1\n".to_string(), None).unwrap();
         assert_eq!(first.path, target_string);
         assert_eq!(first.name, "items.txt");
         assert_eq!(fs::read_to_string(&target).unwrap(), "id\n1\n");
@@ -469,7 +472,8 @@ mod tests {
         let target = dir.join("new-file.txt");
         let target_string = target.to_string_lossy().to_string();
 
-        let payload = write_text_file_safe(target_string.clone(), "fresh\n".to_string(), None).unwrap();
+        let payload =
+            write_text_file_safe(target_string.clone(), "fresh\n".to_string(), None).unwrap();
 
         assert_eq!(payload.path, target_string);
         assert_eq!(payload.name, "new-file.txt");
