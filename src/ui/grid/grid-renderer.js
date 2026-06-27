@@ -3,11 +3,13 @@ import {
   activeRowHeaderChromeSteps,
   cellBackground,
   cellGridLineColor,
+  cellTextRenderPlan,
   cellTextColor,
   centeredTextY,
   columnHeaderRenderState,
   columnIndexLabel,
   columnIndexRenderState,
+  diagnosticTextOverlayPlan,
   diagnosticMarkerState,
   frozenHorizontalEdgeRects,
   frozenVerticalEdgeRects,
@@ -224,6 +226,7 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
     if (typeof grid.fillText === "function") grid.fillText(value, x + 8, centeredTextY(y, height), width - 12);
     else fillText(grid, value, x + 8, centeredTextY(y, height), width - 12);
   }
+  drawDiagnosticTextOverlay(grid, row, column, value, x, y, width, height, { active });
   if (typeof grid.drawDiagnosticMarker === "function") grid.drawDiagnosticMarker(row, column, x, y, width, height);
   else drawDiagnosticMarker(grid, row, column, x, y, width, height);
   if (active) {
@@ -254,6 +257,42 @@ function drawDiagnosticMarker(grid, row, column, x, y, width, height) {
 
 export function drawGridDiagnosticMarker(grid, row, column, x, y, width, height) {
   return drawDiagnosticMarker(grid, row, column, x, y, width, height);
+}
+
+function drawDiagnosticTextOverlay(grid, row, column, value, x, y, width, height, { active = false } = {}) {
+  const diagnostics = grid.diagnosticsByCell?.get(`${row}:${column}`) ?? [];
+  const hovered = grid._hoveredCell?.row === row && grid._hoveredCell?.col === column;
+  const currentProblem = active;
+  const plan = diagnosticTextOverlayPlan({
+    diagnostics,
+    value,
+    active,
+    hovered,
+    currentProblem,
+    textX: x + 8,
+    cellY: y,
+    cellHeight: height,
+    maxWidth: width - 12,
+    measureText: (text) => grid.ctx.measureText(String(text ?? "")).width
+  });
+  if (!plan) return;
+  const ctx = grid.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 2, y + 2, Math.max(0, width - 4), Math.max(0, height - 4));
+  ctx.clip();
+  ctx.strokeStyle = GRID_COLORS[plan.color] ?? GRID_COLORS.diagnosticRangeWarning;
+  ctx.lineWidth = plan.lineWidth;
+  ctx.beginPath();
+  if (plan.kind === "insertion") {
+    ctx.moveTo(plan.x, plan.top);
+    ctx.lineTo(plan.x, plan.bottom);
+  } else {
+    ctx.moveTo(plan.x, plan.y);
+    ctx.lineTo(plan.x + plan.width, plan.y);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawFrozenDividers(grid, frozenColWidth, frozenRowHeight) {
@@ -337,14 +376,12 @@ function drawResizeGuide(grid) {
 }
 
 function fillText(grid, text, x, y, maxWidth) {
-  const value = String(text);
-  if (grid.ctx.measureText(value).width <= maxWidth) {
-    grid.ctx.fillText(value, x, y);
-    return;
-  }
-  let clipped = value;
-  while (clipped.length > 1 && grid.ctx.measureText(`${clipped}...`).width > maxWidth) clipped = clipped.slice(0, -1);
-  grid.ctx.fillText(`${clipped}...`, x, y);
+  const plan = cellTextRenderPlan({
+    text,
+    maxWidth,
+    measureText: (value) => grid.ctx.measureText(String(value ?? "")).width
+  });
+  grid.ctx.fillText(plan.text, x, y);
 }
 
 export function fillGridText(grid, text, x, y, maxWidth) {
