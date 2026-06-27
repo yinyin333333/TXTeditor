@@ -2,24 +2,7 @@ import { TableDocument, clamp } from "./core/table-model.js";
 import { SelectionModel, repairSelectionForDocument } from "./core/selection.js";
 import { makeCellCommand, makeCustomCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument, undoManagerForDocument } from "./core/document-undo-state.js";
-import {
-  addColumnsCommand,
-  addRowsCommand,
-  arithmeticRangesCommand,
-  arithmeticCommand,
-  clearRangesCommand,
-  cloneRowsCommand,
-  copyRange,
-  copyRanges,
-  hiddenColumnsCommand,
-  hiddenRowsCommand,
-  incrementFillRangesCommand,
-  incrementFillCommand,
-  pasteTextToRangesCommand,
-  pasteTextCommand,
-  resizeColumnCommand,
-  resizeRowCommand
-} from "./core/operations.js";
+import { addColumnsCommand, addRowsCommand, arithmeticRangesCommand, arithmeticCommand, clearRangesCommand, cloneRowsCommand, commandAffectsContent, copyRange, copyRanges, hiddenColumnsCommand, hiddenRowsCommand, incrementFillRangesCommand, incrementFillCommand, markCommandViewOnly, pasteTextToRangesCommand, pasteTextCommand, resizeColumnCommand, resizeRowCommand } from "./core/operations.js";
 import {
   isTauriRuntime,
   listenForNativeDrops
@@ -41,6 +24,7 @@ import {
   normalizeLintEngine,
   vectorLspHoverFromStorage
 } from "./core/lint-controller-policy.js";
+import { clearLspUpdateFailureStatus } from "./core/lsp-update-status.js";
 import { CanvasGrid } from "./ui/canvas-grid.js";
 import {
   DEFAULT_DOCK_LAYOUT,
@@ -527,16 +511,21 @@ function execute(command, changedRows = null) {
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
+  const affectsContent = commandAffectsContent(command);
+  const wasDirty = doc.dirty;
   command.redo(doc); repairSelectionForDocument(state.selection, doc);
-  markLegacyLintDocChanged(doc);
+  if (!affectsContent) doc.dirty = wasDirty;
+  if (affectsContent) markLegacyLintDocChanged(doc);
   activeUndo().push(command);
   grid.layout();
-  if (documentChangeSyncRoute(state.lint.engine) === "vector-update") {
+  if (!affectsContent) {
+    clearLspUpdateFailureStatus(state, renderChrome);
+  } else if (documentChangeSyncRoute(state.lint.engine) === "vector-update") {
     lspUpdateDoc(doc, changedRows).catch((error) => handleLspUpdateError(doc, error, "edit"));
   } else {
     scheduleLegacyLintForEdit(doc);
   }
-  recordUiPerf("row-command", started, { changedRows: changedRows?.length ?? 0 });
+  recordUiPerf("row-command", started, { changedRows: affectsContent ? changedRows?.length ?? 0 : 0, affectsContent });
   renderChrome();
 }
 
@@ -676,10 +665,16 @@ async function loadFixture(size) {
 
 function undo() {
   const doc = activeDoc();
-  if (activeUndo().undo(doc)) {
-    repairSelectionForDocument(state.selection, doc); markLegacyLintDocChanged(doc);
+  const wasDirty = doc.dirty;
+  const command = activeUndo().undo(doc);
+  if (command) {
+    const affectsContent = commandAffectsContent(command);
+    repairSelectionForDocument(state.selection, doc);
+    if (!affectsContent) doc.dirty = wasDirty;
+    if (affectsContent) markLegacyLintDocChanged(doc);
     grid.layout();
-    if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "undo"));
+    if (!affectsContent) clearLspUpdateFailureStatus(state, renderChrome);
+    else if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "undo"));
     else scheduleLegacyLintForEdit(doc);
     renderChrome();
   }
@@ -687,10 +682,16 @@ function undo() {
 
 function redo() {
   const doc = activeDoc();
-  if (activeUndo().redo(doc)) {
-    repairSelectionForDocument(state.selection, doc); markLegacyLintDocChanged(doc);
+  const wasDirty = doc.dirty;
+  const command = activeUndo().redo(doc);
+  if (command) {
+    const affectsContent = commandAffectsContent(command);
+    repairSelectionForDocument(state.selection, doc);
+    if (!affectsContent) doc.dirty = wasDirty;
+    if (affectsContent) markLegacyLintDocChanged(doc);
     grid.layout();
-    if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "redo"));
+    if (!affectsContent) clearLspUpdateFailureStatus(state, renderChrome);
+    else if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "redo"));
     else scheduleLegacyLintForEdit(doc);
     renderChrome();
   }
@@ -867,14 +868,14 @@ function unhideAll() {
     rows.length ? hiddenRowsCommand(rows, false) : null,
     columns.length ? hiddenColumnsCommand(columns, false) : null
   ].filter(Boolean);
-  const command = makeCustomCommand("Unhide All", {
+  const command = markCommandViewOnly(makeCustomCommand("Unhide All", {
     redo(target) {
       for (const item of commands) item.redo(target);
     },
     undo(target) {
       for (let i = commands.length - 1; i >= 0; i--) commands[i].undo(target);
     }
-  });
+  }));
   execute(command);
 }
 

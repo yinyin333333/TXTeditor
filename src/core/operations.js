@@ -270,30 +270,39 @@ export function deleteColumnsCommand(doc, index, count = 1) {
   });
 }
 
+export function markCommandViewOnly(command) {
+  if (command) command.affectsContent = false;
+  return command;
+}
+
+export function commandAffectsContent(command) {
+  return command?.affectsContent !== false;
+}
+
 export function hiddenRowsCommand(rows, hidden) {
-  return makeCustomCommand(hidden ? "Hide Row" : "Unhide Row(s)", {
+  return markCommandViewOnly(makeCustomCommand(hidden ? "Hide Row" : "Unhide Row(s)", {
     redo(target) {
       target.setRowsHidden(rows, hidden);
     },
     undo(target) {
       target.setRowsHidden(rows, !hidden);
     }
-  });
+  }));
 }
 
 export function hiddenColumnsCommand(columns, hidden) {
-  return makeCustomCommand(hidden ? "Hide Column" : "Unhide Column(s)", {
+  return markCommandViewOnly(makeCustomCommand(hidden ? "Hide Column" : "Unhide Column(s)", {
     redo(target) {
       target.setColumnsHidden(columns, hidden);
     },
     undo(target) {
       target.setColumnsHidden(columns, !hidden);
     }
-  });
+  }));
 }
 
 export function resizeColumnCommand(column, before, after) {
-  return makeCustomCommand("Resize Column", {
+  return markCommandViewOnly(makeCustomCommand("Resize Column", {
     empty: before === after,
     redo(target) {
       target.setColumnWidth(column, after);
@@ -301,11 +310,11 @@ export function resizeColumnCommand(column, before, after) {
     undo(target) {
       target.setColumnWidth(column, before);
     }
-  });
+  }));
 }
 
 export function resizeRowCommand(row, before, after) {
-  return makeCustomCommand("Resize Row", {
+  return markCommandViewOnly(makeCustomCommand("Resize Row", {
     empty: before === after,
     redo(target) {
       target.setRowHeight(row, after);
@@ -313,7 +322,7 @@ export function resizeRowCommand(row, before, after) {
     undo(target) {
       target.setRowHeight(row, before);
     }
-  });
+  }));
 }
 
 function incrementValueFactory(seed) {

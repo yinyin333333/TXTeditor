@@ -117,6 +117,7 @@ export class SelectionModel {
 
 export function repairSelectionForDocument(selection, doc, { preferVisible = true } = {}) {
   if (!selection || !doc) return;
+  const previousKind = selection.selectionKind;
   const rowMax = Math.max(0, (doc.rowCount ?? 1) - 1);
   const columnMax = Math.max(0, (doc.columnCount ?? 1) - 1);
   const clampedRanges = (selection.ranges ?? []).map((range) => makeRect(
@@ -132,6 +133,7 @@ export function repairSelectionForDocument(selection, doc, { preferVisible = tru
     selection.ranges = [makeRect(fallback.row, fallback.column, fallback.row, fallback.column)];
     selection.focus = fallback;
     selection.anchor = fallback;
+    selection.selectionKind = "cell";
     return;
   }
   selection.ranges = visibleRanges;
@@ -140,6 +142,18 @@ export function repairSelectionForDocument(selection, doc, { preferVisible = tru
   selection.focus = pointInRanges(selection.ranges, focus) && isVisiblePoint(focus, doc, preferVisible) ? focus : fallback;
   const anchor = normalizePoint(selection.anchor, rowMax, columnMax);
   selection.anchor = pointInRanges(selection.ranges, anchor) && isVisiblePoint(anchor, doc, preferVisible) ? anchor : selection.focus;
+  selection.selectionKind = selectionKindForRanges(selection.ranges, rowMax, columnMax, previousKind);
+}
+
+function selectionKindForRanges(ranges, rowMax, columnMax, previousKind) {
+  if (!ranges?.length) return "cell";
+  if (previousKind === "all" && ranges.length === 1) {
+    const range = ranges[0];
+    if (range.top === 0 && range.left === 0 && range.bottom >= rowMax && range.right >= columnMax) return "all";
+  }
+  if (previousKind === "row" && ranges.every((range) => range.left === 0 && range.right >= columnMax)) return "row";
+  if (previousKind === "column" && ranges.every((range) => range.top === 0 && range.bottom >= rowMax)) return "column";
+  return "cell";
 }
 
 function makeRect(rowA, columnA, rowB, columnB) {

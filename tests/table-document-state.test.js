@@ -21,6 +21,7 @@ import {
   addColumnsCommand,
   addRowsCommand,
   cloneRowsCommand,
+  commandAffectsContent,
   copyRange,
   copyRanges,
   deleteColumnsCommand,
@@ -420,6 +421,7 @@ test("selection repair avoids deleted or hidden focus targets", () => {
   deleteRowsCommand(doc, 3, 1).redo(doc);
   repairSelectionForDocument(selection, doc);
   assert.deepEqual(selection.focus, { row: 1, column: 0 });
+  assert.equal(selection.selectionKind, "cell");
   assertVisibleSelection(selection, doc);
 });
 
@@ -432,6 +434,7 @@ test("selection repair collapses hidden-only row selections to a visible cell", 
   assert.deepEqual(selection.focus, { row: 0, column: 0 });
   assert.deepEqual(selection.anchor, { row: 0, column: 0 });
   assert.deepEqual(selection.ranges, [{ top: 0, left: 0, bottom: 0, right: 0 }]);
+  assert.equal(selection.selectionKind, "cell");
   assertVisibleSelection(selection, doc);
 });
 
@@ -444,7 +447,26 @@ test("selection repair collapses hidden-only column selections to a visible cell
   assert.deepEqual(selection.focus, { row: 1, column: 0 });
   assert.deepEqual(selection.anchor, { row: 1, column: 0 });
   assert.deepEqual(selection.ranges, [{ top: 1, left: 0, bottom: 1, right: 0 }]);
+  assert.equal(selection.selectionKind, "cell");
   assertVisibleSelection(selection, doc);
+});
+
+test("selection repair derives row column and all kind from the repaired ranges", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4");
+  const rowSelection = new SelectionModel();
+  rowSelection.setRow(1, doc.columnCount);
+  repairSelectionForDocument(rowSelection, doc);
+  assert.equal(rowSelection.selectionKind, "row");
+
+  const columnSelection = new SelectionModel();
+  columnSelection.setColumn(1, doc.rowCount);
+  repairSelectionForDocument(columnSelection, doc);
+  assert.equal(columnSelection.selectionKind, "column");
+
+  const allSelection = new SelectionModel();
+  allSelection.selectAll(doc.rowCount, doc.columnCount);
+  repairSelectionForDocument(allSelection, doc);
+  assert.equal(allSelection.selectionKind, "all");
 });
 
 test("selection repair keeps focus inside selection after a selected cell is deleted", () => {
@@ -456,6 +478,7 @@ test("selection repair keeps focus inside selection after a selected cell is del
   assert.deepEqual(selection.focus, { row: 1, column: 0 });
   assert.deepEqual(selection.anchor, { row: 1, column: 0 });
   assert.equal(selection.contains(selection.focus.row, selection.focus.column), true);
+  assert.equal(selection.selectionKind, "cell");
 });
 
 test("selection repair collapses a range when all cells become hidden", () => {
@@ -467,6 +490,7 @@ test("selection repair collapses a range when all cells become hidden", () => {
   assert.deepEqual(selection.focus, { row: 0, column: 1 });
   assert.deepEqual(selection.anchor, { row: 0, column: 1 });
   assert.deepEqual(selection.ranges, [{ top: 0, left: 1, bottom: 0, right: 1 }]);
+  assert.equal(selection.selectionKind, "cell");
   assertVisibleSelection(selection, doc);
 });
 
@@ -479,7 +503,19 @@ test("selection repair drops hidden-only ranges from mixed selections", () => {
   repairSelectionForDocument(selection, doc);
   assert.deepEqual(selection.focus, { row: 1, column: 0 });
   assert.deepEqual(selection.ranges, [{ top: 1, left: 0, bottom: 1, right: 0 }]);
+  assert.equal(selection.selectionKind, "cell");
   assertVisibleSelection(selection, doc);
+});
+
+test("view-only table commands are undoable without content sync metadata", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
+  assert.equal(commandAffectsContent(hiddenRowsCommand([1], true)), false);
+  assert.equal(commandAffectsContent(hiddenColumnsCommand([1], true)), false);
+  assert.equal(commandAffectsContent(resizeColumnCommand(1, 120, 180)), false);
+  assert.equal(commandAffectsContent(resizeRowCommand(1, 26, 40)), false);
+  assert.equal(commandAffectsContent(pasteTextCommand(doc, { row: 1, column: 0 }, "edited")), true);
+  assert.equal(commandAffectsContent(deleteRowsCommand(doc, 1, 1)), true);
+  assert.equal(commandAffectsContent(deleteColumnsCommand(doc, 1, 1)), true);
 });
 
 test("manual column width survives table shape refresh", () => {
