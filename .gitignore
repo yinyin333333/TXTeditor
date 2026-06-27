@@ -29,6 +29,7 @@ temp/
 
 # generated fixtures
 fixtures/generated/
+fixtures/d2_*.tsv
 fixtures/*200k*.tsv
 fixtures/*20k*.tsv
 

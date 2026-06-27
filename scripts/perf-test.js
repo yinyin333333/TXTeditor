@@ -5,11 +5,12 @@ import { performance } from "node:perf_hooks";
 import { TableDocument } from "../src/core/table-model.js";
 import { findInTable } from "../src/core/search.js";
 import { makeCellCommand, UndoManager } from "../src/core/undo.js";
+import { fixtureNameForSize, fixturePathForSize, fixtureSizeLabel } from "./fixture-names.mjs";
 
 const size = Number(process.argv[2] ?? 20000);
-const sizeLabel = size % 1000 === 0 ? `${size / 1000}k` : String(size);
-const fixtureName = `d2_${sizeLabel}.tsv`;
-const fixture = join(process.cwd(), "fixtures", fixtureName);
+const sizeLabel = fixtureSizeLabel(size);
+const fixtureName = fixtureNameForSize(size);
+const fixture = fixturePathForSize(size);
 if (!existsSync(fixture)) {
   const result = spawnSync(process.execPath, [join(process.cwd(), "scripts", "generate-fixture.js"), String(size)], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status ?? 1);

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { fixturePathForSize } from "./fixture-names.mjs";
 
 const sizeArg = Number(process.argv[2] ?? 0);
 const sizes = sizeArg ? [sizeArg] : [20000, 200000];
@@ -7,7 +8,7 @@ const sizes = sizeArg ? [sizeArg] : [20000, 200000];
 const headers = ["id", "code", "name", "level", "rarity", "cost", "enabled", "eol"];
 
 for (const size of sizes) {
-  const out = join(process.cwd(), "fixtures", `d2_${size / 1000}k.tsv`);
+  const out = fixturePathForSize(size);
   mkdirSync(dirname(out), { recursive: true });
   const lines = [headers.join("\t")];
   for (let i = 1; i <= size; i++) {

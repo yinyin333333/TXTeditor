@@ -18,7 +18,7 @@ export function buildWeb(root = process.cwd()) {
 export function shouldCopyWebAsset(source, entryRoot, entryName = "") {
   if (entryName !== "fixtures") return true;
   const rel = relative(entryRoot, source).replace(/\\/g, "/");
-  return rel === "" || (rel !== "generated" && !rel.startsWith("generated/") && !/^d2_\d+k\.tsv$/i.test(rel));
+  return rel === "" || (rel !== "generated" && !rel.startsWith("generated/") && !/^d2_(?:\d+k|\d+)\.tsv$/i.test(rel));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
