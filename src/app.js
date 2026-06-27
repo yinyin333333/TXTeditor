@@ -372,7 +372,7 @@ const documentController = createDocumentController({
   activeDoc,
   applyFreezeToDoc,
   renderChrome,
-  showError,
+  showError, showToast,
   reportWindowCloseFailure,
   lspOpenDoc,
   reportLspOpenFailure,

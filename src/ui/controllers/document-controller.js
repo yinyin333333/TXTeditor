@@ -33,6 +33,7 @@ export function createDocumentController({
   applyFreezeToDoc,
   renderChrome,
   showError,
+  showToast = () => {},
   reportWindowCloseFailure,
   lspOpenDoc,
   reportLspOpenFailure,
@@ -172,6 +173,7 @@ export function createDocumentController({
       const workspace = await openWorkspaceNative();
       if (!workspace) return;
       state.workspace = workspace;
+      if (workspace.warning) showToast(workspace.warning);
       resetLegacyWorkspaceIndex();
       if (isVectorLintEngine()) lspStartWorkspace(workspace.path).catch(showError);
       else {

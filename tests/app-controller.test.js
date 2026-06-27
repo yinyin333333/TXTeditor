@@ -456,6 +456,83 @@ test("browser save encodes before opening writable streams", async () => {
   assert.match(errors[0], /cannot be saved as Windows-1252/);
 });
 
+test("open folder surfaces workspace scan warnings without failing the open", async () => {
+  const originalWindow = globalThis.window;
+  const calls = [];
+  const toasts = [];
+  const state = {
+    docs: [],
+    active: -1,
+    workspace: null,
+    lint: { engine: "legacy" }
+  };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "open_folder_dialog") return "E:\\Workspace";
+          if (command === "list_workspace_files") {
+            return {
+              path: "E:\\Workspace",
+              warning: "Workspace scan stopped after 20,000 files.",
+              files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }]
+            };
+          }
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      }
+    }
+  };
+  const controller = createDocumentController({
+    state,
+    els: { closeDialogText: {}, closeDialog: { classList: { add() {}, remove() {} } } },
+    grid: { draw() {}, setDocument() {} },
+    emptyDoc: TableDocument.fromText("Empty", ""),
+    activeDoc: () => state.docs[state.active] ?? TableDocument.fromText("Empty", ""),
+    applyFreezeToDoc() {},
+    renderChrome: () => calls.push(["render"]),
+    showError(error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    },
+    showToast: (message) => toasts.push(message),
+    reportWindowCloseFailure() {},
+    lspOpenDoc() {},
+    reportLspOpenFailure() {},
+    lspCloseDoc() {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace() {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex: () => calls.push(["reset-workspace-index"]),
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull: (reason, delay) => calls.push(["schedule-legacy", reason, delay]),
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {},
+    commitActiveCellEditor() {}
+  });
+
+  try {
+    await controller.openFolder();
+    assert.deepEqual(toasts, ["Workspace scan stopped after 20,000 files."]);
+    assert.equal(state.workspace.path, "E:\\Workspace");
+    assert.equal(state.workspace.files.length, 1);
+    assert.deepEqual(calls, [
+      ["open_folder_dialog", undefined],
+      ["list_workspace_files", { path: "E:\\Workspace" }],
+      ["reset-workspace-index"],
+      ["schedule-legacy", "workspace-opened", 0],
+      ["render"]
+    ]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("browser save aborts writable streams after write failures", async () => {
   const calls = [];
   const doc = TableDocument.fromText("items.txt", "id\n1", {
