@@ -1,12 +1,16 @@
 import { isTauriRuntime, tauriApi } from "./tauri-api.js";
 import { applySavedTextPayload, documentOpenResultFromNativeRead } from "./file-payloads.js";
-import { decodeBuffer } from "./text-codec.js";
+import { decodeBuffer, encodeText } from "./text-codec.js";
 import { readNativeTextFiles } from "./native-read.js";
 
 export async function readFileAsDocument(file, DocumentType) {
   const buffer = await file.arrayBuffer();
   const { text, encoding } = decodeBuffer(buffer);
-  return DocumentType.fromText(file.name, text, { encoding, path: file.name });
+  return DocumentType.fromText(file.name, text, {
+    encoding,
+    path: "",
+    fileKey: `browser:${browserFileId(file)}`
+  });
 }
 
 export async function openFilesNative(DocumentType) {
@@ -44,7 +48,8 @@ export async function saveDocumentNative(doc, saveAs = false) {
   }
   const payload = await api.invoke("write_text_file_safe", {
     path: target,
-    text: doc.toText()
+    text: doc.toText(),
+    encoding: doc.encoding
   });
   applySavedTextPayload(doc, payload);
   return true;
@@ -56,7 +61,8 @@ export async function saveTextNative(defaultName, text) {
   if (!target) return false;
   await api.invoke("write_text_file_safe", {
     path: target,
-    text
+    text,
+    encoding: "utf-8"
   });
   return true;
 }
@@ -74,4 +80,20 @@ export async function listenForNativeDrops(callback) {
 
 function perfNow() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+let browserFileCounter = 0;
+
+function browserFileId(file) {
+  browserFileCounter += 1;
+  return [
+    browserFileCounter,
+    String(file?.name ?? "Untitled.txt"),
+    Number(file?.size ?? 0),
+    Number(file?.lastModified ?? 0)
+  ].join(":");
+}
+
+export function encodedDocumentBytes(doc) {
+  return encodeText(doc.toText(), doc.encoding);
 }

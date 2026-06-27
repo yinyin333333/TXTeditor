@@ -20,6 +20,7 @@ export function createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  commitActiveCellEditor,
   recordUiPerf,
   perfNow,
   showError,
@@ -101,6 +102,7 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
+        commitActiveCellEditor?.();
         state.active = Number(button.dataset.tab);
         state.selection.set(0, 0);
         applyFreezeToDoc(activeDoc());

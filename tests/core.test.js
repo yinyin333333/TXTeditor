@@ -3,7 +3,8 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
-import { clearRangesCommand } from "../src/core/operations.js";
+import { clearRangesCommand, clipboardRows } from "../src/core/operations.js";
+import { decodeBuffer, encodeText } from "../src/core/platform/text-codec.js";
 import {
   CanvasGrid,
   gridColor
@@ -48,6 +49,29 @@ test("multi-range clear applies only to selected cells", () => {
   assert.equal(doc.getCell(0, 0), "");
   assert.equal(doc.getCell(2, 2), "");
   assert.equal(doc.getCell(1, 1), "2");
+});
+
+test("paste parsing drops one terminal clipboard newline only", () => {
+  assert.deepEqual(clipboardRows("X\n"), [["X"]]);
+  assert.deepEqual(clipboardRows("X\r\n"), [["X"]]);
+  assert.deepEqual(clipboardRows("X\n\nY"), [["X"], [""], ["Y"]]);
+  assert.deepEqual(clipboardRows("X\n\n"), [["X"], [""]]);
+});
+
+test("browser text codec preserves Windows-1252 and UTF-8 BOM semantics", () => {
+  const legacy = new Uint8Array([0x93, 0x80, 0x85, 0x97]);
+  assert.deepEqual(decodeBuffer(legacy).encoding, "windows-1252");
+  assert.equal(decodeBuffer(legacy).text, "\u201c\u20ac\u2026\u2014");
+  assert.deepEqual([...encodeText("\u201c\u20ac\u2026\u2014", "windows-1252")], [0x93, 0x80, 0x85, 0x97]);
+  assert.throws(() => encodeText("\u{1F642}", "windows-1252"), /Windows-1252/);
+  assert.deepEqual([...encodeText("id", "utf-8-bom")], [0xEF, 0xBB, 0xBF, 0x69, 0x64]);
+});
+
+test("UTF-8 BOM is metadata and not part of the first table cell", () => {
+  const doc = TableDocument.fromText("bom.txt", "\uFEFFid\tname\n1\tcap", { encoding: "utf-8-bom" });
+  assert.equal(doc.getCell(0, 0), "id");
+  assert.equal(doc.encoding, "utf-8-bom");
+  assert.equal(doc.toText(), "id\tname\n1\tcap");
 });
 
 test("explicit auto-fit can still expand for long body content", () => {

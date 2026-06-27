@@ -1,6 +1,7 @@
 export { isTauriRuntime } from "./platform/tauri-api.js";
 export { decodeBuffer, encodeText } from "./platform/text-codec.js";
 export {
+  encodedDocumentBytes,
   listenForNativeDrops,
   openFilesNative,
   openNativePaths,
@@ -29,4 +30,4 @@ export {
   lspUpdateFile,
   lspUpdateFileIncremental
 } from "./platform/lsp-client.js";
-export { downloadText } from "./platform/download.js";
+export { downloadBytes, downloadText } from "./platform/download.js";

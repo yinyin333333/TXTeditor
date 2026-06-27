@@ -1,11 +1,12 @@
 const tableFileStates = new WeakMap();
 
-const FILE_STATE_FIELDS = ["name", "path", "handle", "lineEnding", "finalNewline", "encoding", "dirty"];
+const FILE_STATE_FIELDS = ["name", "path", "fileKey", "handle", "lineEnding", "finalNewline", "encoding", "dirty"];
 
 export function resetTableFileState(doc, name = "Untitled.txt", meta = {}) {
   const state = {
     name,
     path: meta.path ?? "",
+    fileKey: meta.fileKey ?? "",
     handle: meta.handle ?? null,
     lineEnding: meta.lineEnding ?? "\n",
     finalNewline: meta.finalNewline ?? false,

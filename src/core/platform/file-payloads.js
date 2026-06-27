@@ -11,6 +11,7 @@ export function documentFromTextPayload(payload, DocumentType) {
   return DocumentType.fromText(payload.name, payload.text, {
     path: payload.path,
     encoding: payload.encoding,
+    fileKey: payload.fileKey,
     dirty: false
   });
 }
@@ -41,6 +42,7 @@ export function documentOpenResultFromNativeRead(result, DocumentType, { now = d
 export function applySavedTextPayload(doc, payload) {
   doc.path = payload.path;
   doc.name = payload.name;
+  if (payload.encoding) doc.encoding = payload.encoding;
   doc.dirty = false;
   return doc;
 }

@@ -118,11 +118,13 @@ export class TableDocument {
   }
 
   static fromText(name, text, meta = {}) {
-    const crlf = (text.match(/\r\n/g) ?? []).length;
-    const lf = (text.match(/(?<!\r)\n/g) ?? []).length;
+    const sourceText = String(text ?? "");
+    const content = sourceText.startsWith("\uFEFF") ? sourceText.slice(1) : sourceText;
+    const crlf = (content.match(/\r\n/g) ?? []).length;
+    const lf = (content.match(/(?<!\r)\n/g) ?? []).length;
     const lineEnding = crlf >= lf && crlf > 0 ? "\r\n" : "\n";
-    const finalNewline = text.endsWith("\n") || text.endsWith("\r");
-    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const finalNewline = content.endsWith("\n") || content.endsWith("\r");
+    const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const lines = normalized.split("\n");
     if (finalNewline) lines.pop();
     const rows = lines.map((line) => line.split("\t"));

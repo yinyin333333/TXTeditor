@@ -27,6 +27,7 @@ import {
   documentOpenPlan,
   unsavedDocuments
 } from "../src/ui/document-lifecycle-policy.js";
+import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { syncDockChildren } from "../src/ui/dock-sync.js";
 import {
   globalShortcutAction,
@@ -195,6 +196,130 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 2, documentCount: 3 }), 0);
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 0, documentCount: 1 }), -1);
   assert.equal(closeDialogMessage(docs[1]), "skills.txt has unsaved changes.");
+});
+
+test("close tab commits active editor before unsaved prompt decisions", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\n1", { dirty: false });
+  const classState = new Set(["hidden"]);
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "legacy" }
+  };
+  const gridCalls = [];
+  const controller = createDocumentController({
+    state,
+    els: {
+      closeDialogText: { textContent: "" },
+      closeDialog: {
+        classList: {
+          add: (name) => classState.add(name),
+          remove: (name) => classState.delete(name)
+        }
+      }
+    },
+    grid: {
+      setDocument: (target) => gridCalls.push(["setDocument", target.name])
+    },
+    emptyDoc: TableDocument.fromText("Empty", ""),
+    activeDoc: () => state.docs[state.active] ?? TableDocument.fromText("Empty", ""),
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError(error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    },
+    reportWindowCloseFailure() {},
+    lspOpenDoc() {},
+    reportLspOpenFailure() {},
+    lspCloseDoc() {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace() {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {},
+    commitActiveCellEditor() {
+      doc.setCell(1, 0, "edited");
+    }
+  });
+
+  const closePromise = controller.closeTab(0);
+  await Promise.resolve();
+  assert.equal(doc.dirty, true);
+  assert.equal(classState.has("hidden"), false);
+  controller.handleCloseDialogClick({
+    target: {
+      closest: () => ({ dataset: { closeChoice: "cancel" } })
+    }
+  });
+  await closePromise;
+
+  assert.equal(state.docs.length, 1);
+  assert.equal(doc.getCell(1, 0), "edited");
+  assert.deepEqual(gridCalls, []);
+});
+
+test("save file commits active editor before serializing document text", async () => {
+  const writes = [];
+  const doc = TableDocument.fromText("items.txt", "id\n1", {
+    dirty: false,
+    handle: {
+      async createWritable() {
+        return {
+          async write(bytes) {
+            writes.push(new TextDecoder().decode(bytes));
+          },
+          async close() {}
+        };
+      }
+    }
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "legacy" }
+  };
+  const controller = createDocumentController({
+    state,
+    els: { closeDialogText: {}, closeDialog: { classList: { add() {}, remove() {} } } },
+    grid: { draw() {}, setDocument() {} },
+    emptyDoc: TableDocument.fromText("Empty", ""),
+    activeDoc: () => state.docs[state.active] ?? TableDocument.fromText("Empty", ""),
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError(error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    },
+    reportWindowCloseFailure() {},
+    lspOpenDoc() {},
+    reportLspOpenFailure() {},
+    lspCloseDoc() {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace() {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {},
+    commitActiveCellEditor() {
+      doc.setCell(1, 0, "edited");
+    }
+  });
+
+  assert.equal(await controller.saveFile(), true);
+  assert.deepEqual(writes, ["id\nedited"]);
+  assert.equal(doc.dirty, false);
 });
 
 test("context menu command item registries preserve expected command groups", () => {

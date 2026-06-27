@@ -2,13 +2,14 @@ import { TableDocument } from "../../core/table-model.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
-  downloadText,
   isTauriRuntime,
   openFilesNative,
   openNativePaths,
   openWorkspaceNative,
   readFileAsDocument,
-  saveDocumentNative
+  saveDocumentNative,
+  encodedDocumentBytes,
+  downloadBytes
 } from "../../core/io.js";
 import {
   LINT_ENGINE_VECTOR,
@@ -46,7 +47,8 @@ export function createDocumentController({
   isVectorLintEngine,
   isLegacyLintEngine,
   updateGridDiagnostics,
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile,
+  commitActiveCellEditor
 }) {
   let pendingCloseResolve = null;
 
@@ -59,6 +61,7 @@ export function createDocumentController({
     const tauri = window.__TAURI__;
     if (!tauri?.event?.listen) return;
     await tauri.event.listen("app-close-requested", async () => {
+      commitActiveCellEditor?.();
       const unsaved = unsavedDocuments(state.docs);
       if (!unsaved.length) {
         closeWindow().catch((error) => reportWindowCloseFailure(error, "app-close-requested"));
@@ -182,6 +185,7 @@ export function createDocumentController({
 
   async function saveFile() {
     try {
+      commitActiveCellEditor?.();
       const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
@@ -196,7 +200,7 @@ export function createDocumentController({
       }
       if (doc.handle?.createWritable) {
         const writable = await doc.handle.createWritable();
-        await writable.write(doc.toText());
+        await writable.write(encodedDocumentBytes(doc));
         await writable.close();
         doc.dirty = false;
         renderChrome();
@@ -211,6 +215,7 @@ export function createDocumentController({
 
   async function saveAs() {
     try {
+      commitActiveCellEditor?.();
       const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
@@ -225,7 +230,7 @@ export function createDocumentController({
       } else if ("showSaveFilePicker" in window) {
         const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
         const writable = await handle.createWritable();
-        await writable.write(doc.toText());
+        await writable.write(encodedDocumentBytes(doc));
         await writable.close();
         doc.handle = handle;
         doc.name = handle.name ?? doc.name;
@@ -233,7 +238,7 @@ export function createDocumentController({
         renderChrome();
         return true;
       } else {
-        downloadText(doc.name, doc.toText());
+        downloadBytes(doc.name, encodedDocumentBytes(doc), "text/plain");
         doc.dirty = false;
         renderChrome();
         return true;
@@ -253,6 +258,7 @@ export function createDocumentController({
 
   async function closeTab(index) {
     if (index < 0 || index >= state.docs.length) return;
+    commitActiveCellEditor?.();
     const doc = state.docs[index];
     if (doc.dirty) {
       const choice = await askCloseChoice(doc);

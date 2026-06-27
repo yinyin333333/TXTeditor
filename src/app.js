@@ -404,7 +404,8 @@ const documentController = createDocumentController({
   isVectorLintEngine,
   isLegacyLintEngine,
   updateGridDiagnostics,
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile,
+  commitActiveCellEditor: () => grid.editing && grid.commitEdit()
 });
 const commandSurfaceController = createCommandSurfaceController({
   state,
@@ -446,6 +447,7 @@ shellController = createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  commitActiveCellEditor: () => grid.editing && grid.commitEdit(),
   recordUiPerf,
   perfNow,
   showError,
@@ -466,9 +468,7 @@ function activeDoc() {
   return state.docs[state.active] ?? EMPTY_DOC;
 }
 
-function hasOpenDocument() {
-  return state.docs.length > 0 && state.active >= 0;
-}
+function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
 
 function activeUndo() {
   return undoManagerForDocument(activeDoc());
@@ -701,16 +701,19 @@ function runCommand(id) {
 }
 
 async function copySelection() {
-  if (!hasOpenDocument()) return;
+  if (!hasOpenDocument()) return false;
   try {
     await writeClipboardText(copyRanges(activeDoc(), state.selection.ranges));
+    return true;
   } catch (error) {
     showError(`Clipboard copy failed: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 
 async function cutSelection() {
-  await copySelection();
+  const copied = await copySelection();
+  if (!copied) return;
   execute(clearRangesCommand(activeDoc(), state.selection.ranges, "Cut"));
 }
 
