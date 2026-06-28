@@ -197,6 +197,9 @@ export function createLspController({
 }) {
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
+  const pendingDiagnosticPayloads = new Map();
+  let diagnosticsFlushScheduled = false;
+  let diagnosticsFlushPromise = null;
   const hoverController = createLspHoverController({
     state,
     grid,
@@ -266,7 +269,12 @@ export function createLspController({
       state.lsp.started = true;
       state.lsp.openFileCount = 0;
       const docsWithPaths = state.docs.filter((d) => docToUri(d));
-      for (const doc of docsWithPaths) {
+      const active = activeDoc();
+      const orderedDocs = [
+        ...docsWithPaths.filter((d) => d === active),
+        ...docsWithPaths.filter((d) => d !== active)
+      ];
+      for (const doc of orderedDocs) {
         resetLspDocumentState(doc, { version: 1 });
         await openDoc(doc).catch((error) => reportOpenFailure(doc, error, "workspace-start"));
       }
@@ -469,29 +477,81 @@ export function createLspController({
     });
   }
 
-  async function handleDiagnosticsChanged(uri) {
+  function scheduleDiagnosticsFlush() {
+    if (diagnosticsFlushScheduled) return diagnosticsFlushPromise;
+    diagnosticsFlushScheduled = true;
+    diagnosticsFlushPromise = new Promise((resolve) => {
+      const run = () => {
+        flushDiagnostics()
+          .catch(showError)
+          .finally(() => {
+            diagnosticsFlushPromise = null;
+            resolve();
+          });
+      };
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(run);
+      } else if (typeof queueMicrotask === "function") {
+        queueMicrotask(run);
+      } else {
+        Promise.resolve().then(run);
+      }
+    });
+    return diagnosticsFlushPromise;
+  }
+
+  async function handleDiagnosticsChanged(payload) {
+    const uri = diagnosticsPayloadUri(payload);
     if (!state.lint.enabled || !isVectorLintEngine()) {
       recordLintEngineEvent("vector-diagnostics-ignored", { uri });
       return;
     }
+    if (!uri) return;
+    const fileKey = uriToFileKey(uri);
+    pendingDiagnosticPayloads.set(fileKey, { uri, payload });
+    return scheduleDiagnosticsFlush();
+  }
+
+  function diagnosticsPayloadUri(payload) {
+    return typeof payload === "string" ? payload : payload?.uri;
+  }
+
+  async function flushDiagnostics() {
+    diagnosticsFlushScheduled = false;
+    const activeUri = docToUri(activeDoc());
+    const activeKey = activeUri ? uriToFileKey(activeUri) : null;
+    const entries = [...pendingDiagnosticPayloads.entries()];
+    pendingDiagnosticPayloads.clear();
+    entries.sort(([a], [b]) => (a === activeKey ? -1 : b === activeKey ? 1 : 0));
+
+    for (const [, { payload }] of entries) {
+      await applyDiagnosticsPayload(payload);
+    }
+
+    if (entries.length > 0) {
+      recordLspTraffic(activeUri, "diagnostics_render_batch", {
+        batchSize: entries.length,
+        activeFirst: activeKey ? entries[0]?.[0] === activeKey : false
+      });
+      updateGridDiagnostics();
+      renderChrome();
+    }
+  }
+
+  async function applyDiagnosticsPayload(payload) {
+    const uri = diagnosticsPayloadUri(payload);
+    if (!uri) return;
     recordLspTraffic(uri, "diagnostics_changed");
-    recordLspTraffic(uri, "lsp_get_diagnostics");
     const fileKey = uriToFileKey(uri);
     const doc = state.docs.find((d) => uriToFileKey(docToUri(d)) === fileKey);
     const fileName = doc?.name ?? fileNameFromUri(uri);
     const filePath = doc?.path ?? pathFromUri(uri);
-    const rawDiags = await lspGetDiagnostics(uri).catch((error) => {
-      reportLspRequestFailure({
-        uri,
-        operation: "get diagnostics",
-        eventKind: "lsp_get_diagnostics_failed",
-        fileName,
-        error,
-        context: "diagnostics-changed",
-        recordLspTraffic,
-        appendLspLog
-      });
-      return [];
+    const rawDiags = Array.isArray(payload?.diagnostics)
+      ? payload.diagnostics
+      : await fetchDiagnosticsForPayload(uri, fileName);
+    recordLspTraffic(uri, "diagnostics_payload_applied", {
+      diagnosticCount: rawDiags.length,
+      directPayload: Array.isArray(payload?.diagnostics)
     });
     recordLspReadiness(uri, "firstDiagnosticsReceived", { fileName, activeFile: activeDoc()?.name ?? "", diagnosticCount: rawDiags.length });
 
@@ -509,13 +569,29 @@ export function createLspController({
       ...displayDiags
     ]);
 
-    updateGridDiagnostics();
-    renderChrome();
     if (doc) {
       lspDocumentState(doc).diagnosticsReady = true;
       markDocHoverReady(doc, uri, "diagnostics-ready");
     }
     if (doc === activeDoc()) hoverController.scheduleHoverPrewarm("diagnostics-ready");
+  }
+
+  async function fetchDiagnosticsForPayload(uri, fileName) {
+    recordLspTraffic(uri, "diagnostics_payload_fallback");
+    recordLspTraffic(uri, "lsp_get_diagnostics");
+    return lspGetDiagnostics(uri).catch((error) => {
+      reportLspRequestFailure({
+        uri,
+        operation: "get diagnostics",
+        eventKind: "lsp_get_diagnostics_failed",
+        fileName,
+        error,
+        context: "diagnostics-changed",
+        recordLspTraffic,
+        appendLspLog
+      });
+      return [];
+    });
   }
 
   function computeCharOffset(doc, row, col) {

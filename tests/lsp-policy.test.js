@@ -456,6 +456,143 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
   }
 });
 
+test("TXTeditor opens the active LSP document before inactive tabs", async () => {
+  const originalWindow = globalThis.window;
+  const docs = [
+    TableDocument.fromText("a.txt", "id\n1", { path: "E:\\Data\\a.txt" }),
+    TableDocument.fromText("b.txt", "id\n2", { path: "E:\\Data\\b.txt" }),
+    TableDocument.fromText("c.txt", "id\n3", { path: "E:\\Data\\c.txt" })
+  ];
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+  const state = {
+    docs,
+    active: 2,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, version: 1, status: "", diagnostics: [] },
+    lsp: { started: false, openFileCount: 0 },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    contextHit: null,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        setLspHover() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 0,
+      showToast: () => {},
+      showError: () => {},
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics: () => {},
+      renderChrome: () => {},
+      addDocument: async () => {},
+      applyFreezeToDoc: () => {},
+      updateActiveProblemHighlight: () => {},
+      lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.startWorkspace("E:\\Data");
+    assert.deepEqual(
+      calls.filter(([command]) => command === "lsp_open_file").map(([, args]) => args.uri),
+      [docToUri(docs[2]), docToUri(docs[0]), docToUri(docs[1])]
+    );
+  } finally {
+    for (const doc of docs) resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("TXTeditor batches direct diagnostic payloads and applies the active file first", async () => {
+  const docs = [
+    TableDocument.fromText("inactive.txt", "id\tvalue\n1\tbad", { path: "E:\\Data\\inactive.txt" }),
+    TableDocument.fromText("active.txt", "id\tvalue\n2\tbad", { path: "E:\\Data\\active.txt" })
+  ];
+  const calls = [];
+  const state = {
+    docs,
+    active: 1,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, version: 1, status: "", diagnostics: [] },
+    lsp: { started: true, openFileCount: 2 },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false,
+    contextHit: null,
+    selection: { focus: { row: 0, column: 0 }, set() {} }
+  };
+
+  const controller = createLspController({
+    state,
+    els: { logList: null, host: { focus() {} } },
+    grid: {
+      clearLspHovers() {},
+      setLspHover() {},
+      visibleRowIndexes: () => [],
+      visibleColumnIndexes: () => [],
+      setDocument() {},
+      scrollCellIntoView() {},
+      draw() {}
+    },
+    activeDoc: () => state.docs[state.active],
+    isVectorLintEngine: () => true,
+    effectiveVectorLspHoverEnabled: () => false,
+    recordLintEngineEvent: () => {},
+    perfNow: () => 0,
+    showToast: () => {},
+    showError: (error) => calls.push(["show-error", String(error)]),
+    setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+    updateGridDiagnostics: () => calls.push(["update-grid"]),
+    renderChrome: () => calls.push(["render"]),
+    addDocument: async () => {},
+    applyFreezeToDoc: () => {},
+    updateActiveProblemHighlight: () => {},
+    lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
+  });
+
+  await Promise.all([
+    controller.handleDiagnosticsChanged({
+      uri: docToUri(docs[0]),
+      diagnostics: [{ row: 1, col: 1, severity: "warning", message: "inactive" }]
+    }),
+    controller.handleDiagnosticsChanged({
+      uri: docToUri(docs[1]),
+      diagnostics: [{ row: 1, col: 1, severity: "error", message: "active" }]
+    })
+  ]);
+
+  assert.deepEqual(calls, [["update-grid"], ["render"]]);
+  assert.equal(state.lint.diagnostics.length, 2);
+  assert.equal(state.lint.diagnostics[0].fileKey, uriToFileKey(docToUri(docs[1])));
+  assert.equal(state.lint.diagnostics[0].message, "active");
+  assert.equal(state.lint.diagnostics[1].message, "inactive");
+
+  for (const doc of docs) resetLspDocumentState(doc);
+});
+
 test("Vector-LSP tooltip removes duplicate value titles only", () => {
   assert.deepEqual(
     normalizeVectorLspTooltip("StrClassOnly", "StrClassOnly\r\n\r\nLookup column used by string class filters."),

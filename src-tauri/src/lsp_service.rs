@@ -1,7 +1,7 @@
 use crate::config::AppConfigState;
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
-    strip_markdown_for_tooltip, uri_to_path, LspContentChange, LspDiagnostic,
+    strip_markdown_for_tooltip, LspContentChange, LspDiagnostic,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -23,6 +23,12 @@ struct LspProcess {
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Option<Value>, String>>>>,
     diagnostics: Mutex<HashMap<String, Vec<LspDiagnostic>>>,
     file_lines: Mutex<HashMap<String, Vec<String>>>,
+}
+
+#[derive(Serialize, Clone)]
+struct LspDiagnosticsChangedPayload {
+    uri: String,
+    diagnostics: Vec<LspDiagnostic>,
 }
 
 pub(crate) struct LspManager {
@@ -234,23 +240,18 @@ fn run_lsp_reader(
             .unwrap()
             .get(&uri)
             .cloned()
-            .unwrap_or_else(|| {
-                uri_to_path(&uri)
-                    .ok()
-                    .and_then(|path| std::fs::read_to_string(path).ok())
-                    .unwrap_or_default()
-                    .lines()
-                    .map(String::from)
-                    .collect()
-            });
+            .unwrap_or_default();
 
         let diagnostics = diagnostics_from_lsp_publish(&raw, &lines);
 
         proc.diagnostics
             .lock()
             .unwrap()
-            .insert(uri.clone(), diagnostics);
-        let _ = app.emit("lsp-diagnostics-changed", &uri);
+            .insert(uri.clone(), diagnostics.clone());
+        let _ = app.emit(
+            "lsp-diagnostics-changed",
+            LspDiagnosticsChangedPayload { uri, diagnostics },
+        );
     }
     drain_pending_requests(&proc.pending, "LSP reader stopped");
 }
@@ -822,8 +823,10 @@ mod tests {
     fn production_startup_hands_buffered_reader_to_lsp_reader() {
         let source = include_str!("lsp_service.rs");
         let forbidden_handoff = format!("{}{}", "run_lsp_reader(", "reader.into_inner()");
+        let forbidden_disk_read = format!("{}{}", "std::fs::", "read_to_string");
         assert!(source.contains("fn run_lsp_reader(\n    mut reader: BufReader<ChildStdout>,"));
         assert!(!source.contains(&forbidden_handoff));
+        assert!(!source.contains(&forbidden_disk_read));
     }
 
     #[test]

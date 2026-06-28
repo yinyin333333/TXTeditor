@@ -330,7 +330,10 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   };
   const listen = async (event, callback) => {
     calls.push(["listen", event]);
-    callback({ payload: { event } });
+    const payload = event === "lsp-diagnostics-changed"
+      ? { uri: "file:///items.txt", diagnostics: [{ row: 1, col: 2, message: "warn" }] }
+      : { event };
+    callback({ payload });
     return () => calls.push(["unlisten", event]);
   };
 
@@ -383,7 +386,10 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     unlistenDiagnostics();
     unlistenLog();
 
-    assert.deepEqual(diagnosticsEvents, [{ event: "lsp-diagnostics-changed" }]);
+    assert.deepEqual(diagnosticsEvents, [{
+      uri: "file:///items.txt",
+      diagnostics: [{ row: 1, col: 2, message: "warn" }]
+    }]);
     assert.deepEqual(logEvents, [{ event: "lsp-log" }]);
     assert.deepEqual(calls, [
       ["invoke", "get_config", undefined],
