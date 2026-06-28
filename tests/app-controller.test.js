@@ -3,9 +3,15 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
-import { findInTable } from "../src/core/search.js";
+import {
+  SEARCH_SCOPE_ALL,
+  SEARCH_SCOPE_COLUMN_TITLES,
+  SEARCH_SCOPE_ROW_TITLES,
+  findInTable
+} from "../src/core/search.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
+import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
   canRunCommandWithoutDocument,
   commandActionForId,
@@ -74,10 +80,14 @@ import {
 } from "../src/ui/problems-policy.js";
 import {
   initialSearchState,
+  searchScrollOptionsForScope,
   searchShouldIncludeStart,
+  searchTargetForResult,
   searchStateAfterFind,
-  searchStateAfterInput
+  searchStateAfterInput,
+  searchStatusText
 } from "../src/ui/search-policy.js";
+import { shouldCloseSettingsKey } from "../src/ui/controllers/settings-controller.js";
 import {
   createDefaultLintSettings,
   lintRuleGroupsForProfile,
@@ -123,6 +133,54 @@ test("search matching is case-insensitive only, without whitespace normalization
   assert.deepEqual(findInTable(doc, "warcry", { row: 2, column: 0 }), { row: 1, column: 0 });
   assert.deepEqual(findInTable(doc, "War Cry", { row: 0, column: 0 }), { row: 3, column: 0 });
   assert.deepEqual(findInTable(doc, "war cry", { row: 0, column: 0 }), { row: 3, column: 0 });
+});
+
+test("search can be limited to column titles", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tItemEffect\tmana\nbash\thit\t2\nzeal\thit\t3");
+  assert.deepEqual(
+    findInTable(doc, "itemeffect", { row: 1, column: 2 }, { scope: SEARCH_SCOPE_COLUMN_TITLES }),
+    { row: 0, column: 1 }
+  );
+  assert.equal(
+    findInTable(doc, "hit", { row: 0, column: 0 }, { scope: SEARCH_SCOPE_COLUMN_TITLES }),
+    null
+  );
+});
+
+test("column title search wraps by column", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tItemEffect\tmana\titemLevel\nbash\thit\t2\t1");
+  assert.deepEqual(
+    findInTable(doc, "item", { row: 0, column: 1 }, { scope: SEARCH_SCOPE_COLUMN_TITLES }),
+    { row: 0, column: 3 }
+  );
+  assert.deepEqual(
+    findInTable(doc, "item", { row: 0, column: 3 }, { scope: SEARCH_SCOPE_COLUMN_TITLES }),
+    { row: 0, column: 1 }
+  );
+});
+
+test("search can be limited to row titles", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tItemEffect\nbash\thit\nzeal\tswing");
+  assert.deepEqual(
+    findInTable(doc, "zeal", { row: 0, column: 1 }, { scope: SEARCH_SCOPE_ROW_TITLES }),
+    { row: 2, column: 0 }
+  );
+  assert.equal(
+    findInTable(doc, "swing", { row: 0, column: 0 }, { scope: SEARCH_SCOPE_ROW_TITLES }),
+    null
+  );
+});
+
+test("row title search wraps by row and remains case-insensitive", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tref\nBash\tone\nZeal\ttwo\nBarrage\tthree");
+  assert.deepEqual(
+    findInTable(doc, "ba", { row: 1, column: 1 }, { scope: SEARCH_SCOPE_ROW_TITLES }),
+    { row: 3, column: 0 }
+  );
+  assert.deepEqual(
+    findInTable(doc, "ba", { row: 3, column: 1 }, { scope: SEARCH_SCOPE_ROW_TITLES }),
+    { row: 1, column: 0 }
+  );
 });
 
 test("context menu source stays anchored when right-clicking inside a multi-cell selection", () => {
@@ -508,19 +566,99 @@ test("Find Next includes the current cell once when the query changes", () => {
   const focus = { row: 1, column: 0 };
   const query = "war cry";
   let searchState = initialSearchState();
-  let includeStart = searchShouldIncludeStart(query, searchState.lastQuery);
+  let includeStart = searchShouldIncludeStart(query, SEARCH_SCOPE_ALL, searchState.lastQuery, searchState.lastScope);
   assert.equal(includeStart, true);
   assert.deepEqual(findInTable(doc, query, focus, { includeStart }), focus);
 
-  searchState = searchStateAfterFind(query);
-  includeStart = searchShouldIncludeStart(query, searchState.lastQuery);
+  searchState = searchStateAfterFind(query, SEARCH_SCOPE_ALL);
+  includeStart = searchShouldIncludeStart(query, SEARCH_SCOPE_ALL, searchState.lastQuery, searchState.lastScope);
   assert.equal(includeStart, false);
   assert.deepEqual(findInTable(doc, query, focus, { includeStart }), { row: 2, column: 0 });
 
   searchState = searchStateAfterInput();
-  includeStart = searchShouldIncludeStart(query, searchState.lastQuery);
+  includeStart = searchShouldIncludeStart(query, SEARCH_SCOPE_ALL, searchState.lastQuery, searchState.lastScope);
   assert.equal(includeStart, true);
   assert.deepEqual(findInTable(doc, query, focus, { includeStart }), focus);
+});
+
+test("Find Next includes the current header when the search scope changes", () => {
+  assert.equal(searchShouldIncludeStart("abc", SEARCH_SCOPE_COLUMN_TITLES, "abc", SEARCH_SCOPE_ALL), true);
+  assert.equal(searchShouldIncludeStart("abc", SEARCH_SCOPE_COLUMN_TITLES, "abc", SEARCH_SCOPE_COLUMN_TITLES), false);
+});
+
+test("header search maps matches to the active row or column and preserves the other scroll axis", () => {
+  assert.deepEqual(
+    searchTargetForResult(SEARCH_SCOPE_COLUMN_TITLES, { row: 0, column: 7 }, { row: 300, column: 2 }),
+    { row: 300, column: 7 }
+  );
+  assert.deepEqual(
+    searchTargetForResult(SEARCH_SCOPE_ROW_TITLES, { row: 42, column: 0 }, { row: 300, column: 2 }),
+    { row: 42, column: 2 }
+  );
+  assert.deepEqual(searchScrollOptionsForScope(SEARCH_SCOPE_COLUMN_TITLES), { preserveScrollTop: true });
+  assert.deepEqual(searchScrollOptionsForScope(SEARCH_SCOPE_ROW_TITLES), { preserveScrollLeft: true });
+  assert.deepEqual(searchScrollOptionsForScope(SEARCH_SCOPE_ALL), {});
+  assert.equal(
+    searchStatusText(SEARCH_SCOPE_COLUMN_TITLES, { row: 0, column: 7 }, { row: 300, column: 7 }),
+    "Column C8 (header R1:C8)"
+  );
+});
+
+test("Find scope options submit the current search on Enter", () => {
+  const doc = TableDocument.fromText("skills.txt", "skill\tItemEffect\nbash\thit\nzeal\tswing");
+  const selection = new SelectionModel();
+  selection.set(0, 1);
+  const listeners = new Map();
+  const rowScopeInput = {
+    value: SEARCH_SCOPE_ROW_TITLES,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const state = {
+    search: initialSearchState(),
+    selection
+  };
+  const scrolls = [];
+  const els = {
+    host: { focus: () => {} },
+    searchInput: {
+      value: "zeal",
+      addEventListener: () => {}
+    },
+    searchPanel: {
+      classList: { add: () => {}, remove: () => {} },
+      querySelector: () => rowScopeInput,
+      querySelectorAll: () => [rowScopeInput],
+      addEventListener: () => {}
+    },
+    searchStatus: { textContent: "" }
+  };
+  const controller = createSearchController({
+    state,
+    els,
+    grid: {
+      scrollCellIntoView: (...args) => scrolls.push(args),
+      draw: () => {}
+    },
+    activeDoc: () => doc,
+    updateActiveProblemHighlight: () => {}
+  });
+  controller.wireEvents();
+
+  let prevented = false;
+  listeners.get("keydown")({
+    key: "Enter",
+    preventDefault: () => { prevented = true; }
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(selection.focus, { row: 2, column: 1 });
+  assert.deepEqual(scrolls, [[2, 1, { preserveScrollLeft: true }]]);
+  assert.equal(els.searchStatus.textContent, "Row R3 (title R3:C1)");
+});
+
+test("settings windows treat Escape as a close key only", () => {
+  assert.equal(shouldCloseSettingsKey("Escape"), true);
+  assert.equal(shouldCloseSettingsKey("Enter"), false);
 });
 
 test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths", () => {

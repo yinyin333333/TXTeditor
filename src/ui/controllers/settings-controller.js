@@ -25,6 +25,21 @@ import {
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
 
+export function shouldCloseSettingsKey(key) {
+  return key === "Escape";
+}
+
+function bindEscapeToClose(close) {
+  const onKeydown = (event) => {
+    if (!shouldCloseSettingsKey(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  };
+  document.addEventListener("keydown", onKeydown, true);
+  return () => document.removeEventListener("keydown", onKeydown, true);
+}
+
 export function createSettingsController({
   state,
   els,
@@ -258,10 +273,16 @@ export function createSettingsController({
     }
     backdrop.querySelector("[data-settings-reset-layout]")?.addEventListener("click", () => { resetDockLayout(); refresh(); });
 
+    let closed = false;
+    let unbindEscape = null;
     const close = () => {
+      if (closed) return;
+      closed = true;
+      unbindEscape?.();
       backdrop.remove();
       els.host.focus();
     };
+    unbindEscape = bindEscapeToClose(close);
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop || event.target.closest("[data-settings-close]")) close();
     });
@@ -374,7 +395,17 @@ export function createSettingsController({
     });
 
     return new Promise((resolve) => {
-      const finish = () => { backdrop.remove(); els.host.focus(); resolve(); };
+      let closed = false;
+      let unbindEscape = null;
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        unbindEscape?.();
+        backdrop.remove();
+        els.host.focus();
+        resolve();
+      };
+      unbindEscape = bindEscapeToClose(finish);
       backdrop.addEventListener("click", async (event) => {
         const choice = event.target.closest("[data-settings-choice]")?.dataset.settingsChoice;
         if (choice === "save") {
