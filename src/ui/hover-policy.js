@@ -88,18 +88,39 @@ export function normalizeVectorLspTooltip(value, hoverText) {
 }
 
 export function vectorTooltipSections({ value = "", hoverText = "", diagnostics = [] } = {}) {
+  if (diagnostics.length) {
+    return diagnostics.map((diagnostic) => ({
+      kind: "diagnostic",
+      className: `cell-tooltip-diag cell-tooltip-diag-${diagnostic.severity}`,
+      text: diagnosticTooltipText(diagnostic)
+    }));
+  }
   const tooltip = normalizeVectorLspTooltip(value, hoverText);
   const sections = [];
   if (tooltip.title) sections.push({ kind: "value", className: "cell-tooltip-value", text: tooltip.title });
   if (tooltip.detail) sections.push({ kind: "hover", className: "cell-tooltip-hover", text: tooltip.detail });
-  for (const diagnostic of diagnostics) {
-    sections.push({
-      kind: "diagnostic",
-      className: `cell-tooltip-diag cell-tooltip-diag-${diagnostic.severity}`,
-      text: diagnostic.message
-    });
-  }
   return sections;
+}
+
+export function diagnosticTooltipText(diagnostic = {}) {
+  const message = String(diagnostic.message ?? "");
+  const guidance = diagnosticUserGuidance(diagnostic);
+  return guidance ? `${message}\n\nWhat to do:\n${guidance}` : message;
+}
+
+export function diagnosticUserGuidance(diagnostic = {}) {
+  const data = diagnostic.data;
+  if (!data || typeof data !== "object") return "";
+  const insertText = stringField(data.insertText) || stringField(data.expected);
+  if (data.kind === "missing-token" && insertText) return `Insert '${insertText}' at the marked position.`;
+  if (data.kind === "unexpected-character") {
+    const actual = stringField(data.actual);
+    return actual ? `Remove or replace '${actual}' at the marked position.` : "Remove or replace the marked character.";
+  }
+  if (data.kind === "unexpected-token") return "Remove or replace the marked token.";
+  const hint = stringField(data.hint);
+  if (hint) return hint;
+  return "";
 }
 
 export function vectorTooltipPosition({
@@ -123,4 +144,8 @@ function splitHoverText(hoverText) {
   const title = lines.shift()?.trim() ?? "";
   while (lines.length && lines[0].trim() === "") lines.shift();
   return { title, detail: lines.join("\n").trim() };
+}
+
+function stringField(value) {
+  return typeof value === "string" && value ? value : "";
 }

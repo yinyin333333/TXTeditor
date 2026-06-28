@@ -32,6 +32,9 @@ fixtures/generated/
 fixtures/*200k*.tsv
 fixtures/*20k*.tsv
 
+# d2r casc txt for test
+test-txt/
+
 # old local reference material
 references/
 *.zip

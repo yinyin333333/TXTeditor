@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
-import { incrementFillSelectedCellsCommand } from "../src/core/operations.js";
+import { clearRangesCommand, incrementFillSelectedCellsCommand } from "../src/core/operations.js";
 import {
   CanvasGrid,
   createFirstColumnHoverPreview,
@@ -27,13 +27,21 @@ import {
 import {
   activeRowHeaderChromeSteps,
   cellBackground,
+  cellGridLineColor,
   cellTextColor,
   centeredTextY,
   columnHeaderRenderState,
+  columnIndexLabel,
+  columnIndexRenderState,
   createGridRenderStats,
+  cellTextRenderPlan,
+  diagnosticMarkerState,
+  diagnosticTextOverlayPlan,
   frozenHorizontalEdgeRects,
   frozenVerticalEdgeRects,
   initialColumnFitWidth,
+  indexHandleChromeSteps,
+  indexHandleRenderState,
   rowHeaderRenderState,
   syncGridThemeFromStyle,
   updateGridRenderStats
@@ -53,6 +61,7 @@ import {
   resizedTrackValue
 } from "../src/ui/grid-viewport-policy.js";
 import { shouldClearHoverForInteraction } from "../src/ui/hover-policy.js";
+import { drawGridColumnHeader, drawGridCornerHeader } from "../src/ui/grid/grid-renderer.js";
 import {
   createDefaultLintSettings,
   lintRuleGroupsForProfile,
@@ -67,6 +76,47 @@ function lintDocs(docs, profile = "RotW") {
 
 function ruleIdsForProfile(profile) {
   return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
+}
+
+function cssVariable(css, selector, variable) {
+  const start = css.indexOf(`${selector} {`);
+  assert.notEqual(start, -1);
+  const end = css.indexOf("\n}", start);
+  const block = css.slice(start, end);
+  const match = new RegExp(`${variable}:\\s*([^;]+);`).exec(block);
+  assert.ok(match);
+  return match[1].trim();
+}
+
+function hexRgb(hex) {
+  const value = hex.replace("#", "");
+  return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+}
+
+function cssColorParts(value) {
+  if (value.startsWith("#")) {
+    const [r, g, b] = hexRgb(value);
+    return { r, g, b, a: 1 };
+  }
+  const rgbMatch = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(value);
+  if (rgbMatch) {
+    return {
+      r: Number(rgbMatch[1]),
+      g: Number(rgbMatch[2]),
+      b: Number(rgbMatch[3]),
+      a: 1
+    };
+  }
+  const rgbaMatch = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*(\.\d+|1|0)\)$/.exec(value);
+  if (rgbaMatch) {
+    return {
+      r: Number(rgbaMatch[1]),
+      g: Number(rgbaMatch[2]),
+      b: Number(rgbaMatch[3]),
+      a: Number(rgbaMatch[4])
+    };
+  }
+  assert.fail(`Unsupported CSS color: ${value}`);
 }
 
 test("grid selection policy applies cell, row, column, and corner hits", () => {
@@ -90,6 +140,12 @@ test("grid selection policy applies cell, row, column, and corner hits", () => {
 
   assert.equal(applySelectionForHit(selection, { kind: "empty" }, bounds), "none");
   assert.deepEqual(selection.rect, { top: 0, left: 0, bottom: 5, right: 3 });
+});
+
+test("column index labels use spreadsheet-style letters", () => {
+  assert.deepEqual([0, 1, 2, 25, 26, 27, 51, 52].map(columnIndexLabel), ["A", "B", "C", "Z", "AA", "AB", "AZ", "BA"]);
+  assert.equal(columnIndexLabel(-1), "");
+  assert.equal(columnIndexLabel(Number.NaN), "");
 });
 
 test("grid selection policy detects full row and column ranges", () => {
@@ -155,6 +211,25 @@ test("frozen pane geometry classifies header and frozen regions", () => {
   assert.equal(classifyPanePoint({ ...base, x: 220, y: 90 }), "cell");
 });
 
+test("grid hit testing separates the column index band from field-name cells", () => {
+  assert.deepEqual(
+    classifyGridHit({ pane: "column-header", row: 0, column: 2, x: 250, y: 10 }),
+    { kind: "column-header", row: 0, column: 2, x: 250, y: 10 }
+  );
+  assert.deepEqual(
+    classifyGridHit({ pane: "cell", row: 0, column: 2, x: 250, y: 34 }),
+    { kind: "cell", row: 0, column: 2, x: 250, y: 34 }
+  );
+  assert.deepEqual(
+    classifyGridHit({ pane: "corner", row: 0, column: 0, x: 12, y: 10 }),
+    { kind: "corner", row: 0, column: 0, x: 12, y: 10 }
+  );
+  assert.deepEqual(
+    classifyGridHit({ pane: "row-header", row: 1, column: 0, x: 12, y: 34 }),
+    { kind: "row-header", row: 1, column: 0, x: 12, y: 34 }
+  );
+});
+
 test("frozen first row and first column data cells stay cell targets", () => {
   assert.deepEqual(
     classifyGridHit({ pane: "frozen-row", row: 0, column: 2, x: 250, y: 8 }),
@@ -164,6 +239,64 @@ test("frozen first row and first column data cells stay cell targets", () => {
     classifyGridHit({ pane: "frozen-column", row: 4, column: 0, x: 72, y: 140 }),
     { kind: "cell", row: 4, column: 0, x: 72, y: 140, frozen: true }
   );
+});
+
+test("column index selection targets whole logical columns while field-name cells stay normal cells", () => {
+  const doc = TableDocument.fromText("x.txt", "description\tenabled\tversion\nname\t1\t0.4.4\nname2\t0\t0.4.5");
+  const bounds = { rowCount: doc.rowCount, columnCount: doc.columnCount };
+  const selection = new SelectionModel();
+  const versionColumn = 2;
+
+  assert.equal(applySelectionForHit(selection, { kind: "cell", row: 0, column: versionColumn }, bounds), "set-cell");
+  assert.deepEqual(selection.rect, { top: 0, left: versionColumn, bottom: 0, right: versionColumn });
+  assert.equal(selection.hasFullColumn(versionColumn, doc.rowCount), false);
+
+  assert.equal(applySelectionForHit(selection, { kind: "column-header", column: versionColumn }, bounds), "set-column");
+  assert.deepEqual(selection.rect, { top: 0, left: versionColumn, bottom: 2, right: versionColumn });
+  assert.equal(selection.hasFullColumn(versionColumn, doc.rowCount), true);
+});
+
+test("column index range selection extends contiguous whole-column ranges", () => {
+  const selection = new SelectionModel();
+  const bounds = { rowCount: 4, columnCount: 6 };
+
+  assert.equal(applySelectionForHit(selection, { kind: "column-header", column: 1 }, bounds), "set-column");
+  assert.equal(applySelectionForHit(selection, { kind: "column-header", column: 4 }, { ...bounds, extend: true }), "extend-column");
+  assert.deepEqual(selection.rect, { top: 0, left: 1, bottom: 3, right: 4 });
+  assert.equal(selection.hasFullColumn(1, bounds.rowCount), true);
+  assert.equal(selection.hasFullColumn(4, bounds.rowCount), true);
+  assert.equal(selection.hasFullColumn(5, bounds.rowCount), false);
+});
+
+test("clear after column-index selection edits table cells but not generated labels", () => {
+  const doc = TableDocument.fromText("x.txt", "description\tenabled\tversion\nname\t1\t0.4.4\nname2\t0\t0.4.5");
+  const selection = new SelectionModel();
+  const versionColumn = 2;
+  const beforeLabel = columnIndexLabel(versionColumn);
+
+  applySelectionForHit(selection, { kind: "column-header", column: versionColumn }, {
+    rowCount: doc.rowCount,
+    columnCount: doc.columnCount
+  });
+  const command = clearRangesCommand(doc, selection.ranges);
+  command.redo(doc);
+
+  assert.equal(columnIndexLabel(versionColumn), beforeLabel);
+  assert.equal(doc.getCell(0, versionColumn), "");
+  assert.equal(doc.getCell(1, versionColumn), "");
+  assert.equal(doc.getCell(2, versionColumn), "");
+  assert.equal(doc.getCell(1, 0), "name");
+  assert.equal(command.isEmpty, false);
+
+  command.undo(doc);
+  assert.equal(doc.getCell(0, versionColumn), "version");
+  assert.equal(doc.getCell(1, versionColumn), "0.4.4");
+  assert.equal(doc.getCell(2, versionColumn), "0.4.5");
+
+  command.redo(doc);
+  assert.equal(doc.getCell(0, versionColumn), "");
+  assert.equal(doc.getCell(1, versionColumn), "");
+  assert.equal(doc.getCell(2, versionColumn), "");
 });
 
 test("renderer skips stale text for the active editing cell only", () => {
@@ -291,6 +424,477 @@ test("frozen pane edge uses a subtle raised effect instead of hard divider strok
   assert.match(css, /--grid-frozen-edge-ambient:/);
 });
 
+test("selected row and column index handles use neutral pressed styling", () => {
+  const selectedRowHandle = indexHandleRenderState({ selected: true, active: true });
+  const selectedColumnHandle = indexHandleRenderState({ selected: true, active: true });
+  const activeRowHandle = indexHandleRenderState({ selected: false, active: true });
+  const activeColumnHandle = indexHandleRenderState({ selected: false, active: true });
+  assert.equal(selectedRowHandle.fill, "indexHeaderPressed");
+  assert.equal(selectedColumnHandle.fill, "indexHeaderPressed");
+  assert.equal(activeRowHandle.fill, "indexHeaderPressed");
+  assert.equal(activeColumnHandle.fill, "indexHeaderPressed");
+  assert.notEqual(selectedRowHandle.fill, "selection");
+  assert.notEqual(selectedColumnHandle.fill, "selectionFrozen");
+  assert.notEqual(activeRowHandle.fill, "selection");
+  assert.notEqual(activeColumnHandle.fill, "selectionFrozen");
+  assert.equal(selectedRowHandle.pressed, true);
+  assert.equal(selectedColumnHandle.pressed, true);
+  assert.equal(activeRowHandle.text, "indexHeaderActiveText");
+  assert.equal(activeColumnHandle.text, "indexHeaderActiveText");
+  assert.equal(activeRowHandle.pressed, true);
+  assert.equal(activeColumnHandle.pressed, true);
+  assert.deepEqual(indexHandleChromeSteps({ x: 10, y: 20, width: 40, height: 24, pressed: false }), []);
+  assert.deepEqual(indexHandleChromeSteps({ x: 10, y: 20, width: 40, height: 24, pressed: true }), [
+    { kind: "fillRect", color: "indexHeaderSheen", x: 12, y: 22, width: 36, height: 7 },
+    { kind: "strokePath", color: "indexHeaderShadow", points: [[11.5, 42.5], [11.5, 21.5], [47.5, 21.5]] },
+    { kind: "strokePath", color: "indexHeaderHighlight", points: [[11.5, 42.5], [48.5, 42.5], [48.5, 21.5]] }
+  ]);
+});
+
+test("single-cell focus presses row and column index handles without selection fill", () => {
+  const selection = {
+    focus: { row: 1, column: 2 },
+    hasFullColumn: () => false
+  };
+  const rowHandle = indexHandleRenderState({
+    selected: false,
+    active: rowHeaderRenderState(selection, 1).activeHeader
+  });
+  const columnState = columnIndexRenderState({
+    selection,
+    column: 2,
+    rowCount: 5
+  });
+  const columnHandle = indexHandleRenderState({
+    selected: columnState.selected,
+    active: columnState.activeHeader
+  });
+
+  assert.deepEqual(rowHandle, {
+    fill: "indexHeaderPressed",
+    text: "indexHeaderActiveText",
+    stroke: "grid",
+    pressed: true
+  });
+  assert.deepEqual(columnHandle, {
+    fill: "indexHeaderPressed",
+    text: "indexHeaderActiveText",
+    stroke: "grid",
+    pressed: true
+  });
+});
+
+test("active-cell and direct index selections share the same neutral handle visual state", () => {
+  const activeRowHandle = indexHandleRenderState({ selected: false, active: true });
+  const selectedRowHandle = indexHandleRenderState({ selected: true, active: true });
+  const activeColumnHandle = indexHandleRenderState({ selected: false, active: true });
+  const selectedColumnHandle = indexHandleRenderState({ selected: true, active: true });
+
+  assert.deepEqual(activeRowHandle, selectedRowHandle);
+  assert.deepEqual(activeColumnHandle, selectedColumnHandle);
+  assert.equal(activeRowHandle.fill, "indexHeaderPressed");
+  assert.equal(activeColumnHandle.fill, "indexHeaderPressed");
+  assert.equal(activeRowHandle.pressed, true);
+  assert.equal(activeColumnHandle.pressed, true);
+});
+
+test("corner index handle uses the normal neutral surface unless selected", () => {
+  const fillRects = [];
+  let fillStyle = "";
+  let strokeStyle = "";
+  const ctx = {
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    fillRect: (x, y, width, height) => fillRects.push({ fillStyle, x, y, width, height }),
+    strokeRect() {}
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    headerHeight: 24,
+    selection: {
+      hasFullRow: () => false,
+      hasFullColumn: () => false
+    },
+    doc: {
+      columnCount: 4,
+      rowCount: 6
+    }
+  };
+
+  drawGridCornerHeader(grid);
+  assert.equal(fillRects[0].fillStyle, gridColor("indexHeader"));
+  assert.notEqual(fillRects[0].fillStyle, gridColor("indexHeaderFrozen"));
+});
+
+test("column index labels use normal text weight", () => {
+  const fonts = [];
+  const texts = [];
+  let font = "";
+  const ctx = {
+    set fillStyle(_value) {},
+    get fillStyle() {
+      return "";
+    },
+    set strokeStyle(_value) {},
+    get strokeStyle() {
+      return "";
+    },
+    set font(value) {
+      font = value;
+      fonts.push(value);
+    },
+    get font() {
+      return font;
+    },
+    fillRect() {},
+    strokeRect() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    measureText: (value) => ({ width: String(value).length * 7 }),
+    fillText: (text) => texts.push(text)
+  };
+  const grid = {
+    ctx,
+    headerHeight: 24,
+    font: (weight) => `${weight} 12px sans-serif`,
+    selection: {
+      focus: { row: 2, column: 1 },
+      hasFullColumn: () => false
+    },
+    doc: {
+      rowCount: 6
+    }
+  };
+
+  drawGridColumnHeader(grid, 1, 48, 80);
+  assert.equal(fonts.at(-1), "400 12px sans-serif");
+  assert.deepEqual(texts, ["B"]);
+});
+
+test("theme gridline tokens are clearer and mode-appropriate", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const darkLine = cssVariable(css, ":root", "--gridLine");
+  const lightLine = cssVariable(css, ":root[data-theme=\"light\"]", "--gridLine");
+  const lightRgb = hexRgb(lightLine);
+  const darkRgb = hexRgb(darkLine);
+
+  assert.notEqual(lightLine.toLowerCase(), "#d2dbe5");
+  assert.equal(Math.max(...lightRgb) - Math.min(...lightRgb), 0);
+  assert.ok(lightRgb.every((channel) => channel >= 185 && channel <= 204));
+  assert.notEqual(darkLine.toLowerCase(), lightLine.toLowerCase());
+  assert.ok(darkRgb.every((channel) => channel >= 60 && channel <= 95));
+  assert.equal(cssVariable(css, ":root", "--grid-diagnostic-range-error"), "#ff5f6d");
+  assert.equal(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-diagnostic-range-error"), "#c92f3f");
+});
+
+test("diagnostic text overlay policy plans active hovered and current-problem precise markers only", () => {
+  const measureText = (value) => String(value).length * 7;
+  const rangeDiagnostic = {
+    severity: "error",
+    hasPreciseRange: true,
+    localStart: 2,
+    localEnd: 4
+  };
+  const activePlan = diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdefg",
+    active: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  });
+  assert.deepEqual(activePlan, {
+    kind: "range",
+    severity: "error",
+    color: "diagnosticRangeError",
+    x: 114,
+    y: 40,
+    width: 14,
+    lineWidth: 2
+  });
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{ ...rangeDiagnostic, hasPreciseRange: false }],
+    value: "abcdef",
+    active: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    hovered: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  })?.kind, "range");
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [rangeDiagnostic],
+    value: "abcdef",
+    currentProblem: true,
+    textX: 100,
+    cellY: 20,
+    cellHeight: 26,
+    maxWidth: 80,
+    measureText
+  })?.kind, "range");
+});
+
+test("diagnostic text overlay policy handles insertion points and clipped text", () => {
+  const measureText = (value) => String(value).length * 7;
+  assert.deepEqual(cellTextRenderPlan({
+    text: "abcdefg",
+    maxWidth: 42,
+    measureText
+  }), {
+    text: "abc...",
+    sourceLength: 3,
+    clipped: true
+  });
+  assert.deepEqual(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "warning",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 100,
+    measureText
+  }), {
+    kind: "insertion",
+    severity: "warning",
+    color: "diagnosticInsertionCaretWarning",
+    x: 31,
+    top: 35,
+    bottom: 49,
+    lineWidth: 2
+  });
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      localStart: 4,
+      localEnd: 5
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 42,
+    measureText
+  }), null);
+  assert.equal(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 42,
+    measureText
+  }), null);
+  assert.deepEqual(diagnosticTextOverlayPlan({
+    diagnostics: [{
+      severity: "error",
+      hasPreciseRange: true,
+      isInsertionPoint: true,
+      localStart: 3,
+      localEnd: 3,
+      localInsertionPoint: 3
+    }],
+    value: "abcdefg",
+    active: true,
+    textX: 10,
+    cellY: 30,
+    cellHeight: 24,
+    maxWidth: 49,
+    measureText
+  }), {
+    kind: "insertion",
+    severity: "error",
+    color: "diagnosticInsertionCaretError",
+    x: 31,
+    top: 35,
+    bottom: 49,
+    lineWidth: 2
+  });
+});
+
+test("diagnostic corner marker remains separate from precise text overlay", () => {
+  assert.equal(diagnosticMarkerState([], { x: 10, y: 20, width: 40, height: 26 }), null);
+  assert.deepEqual(diagnosticMarkerState([{ severity: "warning", hasPreciseRange: true }], { x: 10, y: 20, width: 40, height: 26 }), {
+    severity: "warning",
+    color: "#cca700",
+    points: [[40, 45], [49, 45], [49, 36]]
+  });
+});
+
+test("active cell renderer draws precise diagnostic overlay before active border", () => {
+  const operations = [];
+  let fillStyle = "";
+  let strokeStyle = "";
+  let lineWidth = 1;
+  let path = [];
+  const ctx = {
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    set lineWidth(value) {
+      lineWidth = value;
+    },
+    get lineWidth() {
+      return lineWidth;
+    },
+    fillRect: (x, y, width, height) => operations.push({ kind: "fillRect", fillStyle, x, y, width, height }),
+    strokeRect: (x, y, width, height) => operations.push({ kind: "strokeRect", strokeStyle, lineWidth, x, y, width, height }),
+    save: () => operations.push({ kind: "save" }),
+    restore: () => operations.push({ kind: "restore" }),
+    rect: (x, y, width, height) => operations.push({ kind: "rect", x, y, width, height }),
+    clip: () => operations.push({ kind: "clip" }),
+    beginPath: () => {
+      path = [];
+      operations.push({ kind: "beginPath" });
+    },
+    moveTo: (x, y) => path.push(["M", x, y]),
+    lineTo: (x, y) => path.push(["L", x, y]),
+    stroke: () => operations.push({ kind: "stroke", strokeStyle, lineWidth, path }),
+    measureText: (value) => ({ width: String(value).length * 7 }),
+    fillText: (text, x, y) => operations.push({ kind: "text", text, x, y })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 2, column: 1 },
+      contains: () => false
+    },
+    doc: {
+      columnCount: 3,
+      getCell: () => "abcdef"
+    },
+    diagnosticsByCell: new Map([["2:1", [{
+      severity: "error",
+      hasPreciseRange: true,
+      localStart: 1,
+      localEnd: 3
+    }]]]),
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText: (...args) => operations.push({ kind: "gridText", args }),
+    drawDiagnosticMarker: () => operations.push({ kind: "cornerMarker" })
+  };
+
+  CanvasGrid.prototype.drawCell.call(grid, 2, 1, 100, 200, 80, 30);
+
+  const overlayStroke = operations.find((operation) => operation.kind === "stroke" && operation.strokeStyle === gridColor("diagnosticRangeError"));
+  assert.deepEqual(overlayStroke.path, [["M", 115, 224], ["L", 129, 224]]);
+  assert.ok(operations.findIndex((operation) => operation === overlayStroke) < operations.findIndex((operation) => operation.kind === "cornerMarker"));
+  assert.ok(operations.findIndex((operation) => operation.kind === "cornerMarker") < operations.findIndex((operation) => operation.kind === "strokeRect" && operation.lineWidth === 2));
+});
+
+test("cell selection fills are restored to the original 0.4.4 style", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const darkSelectionValue = cssVariable(css, ":root", "--selectionBg");
+  const lightSelectionValue = cssVariable(css, ":root[data-theme=\"light\"]", "--selectionBg");
+  const darkFrozenSelectionValue = cssVariable(css, ":root", "--grid-selection-frozen");
+  const lightFrozenSelectionValue = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-frozen");
+  const darkSelection = cssColorParts(darkSelectionValue);
+  const lightSelection = cssColorParts(lightSelectionValue);
+  const darkFrozenSelection = cssColorParts(darkFrozenSelectionValue);
+  const lightFrozenSelection = cssColorParts(lightFrozenSelectionValue);
+
+  assert.deepEqual(
+    [darkSelection.r, darkSelection.g, darkSelection.b, darkSelection.a],
+    [0, 88, 156, 0.7]
+  );
+  assert.deepEqual(
+    [darkFrozenSelection.r, darkFrozenSelection.g, darkFrozenSelection.b, darkFrozenSelection.a],
+    [0, 105, 185, 0.76]
+  );
+  assert.deepEqual(
+    [lightSelection.r, lightSelection.g, lightSelection.b, lightSelection.a],
+    [0, 96, 170, 0.34]
+  );
+  assert.deepEqual(
+    [lightFrozenSelection.r, lightFrozenSelection.g, lightFrozenSelection.b, lightFrozenSelection.a],
+    [0, 96, 170, 0.42]
+  );
+  assert.notEqual(cssVariable(css, ":root", "--grid-index-header-pressed-bg"), darkSelectionValue);
+  assert.notEqual(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-pressed-bg"), lightSelectionValue);
+});
+
+test("index handle theme tokens use neutral light and dark brightness", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const lightBase = hexRgb(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-bg"));
+  const lightPressed = hexRgb(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-pressed-bg"));
+  const darkBase = hexRgb(cssVariable(css, ":root", "--grid-index-header-bg"));
+  const darkPressed = hexRgb(cssVariable(css, ":root", "--grid-index-header-pressed-bg"));
+
+  assert.ok(lightBase.every((channel) => channel >= 238 && channel <= 242));
+  assert.equal(Math.max(...lightBase) - Math.min(...lightBase), 0);
+  assert.ok(lightPressed.every((channel, index) => channel < lightBase[index]));
+  assert.equal(Math.max(...lightPressed) - Math.min(...lightPressed), 0);
+  assert.ok(darkBase.every((channel) => channel >= 32 && channel <= 48));
+  assert.ok(darkPressed.every((channel, index) => channel > darkBase[index]));
+  assert.notDeepEqual(darkBase, lightBase);
+  assert.notDeepEqual(darkPressed, lightPressed);
+});
+
 test("resize handles are detected on cell boundaries, not only headers", () => {
   assert.deepEqual(
     classifyResizeHandle({
@@ -370,17 +974,116 @@ test("column text color cycle is predictable and bounded", () => {
   assert.equal(cellTextColor(4, 7, "value", false, false, false, colors), "text");
 });
 
-test("active cell highlights both the first-row header and left row header", () => {
+test("selection rendering policy keeps divider stroke brightness unchanged", () => {
+  const colors = {
+    grid: "grid"
+  };
+  assert.equal(cellGridLineColor({ selected: false, frozen: false }, colors), "grid");
+  assert.equal(cellGridLineColor({ selected: false, frozen: true }, colors), "grid");
+  assert.equal(cellGridLineColor({ selected: true, frozen: false }, colors), "grid");
+  assert.equal(cellGridLineColor({ selected: true, frozen: true }, colors), "grid");
+
+  const fillRects = [];
+  const strokeRects = [];
+  const paths = [];
+  let strokeStyle = "";
+  let fillStyle = "";
+  let currentPath = [];
+  const ctx = {
+    lineWidth: 1,
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    fillRect: (x, y, width, height) => fillRects.push({ fillStyle, x, y, width, height }),
+    strokeRect: (x, y, width, height) => strokeRects.push({ strokeStyle, x, y, width, height }),
+    beginPath: () => {
+      currentPath = [];
+    },
+    moveTo: (x, y) => currentPath.push(["M", x, y]),
+    lineTo: (x, y) => currentPath.push(["L", x, y]),
+    stroke: () => paths.push({ strokeStyle, lineWidth: ctx.lineWidth, path: currentPath }),
+    measureText: (value) => ({ width: String(value).length * 7 })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 0, column: 0 },
+      contains: (row, column) => row === 2 && column === 1
+    },
+    doc: {
+      columnCount: 3,
+      getCell: () => "selected"
+    },
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText() {},
+    drawDiagnosticMarker() {}
+  };
+  CanvasGrid.prototype.drawCell.call(grid, 2, 1, 100, 200, 80, 30);
+  assert.equal(fillRects[0].fillStyle, gridColor("selection"));
+  assert.equal(strokeRects[0].strokeStyle, gridColor("grid"));
+  assert.equal(strokeRects.length, 1);
+  assert.equal(paths.length, 0);
+});
+
+test("active cell presses row and column indexes without highlighting field-name header cells", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const selection = { focus: { row: 2, column: 3 } };
   assert.equal(rowHeaderRenderState(selection, 2).activeHeader, true);
   assert.equal(rowHeaderRenderState(selection, 1).activeHeader, false);
-  assert.equal(columnHeaderRenderState({ selection, row: 0, column: 3, editingThisCell: false }).activeColumnHeader, true);
+  assert.deepEqual(columnIndexRenderState({
+    selection: {
+      focus: { row: 2, column: 3 },
+      hasFullColumn: (column, rowCount) => column === 3 && rowCount === 6
+    },
+    column: 3,
+    rowCount: 6
+  }), { selected: true, activeHeader: true });
+  assert.deepEqual(indexHandleRenderState({
+    selected: false,
+    active: rowHeaderRenderState(selection, 2).activeHeader
+  }), {
+    fill: "indexHeaderPressed",
+    text: "indexHeaderActiveText",
+    stroke: "grid",
+    pressed: true
+  });
+  assert.deepEqual(indexHandleRenderState({
+    selected: false,
+    active: columnIndexRenderState({
+      selection: {
+        ...selection,
+        hasFullColumn: () => false
+      },
+      column: 3,
+      rowCount: 6
+    }).activeHeader
+  }), {
+    fill: "indexHeaderPressed",
+    text: "indexHeaderActiveText",
+    stroke: "grid",
+    pressed: true
+  });
+  assert.equal(columnHeaderRenderState({ selection, row: 0, column: 3, editingThisCell: false }).activeColumnHeader, false);
   assert.equal(columnHeaderRenderState({ selection, row: 0, column: 3, editingThisCell: true }).activeColumnHeader, false);
   assert.equal(columnHeaderRenderState({ selection, row: 1, column: 3, editingThisCell: false }).activeColumnHeader, false);
   assert.equal(columnHeaderRenderState({ selection, row: 0, column: 2, editingThisCell: false }).activeColumnHeader, false);
+  assert.equal(columnHeaderRenderState({ selection: { focus: { row: 0, column: 3 } }, row: 0, column: 3, editingThisCell: false }).activeColumnHeader, true);
   const fillRects = [];
   let fillStyle = "";
+  let strokeStyle = "";
+  let currentPath = [];
   const ctx = {
     set fillStyle(value) {
       fillStyle = value;
@@ -388,8 +1091,22 @@ test("active cell highlights both the first-row header and left row header", () 
     get fillStyle() {
       return fillStyle;
     },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    save() {},
+    restore() {},
     fillRect: (x, y, width, height) => fillRects.push({ fillStyle, x, y, width, height }),
     strokeRect() {},
+    beginPath: () => {
+      currentPath = [];
+    },
+    moveTo: (x, y) => currentPath.push(["M", x, y]),
+    lineTo: (x, y) => currentPath.push(["L", x, y]),
+    stroke() {},
     measureText: (value) => ({ width: String(value).length * 7 }),
     fillText() {}
   };
@@ -414,10 +1131,67 @@ test("active cell highlights both the first-row header and left row header", () 
   };
   CanvasGrid.prototype.drawRowHeader.call(grid, 2, 20, 26);
   CanvasGrid.prototype.drawCell.call(grid, 0, 3, 100, 0, 80, 26);
-  assert.equal(fillRects[0].fillStyle, gridColor("activeHeader"));
-  assert.equal(fillRects[1].fillStyle, gridColor("activeHeader"));
+  assert.equal(fillRects[0].fillStyle, gridColor("indexHeaderPressed"));
+  assert.equal(fillRects.at(-1).fillStyle, gridColor("header"));
+  assert.notEqual(fillRects.at(-1).fillStyle, gridColor("activeHeader"));
   assert.match(css, /--grid-active-header-bg: var\(--activeHeaderBg\);/);
   assert.match(css, /--grid-active-header-text: var\(--activeHeaderText\);/);
+});
+
+test("frozen row and column drawing uses frozen cell tints and restores normal backgrounds", () => {
+  const fillRects = [];
+  let fillStyle = "";
+  const ctx = {
+    lineWidth: 1,
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(_value) {},
+    get strokeStyle() {
+      return "";
+    },
+    fillRect: (x, y, width, height) => fillRects.push({ fillStyle, x, y, width, height }),
+    strokeRect() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    measureText: (value) => ({ width: String(value).length * 7 })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 9, column: 9 },
+      contains: () => false
+    },
+    doc: {
+      columnCount: 4,
+      getCell: (row, column) => `${row}:${column}`
+    },
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText() {},
+    drawDiagnosticMarker() {}
+  };
+
+  CanvasGrid.prototype.drawCell.call(grid, 0, 2, 100, 24, 80, 26, { frozenRow: true });
+  CanvasGrid.prototype.drawCell.call(grid, 3, 0, 48, 76, 80, 26, { frozenColumn: true });
+  CanvasGrid.prototype.drawCell.call(grid, 3, 2, 180, 76, 80, 26, { frozenColumn: true });
+  CanvasGrid.prototype.drawCell.call(grid, 0, 2, 100, 24, 80, 26);
+  CanvasGrid.prototype.drawCell.call(grid, 3, 0, 48, 76, 80, 26);
+
+  assert.deepEqual(fillRects.map((rect) => rect.fillStyle), [
+    gridColor("frozenHeader"),
+    gridColor("firstColumnFrozen"),
+    gridColor("frozen"),
+    gridColor("header"),
+    gridColor("firstColumn")
+  ]);
 });
 
 test("active row header draws raised chrome over the row index only", () => {
@@ -492,6 +1266,109 @@ test("grid render policy records frame statistics without CanvasGrid owning the 
   assert.deepEqual(stats.visibleRows, [0, 0]);
   assert.deepEqual(stats.visibleColumns, [0, 0]);
   assert.equal(stats.reason, "resize");
+});
+
+test("column-index band and row-index gutter stay aligned with scroll geometry", () => {
+  const headerHeightGetter = Object.getOwnPropertyDescriptor(CanvasGrid.prototype, "headerHeight").get;
+  assert.equal(headerHeightGetter.call({ zoom: 1 }), 24);
+  assert.equal(headerHeightGetter.call({ zoom: 1.5 }), 36);
+
+  const columnGrid = {
+    rowHeaderWidth: 48,
+    zoom: 1,
+    scrollLeft: 35,
+    host: { clientWidth: 360 },
+    doc: {
+      columnCount: 4,
+      columnWidths: [100, 80, 90, 70],
+      defaultColumnWidth: 80,
+      freezeFirstColumn: false,
+      hiddenColumns: new Set()
+    },
+    frozenColumnWidth: () => 0,
+    scrollStartColumn: () => 0,
+    scaledColumnWidth: CanvasGrid.prototype.scaledColumnWidth,
+    columnContentLeft: CanvasGrid.prototype.columnContentLeft
+  };
+  const columns = CanvasGrid.prototype.visibleColumns.call(columnGrid);
+  assert.equal(columns[0].left, CanvasGrid.prototype.screenXForColumn.call(columnGrid, columns[0].column));
+  assert.equal(columns[1].left, CanvasGrid.prototype.screenXForColumn.call(columnGrid, columns[1].column));
+
+  const rowGrid = {
+    rowHeight: 26,
+    headerHeight: 24,
+    scrollTop: 13,
+    host: { clientHeight: 160 },
+    doc: {
+      rowCount: 5,
+      rowHeights: [],
+      defaultRowHeight: 26,
+      freezeFirstRow: false,
+      hiddenRows: new Set(),
+      hasCustomRowHeights: false
+    },
+    frozenRowHeight: () => 0,
+    scrollStartRow: () => 0,
+    scaledRowHeight: CanvasGrid.prototype.scaledRowHeight,
+    rowContentTop: CanvasGrid.prototype.rowContentTop
+  };
+  const rows = CanvasGrid.prototype.visibleRows.call(rowGrid);
+  assert.equal(rows[0].top, CanvasGrid.prototype.screenYForRow.call(rowGrid, rows[0].row));
+  assert.equal(rows[1].top, CanvasGrid.prototype.screenYForRow.call(rowGrid, rows[1].row));
+});
+
+test("freeze state layout changes redraw the grid immediately", () => {
+  const draws = [];
+  const grid = {
+    doc: {
+      freezeFirstRow: false,
+      freezeFirstColumn: false
+    },
+    host: {
+      getBoundingClientRect: () => ({ width: 320, height: 180 })
+    },
+    canvas: { style: {} },
+    frozenCanvas: { style: {} },
+    ctx: {},
+    frozenCtx: {},
+    scrollSurface: { style: {} },
+    rowHeaderWidth: 48,
+    headerHeight: 24,
+    hideFirstColumnHoverPreview() {},
+    syncTheme() {},
+    layoutCanvas() {},
+    positionCanvases() {},
+    frozenColumnWidth() {
+      return this.doc.freezeFirstColumn ? 80 : 0;
+    },
+    frozenRowHeight() {
+      return this.doc.freezeFirstRow ? 26 : 0;
+    },
+    scrollableColumnWidth() {
+      return 160;
+    },
+    scrollableRowsHeight() {
+      return 260;
+    },
+    draw() {
+      draws.push({
+        freezeFirstRow: this.doc.freezeFirstRow,
+        freezeFirstColumn: this.doc.freezeFirstColumn,
+        scrollWidth: this.scrollSurface.style.width,
+        scrollHeight: this.scrollSurface.style.height
+      });
+    }
+  };
+
+  CanvasGrid.prototype.layout.call(grid);
+  grid.doc.freezeFirstRow = true;
+  grid.doc.freezeFirstColumn = true;
+  CanvasGrid.prototype.layout.call(grid);
+
+  assert.deepEqual(draws, [
+    { freezeFirstRow: false, freezeFirstColumn: false, scrollWidth: "208px", scrollHeight: "284px" },
+    { freezeFirstRow: true, freezeFirstColumn: true, scrollWidth: "288px", scrollHeight: "310px" }
+  ]);
 });
 
 test("initial canvas column fit is header-only and compact", () => {

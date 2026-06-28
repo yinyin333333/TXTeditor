@@ -79,13 +79,15 @@ import {
   hoverTooltipPresentation,
   isGridHoverAllowed,
   isHoverTargetCurrent,
+  diagnosticUserGuidance,
+  diagnosticTooltipText,
   shouldClearHoverForInteraction,
   vectorTooltipPosition,
   vectorTooltipSections,
   vectorTooltipShouldOwnCell
 } from "../src/ui/hover-policy.js";
 import { createLspHoverController } from "../src/ui/controllers/lsp-hover-controller.js";
-import { createLspController } from "../src/ui/controllers/lsp-controller.js";
+import { createLspController, mapLspDiagnosticToDisplay } from "../src/ui/controllers/lsp-controller.js";
 import { appSettingsVisualControls } from "../src/ui/app-settings-policy.js";
 import { lintEnginePanelActive } from "../src/ui/problems-policy.js";
 import {
@@ -330,7 +332,17 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
   const gridCalls = [];
   const renderStatuses = [];
   const diagnosticResponses = [
-    [{ row: 1, col: 2, severity: "error", message: "bad integer", code: "type" }],
+    [{
+      row: 1,
+      col: 2,
+      startCharacter: 27,
+      endCharacter: 30,
+      cellStartCharacter: 23,
+      cellEndCharacter: 30,
+      severity: "error",
+      message: "bad integer",
+      code: "type"
+    }],
     []
   ];
   globalThis.window = {
@@ -409,6 +421,9 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
     await controller.startWorkspace("E:\\Data");
     await listeners.get("lsp-diagnostics-changed")?.({ payload: uri });
     assert.equal(state.lint.diagnostics.length, 1);
+    assert.equal(state.lint.diagnostics[0].localStart, 4);
+    assert.equal(state.lint.diagnostics[0].localEnd, 7);
+    assert.equal(state.lint.diagnostics[0].hasPreciseRange, true);
     assert.equal(lspDocumentState(doc).hoverReady, true);
 
     doc.setCell(1, 2, "0");
@@ -461,11 +476,20 @@ test("Vector-LSP tooltip policy builds sections and viewport-aware positions", (
     vectorTooltipSections({
       value: "StrClassOnly",
       hoverText: "StrClassOnly\n\nLookup column used by string class filters.",
-      diagnostics: [{ severity: "warning", message: "Header is non-standard." }]
+      diagnostics: []
     }),
     [
       { kind: "value", className: "cell-tooltip-value", text: "StrClassOnly" },
-      { kind: "hover", className: "cell-tooltip-hover", text: "Lookup column used by string class filters." },
+      { kind: "hover", className: "cell-tooltip-hover", text: "Lookup column used by string class filters." }
+    ]
+  );
+  assert.deepEqual(
+    vectorTooltipSections({
+      value: "StrClassOnly",
+      hoverText: "StrClassOnly\n\nLookup column used by string class filters.",
+      diagnostics: [{ severity: "warning", message: "Header is non-standard." }]
+    }),
+    [
       { kind: "diagnostic", className: "cell-tooltip-diag cell-tooltip-diag-warning", text: "Header is non-standard." }
     ]
   );
@@ -489,6 +513,350 @@ test("Vector-LSP tooltip policy builds sections and viewport-aware positions", (
       viewportHeight: 300
     }),
     { left: "304px", top: "244px" }
+  );
+});
+
+test("Vector-LSP display diagnostics retain precise range metadata", () => {
+  const doc = TableDocument.fromText("skills.txt", "name\tcalc\n\uD55C\uAE00\tskill(Hammer of the Ancients'.blvl)", { path: "E:\\Data\\skills.txt" });
+  const uri = docToUri(doc);
+  const cellValue = doc.getCell(1, 1);
+  const cellStartCharacter = "\uD55C\uAE00\t".length;
+  const startCharacter = cellStartCharacter + "skill(Hammer of the Ancients".length;
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 1,
+    col: 1,
+    startCharacter,
+    endCharacter: startCharacter + 1,
+    cellStartCharacter,
+    cellEndCharacter: cellStartCharacter + cellValue.length,
+    severity: "error",
+    message: "Invalid calc formula at position 108",
+    code: "calcCheck"
+  }, {
+    uri,
+    fileKey: "e:/data/skills.txt",
+    fileName: "skills.txt",
+    filePath: "E:\\Data\\skills.txt",
+    index: 0,
+    doc
+  });
+
+  assert.equal(diagnostic.rowIndex, 1);
+  assert.equal(diagnostic.columnIndex, 1);
+  assert.equal(diagnostic.localStart, "skill(Hammer of the Ancients".length);
+  assert.equal(diagnostic.localEnd, "skill(Hammer of the Ancients'".length);
+  assert.equal(diagnostic.hasPreciseRange, true);
+  assert.equal(diagnostic.message, "Invalid calc formula at position 108");
+  assert.equal(diagnostic.ruleId, "calcCheck");
+  assert.equal(diagnostic.locationLabel, "Row 2, Col 2");
+});
+
+test("Vector-LSP display diagnostics preserve structured data and insertion points", () => {
+  const formula = "min(5,1+skill('Fire Ball'.blvl)/5";
+  const doc = TableDocument.fromText("skills.txt", `id\tcalc\n1\t${formula}`, { path: "E:\\Data\\skills.txt" });
+  const cellStartCharacter = "1\t".length;
+  const rangeInsertionPoint = cellStartCharacter + formula.length;
+  const data = {
+    rule: "calcCheck",
+    kind: "missing-token",
+    expected: ")",
+    actual: "EOF",
+    insertionPoint: formula.length,
+    insertText: ")",
+    hint: "Insert ')' at the end of this expression."
+  };
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 1,
+    col: 1,
+    startCharacter: rangeInsertionPoint,
+    endCharacter: rangeInsertionPoint,
+    cellStartCharacter,
+    cellEndCharacter: rangeInsertionPoint,
+    severity: "error",
+    message: "calcCheck: Missing ')' before end of formula",
+    code: "calc.expected-rparen.eof",
+    data
+  }, {
+    uri: docToUri(doc),
+    fileKey: "e:/data/skills.txt",
+    fileName: "skills.txt",
+    filePath: "E:\\Data\\skills.txt",
+    index: 0,
+    doc
+  });
+
+  assert.equal(diagnostic.code, "calc.expected-rparen.eof");
+  assert.equal(diagnostic.ruleId, "calc.expected-rparen.eof");
+  assert.deepEqual(diagnostic.data, data);
+  assert.equal(diagnostic.insertionPoint, formula.length);
+  assert.equal(diagnostic.localInsertionPoint, formula.length);
+  assert.equal(diagnostic.isInsertionPoint, true);
+  assert.equal(diagnostic.hasPreciseRange, true);
+});
+
+test("Vector-LSP display diagnostics do not invent precise local ranges without a known cell value", () => {
+  const data = {
+    kind: "missing-token",
+    expected: ")",
+    insertionPoint: 17,
+    insertText: ")"
+  };
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 4,
+    col: 2,
+    startCharacter: 17,
+    endCharacter: 17,
+    cellStartCharacter: 0,
+    cellEndCharacter: 17,
+    severity: "error",
+    message: "Invalid calc formula at position 108",
+    code: "calc.expected-rparen.eof",
+    data
+  }, {
+    uri: "file:///skills.txt",
+    fileKey: "skills.txt",
+    fileName: "skills.txt",
+    index: 0,
+    doc: null
+  });
+
+  assert.equal(diagnostic.rowIndex, 4);
+  assert.equal(diagnostic.columnIndex, 2);
+  assert.equal(diagnostic.startCharacter, 17);
+  assert.equal(diagnostic.endCharacter, 17);
+  assert.deepEqual(diagnostic.data, data);
+  assert.equal(diagnostic.localStart, null);
+  assert.equal(diagnostic.localEnd, null);
+  assert.equal(diagnostic.localInsertionPoint, null);
+  assert.equal(diagnostic.isInsertionPoint, false);
+  assert.equal(diagnostic.hasPreciseRange, false);
+  assert.equal(diagnostic.locationLabel, "Row 5, Col 3");
+});
+
+test("Vector-LSP display diagnostics distinguish known empty cells from unknown cells", () => {
+  const doc = TableDocument.fromText("skills.txt", "id\tcalc\n1\t", { path: "E:\\Data\\skills.txt" });
+  const data = {
+    kind: "missing-token",
+    expected: ")",
+    insertionPoint: 0,
+    insertText: ")"
+  };
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 1,
+    col: 1,
+    startCharacter: 2,
+    endCharacter: 2,
+    cellStartCharacter: 2,
+    cellEndCharacter: 2,
+    severity: "error",
+    message: "calcCheck: Missing ')' before end of formula",
+    code: "calc.expected-rparen.eof",
+    data
+  }, {
+    uri: docToUri(doc),
+    fileKey: "e:/data/skills.txt",
+    fileName: "skills.txt",
+    index: 0,
+    doc
+  });
+
+  assert.equal(doc.getCell(1, 1), "");
+  assert.equal(diagnostic.localStart, 0);
+  assert.equal(diagnostic.localEnd, 0);
+  assert.equal(diagnostic.localInsertionPoint, 0);
+  assert.equal(diagnostic.isInsertionPoint, true);
+  assert.equal(diagnostic.hasPreciseRange, true);
+});
+
+test("Vector-LSP display diagnostics reject edge-clamped local ranges", () => {
+  const doc = TableDocument.fromText("skills.txt", "id\tcalc\n1\tabc", { path: "E:\\Data\\skills.txt" });
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 1,
+    col: 1,
+    startCharacter: 1,
+    endCharacter: 2,
+    cellStartCharacter: 2,
+    cellEndCharacter: 5,
+    severity: "error",
+    message: "Invalid calc formula at position 108",
+    code: "calcCheck"
+  }, {
+    uri: docToUri(doc),
+    fileKey: "e:/data/skills.txt",
+    fileName: "skills.txt",
+    index: 0,
+    doc
+  });
+
+  assert.equal(diagnostic.localStart, null);
+  assert.equal(diagnostic.localEnd, null);
+  assert.equal(diagnostic.localInsertionPoint, null);
+  assert.equal(diagnostic.isInsertionPoint, false);
+  assert.equal(diagnostic.hasPreciseRange, false);
+});
+
+test("Vector-LSP diagnostic tooltip omits precise range excerpts", () => {
+  const singleCharacter = {
+    severity: "error",
+    message: "Invalid cube input",
+    localStart: 2,
+    localEnd: 2,
+    hasPreciseRange: true
+  };
+  assert.equal(
+    diagnosticTooltipText(singleCharacter),
+    "Invalid cube input"
+  );
+  assert.deepEqual(
+    vectorTooltipSections({
+      value: "hpot,qty=abc",
+      diagnostics: [{
+        severity: "error",
+        message: "Invalid cube input",
+        localStart: 9,
+        localEnd: 12,
+        hasPreciseRange: true
+      }]
+    }),
+    [{
+      kind: "diagnostic",
+      className: "cell-tooltip-diag cell-tooltip-diag-error",
+      text: "Invalid cube input"
+    }]
+  );
+});
+
+test("Vector-LSP tooltip uses structured missing-token data for insertion hints", () => {
+  const formula = "min(5,1";
+  const diagnostic = {
+    severity: "error",
+    message: "calcCheck: Missing ')' before end of formula",
+    localStart: formula.length,
+    localEnd: formula.length,
+    localInsertionPoint: formula.length,
+    isInsertionPoint: true,
+    hasPreciseRange: true,
+    data: {
+      kind: "missing-token",
+      expected: ")",
+      actual: "EOF",
+      insertionPoint: formula.length,
+      insertText: ")"
+    }
+  };
+
+  assert.equal(diagnosticUserGuidance(diagnostic), "Insert ')' at the marked position.");
+  assert.equal(
+    diagnosticTooltipText(diagnostic),
+    "calcCheck: Missing ')' before end of formula\n\nWhat to do:\nInsert ')' at the marked position."
+  );
+  assert.deepEqual(
+    vectorTooltipSections({
+      value: formula,
+      diagnostics: [diagnostic]
+    }),
+    [{
+      kind: "diagnostic",
+      className: "cell-tooltip-diag cell-tooltip-diag-error",
+      text: "calcCheck: Missing ')' before end of formula\n\nWhat to do:\nInsert ')' at the marked position."
+    }]
+  );
+});
+
+test("Vector-LSP tooltip uses structured unexpected-character data for guidance", () => {
+  const diagnostic = {
+    severity: "error",
+    message: "calcCheck: Unexpected character '\"'",
+    localStart: 0,
+    localEnd: 1,
+    hasPreciseRange: true,
+    data: {
+      kind: "unexpected-character",
+      actual: "\""
+    }
+  };
+
+  assert.equal(
+    diagnosticTooltipText(diagnostic),
+    "calcCheck: Unexpected character '\"'\n\nWhat to do:\nRemove or replace '\"' at the marked position."
+  );
+});
+
+test("Vector-LSP tooltip keeps diagnostics message-only when precise range has no action hint", () => {
+  const longValue = `${"a".repeat(48)}target-token${"z".repeat(48)}`;
+  assert.equal(
+    diagnosticTooltipText({
+      severity: "error",
+      message: "Unknown token",
+      localStart: 48,
+      localEnd: 54,
+      hasPreciseRange: true
+    }),
+    "Unknown token"
+  );
+  assert.deepEqual(
+    vectorTooltipSections({
+      value: longValue,
+      diagnostics: [{
+        severity: "error",
+        message: "Unknown token",
+        localStart: 48,
+        localEnd: 54,
+        hasPreciseRange: true
+      }]
+    }),
+    [{
+      kind: "diagnostic",
+      className: "cell-tooltip-diag cell-tooltip-diag-error",
+      text: "Unknown token"
+    }]
+  );
+  assert.deepEqual(
+    vectorTooltipSections({
+      value: "whole-cell",
+      diagnostics: [{
+        severity: "warning",
+        message: "Full cell warning",
+        localStart: 0,
+        localEnd: "whole-cell".length,
+        hasPreciseRange: false
+      }]
+    }),
+    [{
+      kind: "diagnostic",
+      className: "cell-tooltip-diag cell-tooltip-diag-warning",
+      text: "Full cell warning"
+    }]
+  );
+});
+
+test("Vector-LSP diagnostics do not parse message text for locations and legacy diagnostics remain unchanged", () => {
+  const doc = TableDocument.fromText("skills.txt", "id\tcalc\n1\tabcdef", { path: "E:\\Data\\skills.txt" });
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 1,
+    col: 1,
+    severity: "error",
+    message: "Invalid calc formula at position 4"
+  }, {
+    uri: docToUri(doc),
+    fileKey: "e:/data/skills.txt",
+    fileName: "skills.txt",
+    index: 2,
+    doc
+  });
+
+  assert.equal(diagnostic.localStart, null);
+  assert.equal(diagnostic.localEnd, null);
+  assert.equal(diagnostic.hasPreciseRange, false);
+  assert.deepEqual(
+    vectorTooltipSections({
+      diagnostics: [{ severity: "warning", message: "Legacy lint warning" }]
+    }),
+    [{
+      kind: "diagnostic",
+      className: "cell-tooltip-diag cell-tooltip-diag-warning",
+      text: "Legacy lint warning"
+    }]
   );
 });
 

@@ -17,7 +17,9 @@ function escapeHtml(value) {
 
 function makeSettingsController({ config = {}, lspStarted = false } = {}) {
   const { document, window } = installFakeAppStartupDom();
+  const calls = [];
   const invoke = async (command) => {
+    calls.push(["invoke", command]);
     if (command === "get_config") return config;
     if (command === "save_config") return undefined;
     if (command === "open_folder_dialog") return "E:\\PickedFolder";
@@ -25,6 +27,7 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
     return undefined;
   };
   window.__TAURI__ = { core: { invoke }, event: { listen: async () => () => {} } };
+  const host = document.createElement("section");
   const state = {
     theme: "dark",
     colorizeColumns: true,
@@ -45,10 +48,9 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
       started: lspStarted
     }
   };
-  const calls = [];
   const controller = createSettingsController({
     state,
-    els: { host: document.createElement("section"), lintControls: document.createElement("div"), lintRulesPanel: document.createElement("div") },
+    els: { host, lintControls: document.createElement("div"), lintRulesPanel: document.createElement("div") },
     grid: {
       syncTheme: () => calls.push("sync-theme"),
       draw: () => calls.push("draw"),
@@ -77,7 +79,7 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
     showError: (error) => calls.push(["error", String(error)]),
     escapeHtml
   });
-  return { controller, document, calls };
+  return { controller, document, calls, host };
 }
 
 async function waitForSelector(document, selector) {
@@ -103,6 +105,28 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("App Settings closes on Escape and removes its temporary key listener", () => {
+  const { controller, document, host } = makeSettingsController();
+
+  controller.showAppSettings();
+  assert.ok(document.body.querySelector(".settings-modal"));
+  assert.equal(document.listeners.get("keydown")?.length, 1);
+
+  let prevented = false;
+  let stopped = false;
+  document.listeners.get("keydown")[0]({
+    key: "Escape",
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => { stopped = true; }
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(document.body.querySelector(".settings-modal"), null);
+  assert.equal(document.activeElement, host);
+  assert.equal(document.listeners.get("keydown")?.length, 0);
 });
 
 test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actions", async () => {
@@ -138,4 +162,34 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
 
   document.body.querySelector("[data-settings-choice='cancel']").click();
   await pending;
+});
+
+test("Lint Options Escape behaves like Cancel without saving or restarting LSP", async () => {
+  const { controller, document, calls, host } = makeSettingsController({
+    lspStarted: true,
+    config: {
+      lintMode: "advanced",
+      pluginPath: "E:\\Plugins",
+      schemaPath: "E:\\Schema",
+      vectorLspPath: "E:\\Tools\\vector-lsp.exe",
+      debugLogging: true
+    }
+  });
+
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsPluginPath").value = "E:\\Unsaved";
+
+  document.listeners.get("keydown")[0]({
+    key: "Escape",
+    preventDefault: () => {},
+    stopPropagation: () => {}
+  });
+  await pending;
+
+  assert.equal(document.body.querySelector(".settings-modal"), null);
+  assert.equal(document.activeElement, host);
+  assert.equal(calls.some((entry) => entry[0] === "invoke" && entry[1] === "save_config"), false);
+  assert.equal(calls.includes("lsp-start"), false);
+  assert.equal(document.listeners.get("keydown")?.length, 0);
 });

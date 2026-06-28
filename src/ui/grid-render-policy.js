@@ -14,10 +14,18 @@ export const GRID_COLORS = {
   activeRowHeaderHighlight: "rgba(255, 255, 255, .28)",
   activeRowHeaderShadow: "rgba(4, 16, 28, .42)",
   activeRowHeaderSheen: "rgba(255, 255, 255, .08)",
+  indexHeader: "#252526",
+  indexHeaderFrozen: "#30343b",
+  indexHeaderActive: "#30343b",
+  indexHeaderPressed: "#35383d",
+  indexHeaderActiveText: "#ffffff",
+  indexHeaderHighlight: "rgba(255, 255, 255, .20)",
+  indexHeaderShadow: "rgba(0, 0, 0, .48)",
+  indexHeaderSheen: "rgba(255, 255, 255, .06)",
   frozen: "#252a31",
   frozenHeader: "#30343b",
-  grid: "#3a3d41",
-  gridFrozen: "#505863",
+  grid: "#46515b",
+  gridFrozen: "#6a7887",
   rowHeader: "#252526",
   rowHeaderFrozen: "#30343b",
   selection: "#264f78",
@@ -36,7 +44,13 @@ export const GRID_COLORS = {
   frozenDivider: "#6a7b90",
   frozenEdgeHighlight: "rgba(255, 255, 255, .22)",
   frozenEdgeShadow: "rgba(18, 31, 45, .24)",
-  frozenEdgeAmbient: "rgba(18, 31, 45, .10)"
+  frozenEdgeAmbient: "rgba(18, 31, 45, .10)",
+  diagnosticRangeError: "#ff5f6d",
+  diagnosticRangeWarning: "#d9a400",
+  diagnosticRangeInfo: "#3794ff",
+  diagnosticInsertionCaretError: "#ff5f6d",
+  diagnosticInsertionCaretWarning: "#d9a400",
+  diagnosticInsertionCaretInfo: "#3794ff"
 };
 
 export const GRID_CSS_VARS = {
@@ -53,6 +67,14 @@ export const GRID_CSS_VARS = {
   activeRowHeaderHighlight: "--grid-active-row-header-highlight",
   activeRowHeaderShadow: "--grid-active-row-header-shadow",
   activeRowHeaderSheen: "--grid-active-row-header-sheen",
+  indexHeader: "--grid-index-header-bg",
+  indexHeaderFrozen: "--grid-index-header-frozen-bg",
+  indexHeaderActive: "--grid-index-header-active-bg",
+  indexHeaderPressed: "--grid-index-header-pressed-bg",
+  indexHeaderActiveText: "--grid-index-header-active-text",
+  indexHeaderHighlight: "--grid-index-header-highlight",
+  indexHeaderShadow: "--grid-index-header-shadow",
+  indexHeaderSheen: "--grid-index-header-sheen",
   frozen: "--grid-frozen-bg",
   frozenHeader: "--grid-frozen-header-bg",
   grid: "--grid-line",
@@ -75,7 +97,13 @@ export const GRID_CSS_VARS = {
   frozenDivider: "--grid-frozen-divider",
   frozenEdgeHighlight: "--grid-frozen-edge-highlight",
   frozenEdgeShadow: "--grid-frozen-edge-shadow",
-  frozenEdgeAmbient: "--grid-frozen-edge-ambient"
+  frozenEdgeAmbient: "--grid-frozen-edge-ambient",
+  diagnosticRangeError: "--grid-diagnostic-range-error",
+  diagnosticRangeWarning: "--grid-diagnostic-range-warning",
+  diagnosticRangeInfo: "--grid-diagnostic-range-info",
+  diagnosticInsertionCaretError: "--grid-diagnostic-insertion-caret-error",
+  diagnosticInsertionCaretWarning: "--grid-diagnostic-insertion-caret-warning",
+  diagnosticInsertionCaretInfo: "--grid-diagnostic-insertion-caret-info"
 };
 
 export function gridColor(name) {
@@ -98,7 +126,27 @@ export function rowHeaderRenderState(selection, row) {
 
 export function columnHeaderRenderState({ selection, row, column, editingThisCell }) {
   return {
-    activeColumnHeader: !editingThisCell && row === 0 && selection.focus.column === column
+    activeColumnHeader: !editingThisCell && row === 0 && selection.focus.row === row && selection.focus.column === column
+  };
+}
+
+export function columnIndexLabel(column) {
+  const index = Math.floor(Number(column));
+  if (!Number.isFinite(index) || index < 0) return "";
+  let value = index + 1;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+export function columnIndexRenderState({ selection, column, rowCount }) {
+  return {
+    selected: selection.hasFullColumn(column, rowCount),
+    activeHeader: selection.focus.column === column
   };
 }
 
@@ -108,6 +156,54 @@ export function cellBackground(row, selected, frozen, firstColumnLabel, colors =
   if (row === 0) return colors.header;
   if (firstColumnLabel) return colors.firstColumn;
   return row % 2 ? colors.rowOdd : colors.rowEven;
+}
+
+export function cellGridLineColor(_state = {}, colors = GRID_COLORS) {
+  return colors.grid;
+}
+
+export function indexHandleRenderState({ selected = false, active = false, frozen = false } = {}) {
+  const pressed = selected || active;
+  return {
+    fill: pressed ? "indexHeaderPressed" : frozen ? "indexHeaderFrozen" : "indexHeader",
+    text: pressed ? "indexHeaderActiveText" : "rowText",
+    stroke: "grid",
+    pressed
+  };
+}
+
+export function indexHandleChromeSteps({ x = 0, y = 0, width = 0, height = 0, pressed = false } = {}) {
+  if (!pressed || width <= 2 || height <= 2) return [];
+  const right = x + width - 1.5;
+  const bottom = y + height - 1.5;
+  return [
+    {
+      kind: "fillRect",
+      color: "indexHeaderSheen",
+      x: x + 2,
+      y: y + 2,
+      width: Math.max(0, width - 4),
+      height: Math.max(1, Math.floor(height * .32))
+    },
+    {
+      kind: "strokePath",
+      color: "indexHeaderShadow",
+      points: [
+        [x + 1.5, bottom],
+        [x + 1.5, y + 1.5],
+        [right - 1, y + 1.5]
+      ]
+    },
+    {
+      kind: "strokePath",
+      color: "indexHeaderHighlight",
+      points: [
+        [x + 1.5, bottom],
+        [right, bottom],
+        [right, y + 1.5]
+      ]
+    }
+  ];
 }
 
 export function cellTextColor(row, column, value, selected, colorizeColumns, firstColumnLabel = false, colors = GRID_COLORS) {
@@ -211,6 +307,97 @@ export function diagnosticMarkerState(diagnostics = [], { x = 0, y = 0, width = 
       [x + width - 1, y + height - size - 1]
     ]
   };
+}
+
+export function cellTextRenderPlan({ text = "", maxWidth = 0, measureText } = {}) {
+  const value = String(text ?? "");
+  const measure = typeof measureText === "function" ? measureText : (candidate) => String(candidate ?? "").length;
+  if (maxWidth <= 0) {
+    return { text: "", sourceLength: 0, clipped: value.length > 0 };
+  }
+  if (measure(value) <= maxWidth) {
+    return { text: value, sourceLength: value.length, clipped: false };
+  }
+  let clipped = value;
+  while (clipped.length > 1 && measure(`${clipped}...`) > maxWidth) clipped = clipped.slice(0, -1);
+  return {
+    text: `${clipped}...`,
+    sourceLength: clipped.length,
+    clipped: true
+  };
+}
+
+export function diagnosticTextOverlayPlan({
+  diagnostics = [],
+  value = "",
+  active = false,
+  hovered = false,
+  currentProblem = false,
+  textX = 0,
+  cellY = 0,
+  cellHeight = 0,
+  maxWidth = 0,
+  measureText
+} = {}) {
+  if (!active && !hovered && !currentProblem) return null;
+  const diagnostic = bestPreciseDiagnostic(diagnostics);
+  if (!diagnostic) return null;
+  const text = String(value ?? "");
+  const renderPlan = cellTextRenderPlan({ text, maxWidth, measureText });
+  const visibleSourceLength = renderPlan.sourceLength;
+  const measure = typeof measureText === "function" ? measureText : (candidate) => String(candidate ?? "").length;
+  const severity = diagnostic.severity === "error" || diagnostic.severity === "warning" ? diagnostic.severity : "info";
+  const color = severity[0].toUpperCase() + severity.slice(1);
+
+  if (diagnostic.isInsertionPoint) {
+    const position = numberOr(diagnostic.localInsertionPoint, diagnostic.localStart);
+    if (position == null || position < 0 || position > text.length) return null;
+    if (renderPlan.clipped && position >= visibleSourceLength) return null;
+    const x = textX + measure(text.slice(0, position));
+    return {
+      kind: "insertion",
+      severity,
+      color: `diagnosticInsertionCaret${color}`,
+      x,
+      top: cellY + 5,
+      bottom: cellY + Math.max(6, cellHeight - 5),
+      lineWidth: 2
+    };
+  }
+
+  const start = numberOr(diagnostic.localStart, null);
+  const end = numberOr(diagnostic.localEnd, null);
+  if (start == null || end == null || end <= start || start < 0 || end > text.length) return null;
+  if (renderPlan.clipped && end > visibleSourceLength) return null;
+  const startX = textX + measure(text.slice(0, start));
+  const endX = textX + measure(text.slice(0, end));
+  if (endX <= startX) return null;
+  return {
+    kind: "range",
+    severity,
+    color: `diagnosticRange${color}`,
+    x: startX,
+    y: cellY + Math.max(8, cellHeight - 6),
+    width: Math.max(3, endX - startX),
+    lineWidth: 2
+  };
+}
+
+function bestPreciseDiagnostic(diagnostics = []) {
+  return [...(diagnostics ?? [])]
+    .filter((diagnostic) => diagnostic?.hasPreciseRange)
+    .sort((a, b) => severityRank(b.severity) - severityRank(a.severity))[0] ?? null;
+}
+
+function severityRank(severity) {
+  if (severity === "error") return 3;
+  if (severity === "warning") return 2;
+  return 1;
+}
+
+function numberOr(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function createGridRenderStats() {
