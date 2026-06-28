@@ -1455,6 +1455,40 @@ details:not([open]) .problem-file-header::before {
   margin-bottom: 0;
 }
 
+.search-scope {
+  display: flex;
+  width: fit-content;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+}
+
+.search-scope label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--button-bg);
+  cursor: pointer;
+}
+
+.search-scope label + label {
+  border-left: 1px solid var(--button-border);
+}
+
+.search-scope input {
+  margin: 0 6px 0 0;
+}
+
+.search-scope label:has(input:checked) {
+  color: var(--text-strong);
+  background: var(--selection);
+}
+
 .search-status {
   min-height: 18px;
   color: var(--muted);

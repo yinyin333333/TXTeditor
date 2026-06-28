@@ -1,8 +1,11 @@
-import { findInTable } from "../../core/search.js";
+import { findInTable, normalizeSearchScope } from "../../core/search.js";
 import {
+  searchScrollOptionsForScope,
   searchShouldIncludeStart,
+  searchStatusText,
   searchStateAfterFind,
   searchStateAfterInput,
+  searchTargetForResult,
   shouldCloseSearchKey,
   shouldSubmitSearchKey
 } from "../search-policy.js";
@@ -19,20 +22,29 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     els.host.focus();
   }
 
+  function selectedSearchScope() {
+    return normalizeSearchScope(
+      els.searchPanel.querySelector("input[name='searchScope']:checked")?.value
+    );
+  }
+
   function findNext() {
     const query = els.searchInput.value;
-    const includeStart = searchShouldIncludeStart(query, state.search.lastQuery);
-    const found = findInTable(activeDoc(), query, state.selection.focus, { includeStart });
+    const scope = selectedSearchScope();
+    const includeStart = searchShouldIncludeStart(query, scope, state.search.lastQuery, state.search.lastScope);
+    const focus = state.selection.focus;
+    const found = findInTable(activeDoc(), query, focus, { includeStart, scope });
     if (!found) {
       els.searchStatus.textContent = "No results";
       return;
     }
-    Object.assign(state.search, searchStateAfterFind(query));
-    state.selection.set(found.row, found.column);
-    grid.scrollCellIntoView(found.row, found.column);
+    const target = searchTargetForResult(scope, found, focus);
+    Object.assign(state.search, searchStateAfterFind(query, scope));
+    state.selection.set(target.row, target.column);
+    grid.scrollCellIntoView(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();
-    els.searchStatus.textContent = `R${found.row + 1}:C${found.column + 1}`;
+    els.searchStatus.textContent = searchStatusText(scope, found, target);
   }
 
   function wireEvents() {
@@ -48,6 +60,16 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     });
     els.searchInput.addEventListener("input", () => {
       Object.assign(state.search, searchStateAfterInput());
+    });
+    els.searchPanel.querySelectorAll("input[name='searchScope']").forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (!shouldSubmitSearchKey(event.key)) return;
+        event.preventDefault();
+        findNext();
+      });
+      input.addEventListener("change", () => {
+        Object.assign(state.search, searchStateAfterInput());
+      });
     });
     els.searchPanel.addEventListener("click", (event) => {
       if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();

@@ -75,6 +75,11 @@
       <div class="modal search-modal">
         <h2 id="searchTitle">Find</h2>
         <input id="searchInput" class="modal-input" placeholder="Search in current table" />
+        <fieldset class="search-scope" aria-label="Search scope">
+          <label><input type="radio" name="searchScope" value="all" checked /> All cells</label>
+          <label><input type="radio" name="searchScope" value="column-titles" /> Column only</label>
+          <label><input type="radio" name="searchScope" value="row-titles" /> Row only</label>
+        </fieldset>
         <div id="searchStatus" class="search-status"></div>
         <div class="modal-actions">
           <button data-command="find-next">Find Next</button>

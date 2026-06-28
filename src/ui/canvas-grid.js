@@ -822,7 +822,7 @@ export class CanvasGrid {
     };
   }
 
-  scrollCellIntoView(row, column) {
+  scrollCellIntoView(row, column, options = {}) {
     const scrollState = edgeCellScrollState({
       row,
       column,
@@ -837,8 +837,8 @@ export class CanvasGrid {
       viewportWidth: this.host.clientWidth - this.rowHeaderWidth - this.frozenColumnWidth(),
       viewportHeight: this.host.clientHeight - this.headerHeight - this.frozenRowHeight()
     });
-    if ("scrollLeft" in scrollState) this.host.scrollLeft = scrollState.scrollLeft;
-    if ("scrollTop" in scrollState) this.host.scrollTop = scrollState.scrollTop;
+    if ("scrollLeft" in scrollState && !options.preserveScrollLeft) this.host.scrollLeft = scrollState.scrollLeft;
+    if ("scrollTop" in scrollState && !options.preserveScrollTop) this.host.scrollTop = scrollState.scrollTop;
   }
 
   scrollCellToCenter(row, column) {
