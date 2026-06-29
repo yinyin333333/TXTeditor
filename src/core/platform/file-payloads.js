@@ -1,3 +1,5 @@
+import { markTableSaved, tableFileState } from "../table-file-state.js";
+
 export function normalizeNativeReadResult(entry, fallbackPath, bulkRead) {
   if (entry?.Ok) return { path: entry.Ok.path ?? fallbackPath, payload: entry.Ok, bulkRead };
   if (entry?.Err) return { path: fallbackPath, error: String(entry.Err), bulkRead };
@@ -38,10 +40,10 @@ export function documentOpenResultFromNativeRead(result, DocumentType, { now = d
   }
 }
 
-export function applySavedTextPayload(doc, payload) {
+export function applySavedTextPayload(doc, payload, revision = tableFileState(doc).revision) {
   doc.path = payload.path;
   doc.name = payload.name;
-  doc.dirty = false;
+  markTableSaved(doc, revision);
   return doc;
 }
 

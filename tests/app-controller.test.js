@@ -11,6 +11,7 @@ import {
 } from "../src/core/search.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
+import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
   canRunCommandWithoutDocument,
@@ -253,6 +254,289 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 2, documentCount: 3 }), 0);
   assert.equal(activeIndexAfterTabClose({ activeIndex: 0, closeIndex: 0, documentCount: 1 }), -1);
   assert.equal(closeDialogMessage(docs[1]), "skills.txt has unsaved changes.");
+});
+
+test("document save commits the active editor value before writing", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write: async (text) => writes.push(text),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc, {
+    commitEdit: () => doc.setCell(1, 0, "new")
+  });
+
+  assert.equal(await controller.saveFile(), true);
+  assert.deepEqual(writes, ["id\nnew"]);
+  assert.equal(doc.dirty, false);
+});
+
+test("document save keeps dirty when content changes during browser write", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write(text) {
+          const gate = deferred();
+          writes.push({ text, gate });
+          return gate.promise;
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  const saving = controller.saveFile();
+  await waitFor(() => writes.length === 1);
+  assert.equal(writes[0].text, "id\nold");
+  doc.setCell(1, 0, "newer");
+  writes[0].gate.resolve();
+
+  assert.equal(await saving, true);
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.toText(), "id\nnewer");
+});
+
+test("document saves for the same file run in order", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write(text) {
+          const gate = deferred();
+          writes.push({ text, gate });
+          return gate.promise;
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  const first = controller.saveFile();
+  await waitFor(() => writes.length === 1);
+  doc.setCell(1, 0, "newer");
+  const second = controller.saveFile();
+  await Promise.resolve();
+  assert.equal(writes.length, 1);
+
+  writes[0].gate.resolve();
+  await waitFor(() => writes.length === 2);
+  assert.equal(writes[1].text, "id\nnewer");
+  writes[1].gate.resolve();
+
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(doc.dirty, false);
+});
+
+test("document native saves for the same file run in order", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const writes = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke(command, args) {
+          assert.equal(command, "write_text_file_safe");
+          const gate = deferred();
+          writes.push({ args, gate });
+          return gate.promise.then(() => ({ path: args.path, name: "items.txt" }));
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController(doc);
+    const first = controller.saveFile();
+    await waitFor(() => writes.length === 1);
+    doc.setCell(1, 0, "newer");
+    const second = controller.saveFile();
+    await Promise.resolve();
+    assert.equal(writes.length, 1);
+
+    writes[0].gate.resolve();
+    await waitFor(() => writes.length === 2);
+    assert.deepEqual(writes.map((write) => write.args.text), ["id\nold", "id\nnewer"]);
+    writes[1].gate.resolve();
+
+    assert.equal(await first, true);
+    assert.equal(await second, true);
+    assert.equal(doc.dirty, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document native save as cancel keeps committed edit dirty", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke(command) {
+          assert.equal(command, "save_file_dialog");
+          return null;
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => doc.setCell(1, 0, "new")
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(doc.toText(), "id\nnew");
+    assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document browser save as write failure keeps committed edit dirty", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const errors = [];
+  globalThis.window = {
+    showSaveFilePicker: async () => ({
+      name: "picked.txt",
+      async createWritable() {
+        return {
+          write: async () => { throw new Error("write blocked"); },
+          close: async () => {}
+        };
+      }
+    })
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => doc.setCell(1, 0, "new")
+    }, {
+      showError: (error) => errors.push(String(error.message ?? error))
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(doc.name, "items.txt");
+    assert.equal(doc.handle, null);
+    assert.equal(doc.toText(), "id\nnew");
+    assert.equal(doc.dirty, true);
+    assert.deepEqual(errors, ["write blocked"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document download fallback saves committed editor text", async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalBlob = globalThis.Blob;
+  const originalUrl = globalThis.URL;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  let blobText = null;
+  let clicked = false;
+  let editing = true;
+  globalThis.window = {};
+  globalThis.Blob = class Blob {
+    constructor(parts) {
+      blobText = parts[0];
+    }
+  };
+  globalThis.URL = {
+    createObjectURL: () => "blob:test",
+    revokeObjectURL: () => {}
+  };
+  globalThis.document = {
+    body: { append: () => {} },
+    createElement: () => ({
+      click: () => { clicked = true; },
+      remove: () => {}
+    })
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => {
+        if (!editing) return;
+        editing = false;
+        doc.setCell(1, 0, "downloaded");
+      }
+    });
+
+    assert.equal(await controller.saveFile(), true);
+    assert.equal(blobText, "id\ndownloaded");
+    assert.equal(clicked, true);
+    assert.equal(doc.dirty, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    if (originalBlob === undefined) delete globalThis.Blob;
+    else globalThis.Blob = originalBlob;
+    if (originalUrl === undefined) delete globalThis.URL;
+    else globalThis.URL = originalUrl;
+  }
+});
+
+test("closing the active tab commits editor changes before checking dirty state", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const { controller, state } = testDocumentController(doc, {
+    commitEdit: () => doc.setCell(1, 0, "new")
+  });
+
+  const closing = controller.closeTab(0);
+  await waitFor(() => doc.dirty === true);
+  assert.equal(state.docs.length, 1);
+
+  controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+  await closing;
+  assert.equal(state.docs.length, 1);
+});
+
+test("closing another tab commits the active editor before switching documents", async () => {
+  const activeDoc = TableDocument.fromText("active.txt", "id\nactive", { dirty: false });
+  const closingDoc = TableDocument.fromText("closing.txt", "id\nclosing", { dirty: true });
+  const writes = [];
+  let editing = true;
+  closingDoc.handle = {
+    async createWritable() {
+      return {
+        write: async (text) => writes.push(text),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller, state } = testDocumentController([activeDoc, closingDoc], {
+    commitEdit: () => {
+      if (!editing) return;
+      editing = false;
+      activeDoc.setCell(1, 0, "active-edit");
+    }
+  });
+
+  const closing = controller.closeTab(1);
+  await waitFor(() => activeDoc.dirty === true);
+  controller.handleCloseDialogClick(closeChoiceEvent("save"));
+  await closing;
+
+  assert.deepEqual(writes, ["id\nclosing"]);
+  assert.equal(activeDoc.toText(), "id\nactive-edit");
+  assert.deepEqual(state.docs.map((doc) => doc.name), ["active.txt"]);
 });
 
 test("context menu command item registries preserve expected command groups", () => {
@@ -676,3 +960,68 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+L`: toggle Problems panel/);
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
+
+function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
+  const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: "legacy" } };
+  const grid = {
+    commitEdit: () => {},
+    draw: () => {},
+    setDocument: () => {},
+    ...gridOverrides
+  };
+  const controller = createDocumentController({
+    state,
+    els: {
+      closeDialog: { classList: { add: () => {}, remove: () => {} } },
+      closeDialogText: { textContent: "" },
+      fileInput: { click: () => {} }
+    },
+    grid,
+    emptyDoc: TableDocument.fromText("empty.txt", ""),
+    activeDoc: () => state.docs[state.active],
+    applyFreezeToDoc: () => {},
+    renderChrome: () => {},
+    showError: options.showError ?? ((error) => { throw error; }),
+    reportWindowCloseFailure: () => {},
+    lspOpenDoc: () => {},
+    reportLspOpenFailure: () => {},
+    lspCloseDoc: () => {},
+    reportLspCloseFailure: () => {},
+    lspStartWorkspace: () => {},
+    scheduleHoverPrewarm: () => {},
+    resetUndoManagerForDocument: () => {},
+    resetLegacyWorkspaceIndex: () => {},
+    scheduleLegacyLintForOpen: () => {},
+    scheduleLegacyLintFull: () => {},
+    cancelLegacyLintJobs: () => {},
+    isVectorLintEngine: () => false,
+    isLegacyLintEngine: () => true,
+    updateGridDiagnostics: () => {},
+    scrollProblemsToActiveFile: () => {}
+  });
+  return { controller, state };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(condition) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(condition(), true);
+}
+
+function closeChoiceEvent(choice) {
+  return {
+    target: {
+      closest: () => ({ dataset: { closeChoice: choice } })
+    }
+  };
+}

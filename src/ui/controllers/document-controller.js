@@ -1,4 +1,5 @@
 import { TableDocument } from "../../core/table-model.js";
+import { markTableSaved, tableFileState } from "../../core/table-file-state.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
@@ -49,6 +50,7 @@ export function createDocumentController({
   scrollProblemsToActiveFile
 }) {
   let pendingCloseResolve = null;
+  const pendingSaves = new WeakMap();
 
   function hasOpenDocument() {
     return state.docs.length > 0 && state.active >= 0;
@@ -59,6 +61,7 @@ export function createDocumentController({
     const tauri = window.__TAURI__;
     if (!tauri?.event?.listen) return;
     await tauri.event.listen("app-close-requested", async () => {
+      commitActiveEdit();
       const unsaved = unsavedDocuments(state.docs);
       if (!unsaved.length) {
         closeWindow().catch((error) => reportWindowCloseFailure(error, "app-close-requested"));
@@ -182,65 +185,79 @@ export function createDocumentController({
 
   async function saveFile() {
     try {
-      const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
         return false;
       }
-      if (isTauriRuntime()) {
-        const saved = await saveDocumentNative(doc, false);
-        if (!saved) return false;
-        grid.draw();
-        renderChrome();
-        return true;
-      }
-      if (doc.handle?.createWritable) {
-        const writable = await doc.handle.createWritable();
-        await writable.write(doc.toText());
-        await writable.close();
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      }
-      return saveAs();
+      commitActiveEdit();
+      const doc = activeDoc();
+      if (!isTauriRuntime() && !doc.handle?.createWritable) return saveAs();
+      return await queueSave(doc, () => saveFileNow(doc));
     } catch (error) {
       showError(error);
       return false;
     }
   }
 
+  async function saveFileNow(doc) {
+    if (isTauriRuntime()) {
+      const saved = await saveDocumentNative(doc, false);
+      if (!saved) return false;
+      grid.draw();
+      renderChrome();
+      return true;
+    }
+    const revision = tableFileState(doc).revision;
+    const text = doc.toText();
+    const writable = await doc.handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+    markTableSaved(doc, revision);
+    renderChrome();
+    return true;
+  }
+
   async function saveAs() {
     try {
-      const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
         return false;
       }
-      if (isTauriRuntime()) {
-        const saved = await saveDocumentNative(doc, true);
-        if (!saved) return false;
-        grid.draw();
-        renderChrome();
-        return true;
-      } else if ("showSaveFilePicker" in window) {
-        const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
-        const writable = await handle.createWritable();
-        await writable.write(doc.toText());
-        await writable.close();
-        doc.handle = handle;
-        doc.name = handle.name ?? doc.name;
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      } else {
-        downloadText(doc.name, doc.toText());
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      }
+      commitActiveEdit();
+      const doc = activeDoc();
+      return await queueSave(doc, () => saveAsNow(doc));
     } catch (error) {
       showError(error);
       return false;
+    }
+  }
+
+  async function saveAsNow(doc) {
+    if (isTauriRuntime()) {
+      const saved = await saveDocumentNative(doc, true);
+      if (!saved) return false;
+      grid.draw();
+      renderChrome();
+      return true;
+    } else if ("showSaveFilePicker" in window) {
+      const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
+      const revision = tableFileState(doc).revision;
+      const text = doc.toText();
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      doc.handle = handle;
+      doc.name = handle.name ?? doc.name;
+      markTableSaved(doc, revision);
+      renderChrome();
+      return true;
+    } else {
+      const revision = tableFileState(doc).revision;
+      const text = doc.toText();
+      downloadText(doc.name, text);
+      markTableSaved(doc, revision);
+      renderChrome();
+      return true;
     }
   }
 
@@ -253,6 +270,7 @@ export function createDocumentController({
 
   async function closeTab(index) {
     if (index < 0 || index >= state.docs.length) return;
+    commitActiveEdit();
     const doc = state.docs[index];
     if (doc.dirty) {
       const choice = await askCloseChoice(doc);
@@ -296,6 +314,25 @@ export function createDocumentController({
     return new Promise((resolve) => {
       pendingCloseResolve = resolve;
     });
+  }
+
+  function commitActiveEdit() {
+    grid.commitEdit?.();
+  }
+
+  function queueSave(doc, save) {
+    const previous = pendingSaves.get(doc) ?? Promise.resolve();
+    const queued = previous.catch(() => {}).then(save);
+    pendingSaves.set(doc, queued);
+    queued.then(
+      () => {
+        if (pendingSaves.get(doc) === queued) pendingSaves.delete(doc);
+      },
+      () => {
+        if (pendingSaves.get(doc) === queued) pendingSaves.delete(doc);
+      }
+    );
+    return queued;
   }
 
   return {

@@ -2,6 +2,7 @@ import { isTauriRuntime, tauriApi } from "./tauri-api.js";
 import { applySavedTextPayload, documentOpenResultFromNativeRead } from "./file-payloads.js";
 import { decodeBuffer } from "./text-codec.js";
 import { readNativeTextFiles } from "./native-read.js";
+import { tableFileState } from "../table-file-state.js";
 
 export async function readFileAsDocument(file, DocumentType) {
   const buffer = await file.arrayBuffer();
@@ -42,11 +43,13 @@ export async function saveDocumentNative(doc, saveAs = false) {
     target = await api.invoke("save_file_dialog", { defaultName: doc.name });
     if (!target) return false;
   }
+  const revision = tableFileState(doc).revision;
+  const text = doc.toText();
   const payload = await api.invoke("write_text_file_safe", {
     path: target,
-    text: doc.toText()
+    text
   });
-  applySavedTextPayload(doc, payload);
+  applySavedTextPayload(doc, payload, revision);
   return true;
 }
 

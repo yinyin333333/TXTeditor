@@ -35,6 +35,7 @@ import {
   documentOpenResultFromNativeRead,
   normalizeNativeReadResult
 } from "../src/core/platform/file-payloads.js";
+import { tableFileState } from "../src/core/table-file-state.js";
 import { readNativeTextFiles } from "../src/core/platform/native-read.js";
 import {
   legacyWorkspaceFileSignature,
@@ -417,6 +418,108 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   }
 });
 
+test("native save leaves dirty set when content changes during the write", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const writes = [];
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_safe");
+          const gate = deferredPlatformWrite();
+          writes.push({ args, gate });
+          await gate.promise;
+          return { path: args.path, name: "items.txt" };
+        }
+      }
+    }
+  };
+
+  try {
+    const saving = saveDocumentNative(doc, false);
+    await waitForPlatformWrite(() => writes.length === 1);
+    assert.equal(writes[0].args.text, "id\nold");
+    doc.setCell(1, 0, "new");
+    writes[0].gate.resolve();
+
+    assert.equal(await saving, true);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.toText(), "id\nnew");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("saved native payload does not clear dirty for a stale document revision", () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const savingRevision = tableFileState(doc).revision;
+  doc.setCell(1, 0, "new");
+
+  applySavedTextPayload(doc, { path: "E:\\renamed.txt", name: "renamed.txt" }, savingRevision);
+
+  assert.equal(doc.path, "E:\\renamed.txt");
+  assert.equal(doc.name, "renamed.txt");
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.toText(), "id\nnew");
+});
+
+test("native save as cancel leaves dirty set and does not write", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const calls = [];
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          assert.equal(command, "save_file_dialog");
+          return null;
+        }
+      }
+    }
+  };
+
+  try {
+    assert.equal(await saveDocumentNative(doc, true), false);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.path, "");
+    assert.deepEqual(calls, [["save_file_dialog", { defaultName: "items.txt" }]]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("native write failure leaves dirty set", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_safe");
+          assert.deepEqual(args, { path: "E:\\items.txt", text: "id\nold" });
+          throw new Error("disk blocked");
+        }
+      }
+    }
+  };
+
+  try {
+    await assert.rejects(() => saveDocumentNative(doc, false), /disk blocked/);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.path, "E:\\items.txt");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -448,3 +551,19 @@ test("Find UI is a centered modal and text inputs keep native shortcuts", () => 
   assert.match(css, /\.modal-backdrop\s*\{[\s\S]*align-items: center;[\s\S]*justify-content: center;/);
   assert.match(css, /\.search-modal\s*\{/);
 });
+
+function deferredPlatformWrite() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitForPlatformWrite(condition) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(condition(), true);
+}

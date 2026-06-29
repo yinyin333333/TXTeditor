@@ -10,7 +10,8 @@ export function resetTableFileState(doc, name = "Untitled.txt", meta = {}) {
     lineEnding: meta.lineEnding ?? "\n",
     finalNewline: meta.finalNewline ?? false,
     encoding: meta.encoding ?? "utf-8",
-    dirty: meta.dirty ?? false
+    dirty: meta.dirty ?? false,
+    revision: meta.revision ?? 0
   };
   tableFileStates.set(doc, state);
   defineTableFileStateAccessors(doc);
@@ -24,7 +25,14 @@ export function tableFileState(doc) {
 }
 
 export function markTableContentDirty(doc) {
-  tableFileState(doc).dirty = true;
+  const state = tableFileState(doc);
+  state.dirty = true;
+  state.revision += 1;
+}
+
+export function markTableSaved(doc, revision = tableFileState(doc).revision) {
+  const state = tableFileState(doc);
+  if (state.revision === revision) state.dirty = false;
 }
 
 function defineTableFileStateAccessors(doc) {
