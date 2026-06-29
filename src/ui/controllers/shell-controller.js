@@ -28,9 +28,11 @@ export function createShellController({
   documentRef = document
 }) {
   const collapsedFileGroups = new Set();
+  let explorerSearchActiveIndex = 0;
 
   function renderChrome() {
     const started = perfNow();
+    bindExplorerFilter();
     syncDockLayout();
     els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
     els.shell.classList.toggle("problems-open", state.problemsVisible);
@@ -101,14 +103,7 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
-        state.active = Number(button.dataset.tab);
-        state.selection.set(0, 0);
-        applyFreezeToDoc(activeDoc());
-        grid.setDocument(activeDoc());
-        updateGridDiagnostics();
-        renderChrome();
-        scrollProblemsToActiveFile();
-        scheduleHoverPrewarm("tab-switch");
+        selectTab(Number(button.dataset.tab));
       });
     }
     for (const button of documentRef.querySelectorAll("[data-close-tab]")) {
@@ -127,7 +122,97 @@ export function createShellController({
         else collapsedFileGroups.add(group);
       });
     }
+    renderExplorerSearchResults();
     recordUiPerf("render-chrome", started, { docs: state.docs.length });
+  }
+
+  function selectTab(index) {
+    state.active = index;
+    state.selection.set(0, 0);
+    applyFreezeToDoc(activeDoc());
+    grid.setDocument(activeDoc());
+    updateGridDiagnostics();
+    renderChrome();
+    scrollProblemsToActiveFile();
+    scheduleHoverPrewarm("tab-switch");
+  }
+
+  function bindExplorerFilter() {
+    if (!els.explorerFilter || els.explorerFilter.dataset.bound) return;
+    els.explorerFilter.dataset.bound = "true";
+    els.explorerFilter.addEventListener("input", () => {
+      explorerSearchActiveIndex = 0;
+      renderExplorerSearchResults();
+    });
+    els.explorerFilter.addEventListener("keydown", (event) => {
+      const results = explorerSearchResults();
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (!results.length) return;
+        event.preventDefault();
+        explorerSearchActiveIndex = (explorerSearchActiveIndex + (event.key === "ArrowDown" ? 1 : results.length - 1)) % results.length;
+        renderExplorerSearchResults(results);
+        return;
+      }
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      openExplorerSearchResult(results[explorerSearchActiveIndex] ?? results[0]);
+    });
+    els.explorerSearchResults?.addEventListener("mousedown", (event) => event.preventDefault());
+    els.explorerSearchResults?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-explorer-search-index]");
+      if (!button) return;
+      openExplorerSearchResult(explorerSearchResults()[Number(button.dataset.explorerSearchIndex)]);
+    });
+  }
+
+  function renderExplorerSearchResults(results = explorerSearchResults()) {
+    if (!els.explorerSearchResults) return;
+    if (!normalizedExplorerQuery(els.explorerFilter?.value) || !results.length) {
+      els.explorerSearchResults.classList.add("hidden");
+      els.explorerSearchResults.innerHTML = "";
+      return;
+    }
+    explorerSearchActiveIndex = Math.min(explorerSearchActiveIndex, results.length - 1);
+    els.explorerSearchResults.classList.remove("hidden");
+    els.explorerSearchResults.innerHTML = results.map((result, index) => (
+      `<button class="${index === explorerSearchActiveIndex ? "active" : ""}" data-explorer-search-index="${index}" type="button" role="option">${escapeHtml(result.name)}</button>`
+    )).join("");
+  }
+
+  function openExplorerSearchResult(result) {
+    if (!result) return;
+    els.explorerFilter.value = "";
+    renderExplorerSearchResults([]);
+    if (result.index != null) return selectTab(result.index);
+    openDroppedNativePaths([result.path]).catch(showError);
+  }
+
+  function explorerSearchResults() {
+    const query = normalizedExplorerQuery(els.explorerFilter?.value);
+    if (!query) return [];
+    const openKeys = new Set(state.docs.map((doc) => lintPathKey(doc.path || "")));
+    const candidates = [
+      ...state.docs.map((doc, index) => ({ index, name: doc.name })),
+      ...(state.workspace?.files ?? [])
+        .filter((file) => !openKeys.has(lintPathKey(file.path || "")))
+        .map((file) => ({ path: file.path, name: file.name }))
+    ];
+    return candidates
+      .map((candidate) => ({ ...candidate, score: explorerMatchScore(candidate.name, query) }))
+      .filter((candidate) => candidate.score >= 0)
+      .sort((a, b) => a.score - b.score);
+  }
+
+  function explorerMatchScore(name, query) {
+    const fileName = normalizedExplorerQuery(name);
+    const stem = fileName.replace(/\.[^.]+$/, "");
+    if (fileName === query || stem === query) return 0;
+    if (fileName.startsWith(query) || stem.startsWith(query)) return 1;
+    return fileName.includes(query) ? 2 : -1;
+  }
+
+  function normalizedExplorerQuery(value) {
+    return String(value || "").trim().toLowerCase();
   }
 
   return {

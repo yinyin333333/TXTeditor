@@ -168,6 +168,8 @@ const els = {
   editor: document.getElementById("cellEditor"),
   tabs: document.getElementById("tabs"),
   emptyState: document.getElementById("emptyState"),
+  explorerFilter: document.getElementById("explorerFilter"),
+  explorerSearchResults: document.getElementById("explorerSearchResults"),
   fileList: document.getElementById("fileList"),
   fileInput: document.getElementById("hiddenFileInput"),
   lintControls: document.getElementById("lintControls"),
