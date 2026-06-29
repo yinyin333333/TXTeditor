@@ -1048,17 +1048,8 @@ async function showSettings() {
 
 function resizeFit(useSelection) {
   const doc = activeDoc();
-  const rect = state.selection.rect;
-  const hit = state.contextHit;
-  if (isFullRowSelection(rect, doc) || hit?.kind === "row-header") {
-    const rows = useSelection ? rowsFromSelection() : [hit?.row ?? state.selection.focus.row];
-    return autoFitRows(rows);
-  }
-  if (isFullColumnSelection(rect, doc) || hit?.row === 0 || hit?.kind === "column-header") {
-    const columns = useSelection ? columnsFromSelection() : [hit?.column ?? state.selection.focus.column];
-    return autoFitColumns(columns);
-  }
-  return autoFitColumns(useSelection ? columnsFromSelection() : [state.selection.focus.column]);
+  const columns = useSelection ? columnsFromSelection() : range(0, doc.columnCount - 1);
+  return autoFitColumns(columns);
 }
 
 async function autoFitColumns(columns) {
@@ -1068,16 +1059,6 @@ async function autoFitColumns(columns) {
   const wasDirty = doc.dirty;
   const widths = await Promise.all(targets.map((col) => grid.measureColumnFitWidth(col, { yieldEvery: 0 })));
   targets.forEach((col, i) => doc.setColumnWidth(col, widths[i]));
-  doc.dirty = wasDirty;
-  grid.layout();
-  renderChrome();
-}
-
-function autoFitRows(rows) {
-  const doc = activeDoc();
-  const targets = [...new Set(rows)].filter((row) => row >= 0 && row < doc.rowCount && !doc.hiddenRows.has(row));
-  const wasDirty = doc.dirty;
-  for (const row of targets) doc.setRowHeight(row, doc.defaultRowHeight);
   doc.dirty = wasDirty;
   grid.layout();
   renderChrome();

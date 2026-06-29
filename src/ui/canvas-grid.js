@@ -22,7 +22,7 @@ const BASE_ROW_HEIGHT = 26;
 const BASE_ROW_HEADER_MIN = 38;
 const OVERSCAN_ROWS = 12;
 const OVERSCAN_COLUMNS_PX = 900;
-const FIT_PADDING = 24;
+const FIT_PADDING = 16;
 export const VECTOR_LSP_HOVER_DELAY_MS = 0;
 export { gridColor } from "./grid-render-policy.js";
 
@@ -792,7 +792,7 @@ export class CanvasGrid {
   async measureColumnFitWidth(column, { yieldEvery = 10000 } = {}) {
     let width = 72 * this.zoom;
     for (let row = 0; row < this.doc.rowCount; row++) {
-      this.ctx.font = this.font(row === 0 ? 600 : 400);
+      this.ctx.font = this.font(row === 0 || (column === 0 && row > 0) ? 600 : 400);
       width = Math.max(width, this.ctx.measureText(this.doc.getCell(row, column)).width + FIT_PADDING * this.zoom);
       if (yieldEvery > 0 && row > 0 && row % yieldEvery === 0) await yieldToBrowser();
     }
