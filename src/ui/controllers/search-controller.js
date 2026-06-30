@@ -10,7 +10,7 @@ import {
   shouldSubmitSearchKey
 } from "../search-policy.js";
 
-export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight }) {
+export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight, saveSelectionState = () => {} }) {
   function showSearch() {
     els.searchPanel.classList.remove("hidden");
     els.searchInput.focus();
@@ -41,6 +41,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     const target = searchTargetForResult(scope, found, focus);
     Object.assign(state.search, searchStateAfterFind(query, scope));
     state.selection.set(target.row, target.column);
+    saveSelectionState();
     grid.scrollCellIntoView(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();

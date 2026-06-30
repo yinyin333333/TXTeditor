@@ -11,6 +11,21 @@ export class SelectionModel {
     this.ranges = [makeRect(row, column, row, column)];
   }
 
+  snapshot() {
+    return {
+      anchor: { ...this.anchor },
+      focus: { ...this.focus },
+      ranges: this.ranges.map((range) => ({ ...range }))
+    };
+  }
+
+  restore(snapshot, rowCount, columnCount) {
+    const safe = normalizeSelectionSnapshot(snapshot, rowCount, columnCount);
+    this.anchor = safe.anchor;
+    this.focus = safe.focus;
+    this.ranges = safe.ranges;
+  }
+
   extend(row, column) {
     this.focus = { row, column };
     this.ranges = [makeRect(this.anchor.row, this.anchor.column, row, column)];
@@ -101,6 +116,22 @@ export class SelectionModel {
   }
 }
 
+export function normalizeSelectionSnapshot(snapshot, rowCount = 1, columnCount = 1) {
+  const maxRow = Math.max(0, Math.floor(Number(rowCount) || 0) - 1);
+  const maxColumn = Math.max(0, Math.floor(Number(columnCount) || 0) - 1);
+  const fallbackCell = { row: 0, column: 0 };
+  const focus = normalizeCell(snapshot?.focus, maxRow, maxColumn) ?? fallbackCell;
+  const anchor = normalizeCell(snapshot?.anchor, maxRow, maxColumn) ?? focus;
+  const ranges = Array.isArray(snapshot?.ranges)
+    ? snapshot.ranges.map((range) => normalizeSnapshotRect(range, maxRow, maxColumn)).filter(Boolean)
+    : [];
+  return {
+    anchor,
+    focus,
+    ranges: ranges.length ? ranges : [makeRect(focus.row, focus.column, focus.row, focus.column)]
+  };
+}
+
 function makeRect(rowA, columnA, rowB, columnB) {
   return {
     top: Math.min(rowA, rowB),
@@ -108,6 +139,33 @@ function makeRect(rowA, columnA, rowB, columnB) {
     bottom: Math.max(rowA, rowB),
     right: Math.max(columnA, columnB)
   };
+}
+
+function normalizeCell(cell, maxRow, maxColumn) {
+  if (!cell || !Number.isFinite(Number(cell.row)) || !Number.isFinite(Number(cell.column))) return null;
+  return {
+    row: clampIndex(cell.row, maxRow),
+    column: clampIndex(cell.column, maxColumn)
+  };
+}
+
+function normalizeSnapshotRect(range, maxRow, maxColumn) {
+  if (!range) return null;
+  const top = Number(range.top);
+  const left = Number(range.left);
+  const bottom = Number(range.bottom);
+  const right = Number(range.right);
+  if (![top, left, bottom, right].every(Number.isFinite)) return null;
+  return makeRect(
+    clampIndex(top, maxRow),
+    clampIndex(left, maxColumn),
+    clampIndex(bottom, maxRow),
+    clampIndex(right, maxColumn)
+  );
+}
+
+function clampIndex(value, max) {
+  return Math.max(0, Math.min(max, Math.floor(Number(value))));
 }
 
 function normalizeRect(rect) {

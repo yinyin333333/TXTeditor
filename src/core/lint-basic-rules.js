@@ -1,7 +1,7 @@
 import { duplicateRowPairs } from "./lint-duplicates.js";
 import { acceptedColumnsForProfile, nonStandardColumnsForProfile, numericBoundsForProfile } from "./lint-profile-data.js";
 import { BOOLEAN_FIELDS, DUPLICATE_KEYS, REQUIRED_COLUMNS, VERSION_CHECKS } from "./lint-rule-data.js";
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { numberedFields } from "./lint-stat-data.js";
 import { clean, normalizeHeader, normalizeToken, rowLabelFor } from "./lint-table.js";
 
@@ -9,15 +9,15 @@ import { clean, normalizeHeader, normalizeToken, rowLabelFor } from "./lint-tabl
 export function basicLintRules(options = {}) {
   const linkedExcelRunner = options.lintLinkedExcel ?? lintLinkedExcel;
   return [
-    rule("Basic/NoDuplicateExcel", "No duplicate Excel IDs", lintNoDuplicateExcel),
-    rule("Basic/ExcelColumns", "Required Excel columns", lintExcelColumns),
-    rule("Basic/LinkedExcel", "Linked Excel references", linkedExcelRunner),
-    rule("Basic/MissileRangeFieldSemantics", "Missile range field semantics", lintMissileRangeFieldSemantics, true, ["2.4"]),
-    rule("Basic/MonstatsDesecratedTreasureClassSemantics", "Desecrated treasure class semantics", lintMonstatsDesecratedTreasureClassSemantics, true, ["2.4"]),
-    rule("Basic/MonEquipLevelOrder", "Monster equipment level order", lintMonEquipLevelOrder, true, ["2.4"]),
-    rule("Basic/StringCheck", "String references", lintStringCheck),
-    rule("Basic/NumericBounds", "Numeric bounds", lintNumericBounds),
-    rule("Basic/BooleanFields", "Boolean fields", lintBooleanFields)
+    rule("Basic/NoDuplicateExcel", "No duplicate Excel IDs", lintNoDuplicateExcel, true, PROFILE_OPTIONS, "Checks key columns that must be unique and reports duplicate row identifiers."),
+    rule("Basic/ExcelColumns", "Required Excel columns", lintExcelColumns, true, PROFILE_OPTIONS, "Checks for missing required columns and columns that are non-standard for the selected profile."),
+    rule("Basic/LinkedExcel", "Linked Excel references", linkedExcelRunner, true, PROFILE_OPTIONS, "Checks values that reference other TXT tables, such as item stats, properties, skills, missiles, item types, and string keys."),
+    rule("Basic/MissileRangeFieldSemantics", "Missile range field semantics", lintMissileRangeFieldSemantics, true, ["2.4"], "Checks that missiles.txt range values use the plain integer format expected by D2R 2.4."),
+    rule("Basic/MonstatsDesecratedTreasureClassSemantics", "Desecrated treasure class semantics", lintMonstatsDesecratedTreasureClassSemantics, true, ["2.4"], "Checks that desecrated champion or unique treasure classes also have the matching base desecrated treasure class in D2R 2.4."),
+    rule("Basic/MonEquipLevelOrder", "Monster equipment level order", lintMonEquipLevelOrder, true, ["2.4"], "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level in D2R 2.4."),
+    rule("Basic/StringCheck", "String references", lintStringCheck, true, PROFILE_OPTIONS, "Checks string tables for different keys that reuse the same string ID."),
+    rule("Basic/NumericBounds", "Numeric bounds", lintNumericBounds, true, PROFILE_OPTIONS, "Checks numeric fields and version fields against the allowed ranges for the selected profile."),
+    rule("Basic/BooleanFields", "Boolean fields", lintBooleanFields, true, PROFILE_OPTIONS, "Checks boolean fields that should be empty, 0, or 1.")
   ];
 }
 

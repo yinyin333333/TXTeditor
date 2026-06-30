@@ -31,11 +31,12 @@ import {
 } from "../src/core/io.js";
 import {
   applySavedTextPayload,
+  documentFromTextPayloadAsync,
   documentFromTextPayload,
-  documentOpenResultFromNativeRead,
   normalizeNativeReadResult
 } from "../src/core/platform/file-payloads.js";
-import { readNativeTextFiles } from "../src/core/platform/native-read.js";
+import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
+import { tableFileState } from "../src/core/table-file-state.js";
 import {
   legacyWorkspaceFileSignature,
   legacyWorkspaceIndexCacheHit,
@@ -128,21 +129,6 @@ test("platform file payload helpers normalize native reads and saved document me
     error: "nope",
     bulkRead: true
   });
-  assert.deepEqual(normalizeNativeReadResult({ ok: { name: "b.txt", text: "id\n2" } }, "fallback-b.txt", false), {
-    path: "fallback-b.txt",
-    payload: { name: "b.txt", text: "id\n2" },
-    bulkRead: false
-  });
-  assert.deepEqual(normalizeNativeReadResult({ err: "bad" }, "fallback-c.txt", false), {
-    path: "fallback-c.txt",
-    error: "bad",
-    bulkRead: false
-  });
-  assert.deepEqual(normalizeNativeReadResult({ path: "direct.txt", name: "direct.txt", text: "id\n3" }, "fallback-d.txt", true), {
-    path: "direct.txt",
-    payload: { path: "direct.txt", name: "direct.txt", text: "id\n3" },
-    bulkRead: true
-  });
   assert.deepEqual(normalizeNativeReadResult({}, "fallback-e.txt", true), {
     path: "fallback-e.txt",
     error: "Unexpected native read result.",
@@ -167,60 +153,53 @@ test("platform file payload helpers normalize native reads and saved document me
   assert.equal(doc.name, "renamed.txt");
   assert.equal(doc.dirty, false);
 
-  const ticks = [10, 12.345, 20, 20.004];
-  const opened = documentOpenResultFromNativeRead({
-    path: "ok.txt",
-    payload: { path: "ok.txt", name: "ok.txt", text: "id\n1", encoding: "utf-8" },
-    bulkRead: true
-  }, TableDocument, { now: () => ticks.shift() });
-  assert.equal(opened.path, "ok.txt");
-  assert.equal(opened.name, "ok.txt");
-  assert.equal(opened.bulkRead, true);
-  assert.equal(opened.parseMs, 2.35);
-  assert.equal(opened.doc.toText(), "id\n1");
-  assert.equal(opened.doc.dirty, false);
-
-  const badDocumentType = {
-    fromText() {
-      throw new Error("parse failed");
-    }
-  };
-  assert.deepEqual(documentOpenResultFromNativeRead({
-    path: "bad.txt",
-    payload: { path: "bad.txt", name: "bad.txt", text: "broken", encoding: "utf-8" },
-    bulkRead: false
-  }, badDocumentType, { now: () => ticks.shift() }), {
-    path: "bad.txt",
-    name: "bad.txt",
-    bulkRead: false,
-    parseMs: 0,
-    error: "parse failed"
-  });
-  const readFailure = { path: "missing.txt", error: "read failed", bulkRead: true };
-  assert.equal(documentOpenResultFromNativeRead(readFailure, TableDocument), readFailure);
 });
 
-test("native text file reads fall back from bulk command to per-file reads", async () => {
+test("large file payloads can parse through a worker before document construction", async () => {
+  const originalWorker = globalThis.Worker;
   const calls = [];
-  const results = await readNativeTextFiles(["a.txt", "bad.txt"], async (command, args) => {
-    calls.push([command, args]);
-    if (command === "read_text_files") throw new Error("bulk unavailable");
-    if (args.path === "bad.txt") throw new Error("single failed");
-    return { path: args.path, name: args.path, text: "id\n1", encoding: "utf-8" };
-  });
+  globalThis.Worker = class FakeWorker {
+    constructor(url, options) {
+      calls.push({ url: String(url), options, terminated: false });
+    }
 
-  assert.deepEqual(calls, [
-    ["read_text_files", { paths: ["a.txt", "bad.txt"] }],
-    ["read_text_file", { path: "a.txt" }],
-    ["read_text_file", { path: "bad.txt" }]
-  ]);
-  assert.deepEqual(results, [
-    { path: "a.txt", payload: { path: "a.txt", name: "a.txt", text: "id\n1", encoding: "utf-8" }, bulkRead: false },
-    { path: "bad.txt", error: "single failed", bulkRead: false }
-  ]);
-  assert.deepEqual(await readNativeTextFiles([], async () => {
-    throw new Error("should not invoke");
-  }), []);
+    postMessage(message, transfer) {
+      calls.at(-1).message = { ...message, buffer: Boolean(message.buffer) };
+      calls.at(-1).transferLength = transfer.length;
+      queueMicrotask(() => this.onmessage?.({
+        data: {
+          id: message.id,
+          parsed: { rows: [["id"], ["1"]], lineEnding: "\n", finalNewline: false },
+          encoding: "utf-8",
+          fileSizeBytes: message.fileSizeBytes
+        }
+      }));
+    }
+
+    terminate() {
+      calls.at(-1).terminated = true;
+    }
+  };
+
+  try {
+    const doc = await documentFromTextPayloadAsync({
+      path: "huge.txt",
+      name: "huge.txt",
+      text: "worker should replace this text",
+      encoding: "utf-8",
+      fileSizeBytes: LARGE_FILE_THRESHOLDS.fileSizeBytes
+    }, TableDocument);
+
+    assert.equal(doc.toText(), "id\n1");
+    assert.equal(doc.fileSizeBytes, LARGE_FILE_THRESHOLDS.fileSizeBytes);
+    assert.equal(doc.largeFileMode, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.type, "module");
+    assert.equal(calls[0].terminated, true);
+  } finally {
+    if (originalWorker === undefined) delete globalThis.Worker;
+    else globalThis.Worker = originalWorker;
+  }
 });
 
 test("Tauri command boundary preserves JS invoke names and Rust registrations", () => {
@@ -253,10 +232,10 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "open_files_dialog",
     "open_folder_dialog",
     "pick_file_path",
-    "read_text_file",
     "read_text_files",
     "save_config",
     "save_file_dialog",
+    "write_text_file_chunk_safe",
     "write_text_file_safe"
   ]);
   assert.deepEqual([...new Set(rustCommands)], [...new Set(jsCommands)]);
@@ -324,7 +303,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   ]);
   const invoke = async (command, args) => {
     calls.push(["invoke", command, args]);
-    if (command === "write_text_file_safe") return { path: args.path, name: args.path.split(/[/\\]/).pop() };
+    if (command === "write_text_file_safe" || command === "write_text_file_chunk_safe") return { path: args.path, name: args.path.split(/[/\\]/).pop() };
     const queue = responses.get(command) ?? [];
     return queue.length ? queue.shift() : undefined;
   };
@@ -393,9 +372,9 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "close_window", undefined],
       ["invoke", "open_folder_dialog", undefined],
       ["invoke", "list_workspace_files", { path: "E:\\Workspace" }],
-      ["invoke", "write_text_file_safe", { path: "E:\\items.txt", text: "id\n1" }],
+      ["invoke", "write_text_file_chunk_safe", { path: "E:\\items.txt", text: "id\n1", first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "items.txt" }],
-      ["invoke", "write_text_file_safe", { path: "E:\\SavedAs.txt", text: "id\n2" }],
+      ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace" }],
@@ -411,6 +390,144 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["unlisten", "lsp-diagnostics-changed"],
       ["unlisten", "lsp-log"]
     ]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("native save leaves dirty set when content changes during the write", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const writes = [];
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_chunk_safe");
+          const gate = deferredPlatformWrite();
+          writes.push({ args, gate });
+          await gate.promise;
+          return { path: args.path, name: "items.txt" };
+        }
+      }
+    }
+  };
+
+  try {
+    const saving = saveDocumentNative(doc, false);
+    await waitForPlatformWrite(() => writes.length === 1);
+    assert.equal(writes[0].args.text, "id\nold");
+    assert.deepEqual([writes[0].args.first, writes[0].args.last], [true, true]);
+    doc.setCell(1, 0, "new");
+    writes[0].gate.resolve();
+
+    assert.equal(await saving, true);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.toText(), "id\nnew");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("native document save streams chunks without full serialization", async () => {
+  const originalWindow = globalThis.window;
+  const text = Array.from({ length: 2505 }, (_, index) => index === 0 ? "id" : String(index)).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, { path: "E:\\items.txt", dirty: true });
+  const expected = doc.toText();
+  const writes = [];
+  doc.toText = () => {
+    throw new Error("native document save should stream chunks instead of calling toText");
+  };
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_chunk_safe");
+          writes.push(args);
+          return args.last ? { path: args.path, name: "items.txt" } : null;
+        }
+      }
+    }
+  };
+
+  try {
+    assert.equal(await saveDocumentNative(doc, false), true);
+    assert.ok(writes.length > 1);
+    assert.deepEqual(writes.map((write) => write.first), [true, ...Array.from({ length: writes.length - 1 }, () => false)]);
+    assert.equal(writes.at(-1).last, true);
+    assert.equal(writes.map((write) => write.text).join(""), expected);
+    assert.equal(doc.dirty, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("saved native payload does not clear dirty for a stale document revision", () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const savingRevision = tableFileState(doc).revision;
+  doc.setCell(1, 0, "new");
+
+  applySavedTextPayload(doc, { path: "E:\\renamed.txt", name: "renamed.txt" }, savingRevision);
+
+  assert.equal(doc.path, "E:\\renamed.txt");
+  assert.equal(doc.name, "renamed.txt");
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.toText(), "id\nnew");
+});
+
+test("native save as cancel leaves dirty set and does not write", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const calls = [];
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          assert.equal(command, "save_file_dialog");
+          return null;
+        }
+      }
+    }
+  };
+
+  try {
+    assert.equal(await saveDocumentNative(doc, true), false);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.path, "");
+    assert.deepEqual(calls, [["save_file_dialog", { defaultName: "items.txt" }]]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("native write failure leaves dirty set", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_chunk_safe");
+          assert.deepEqual(args, { path: "E:\\items.txt", text: "id\nold", first: true, last: true });
+          throw new Error("disk blocked");
+        }
+      }
+    }
+  };
+
+  try {
+    await assert.rejects(() => saveDocumentNative(doc, false), /disk blocked/);
+    assert.equal(doc.dirty, true);
+    assert.equal(doc.path, "E:\\items.txt");
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
@@ -448,3 +565,19 @@ test("Find UI is a centered modal and text inputs keep native shortcuts", () => 
   assert.match(css, /\.modal-backdrop\s*\{[\s\S]*align-items: center;[\s\S]*justify-content: center;/);
   assert.match(css, /\.search-modal\s*\{/);
 });
+
+function deferredPlatformWrite() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitForPlatformWrite(condition) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(condition(), true);
+}

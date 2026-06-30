@@ -13,14 +13,14 @@ export const COMMAND_LABELS_BASE = [
   ["clear-selection", "Clear Cell(s)"],
   ["select-all", "Select All"],
   ["add-row", "Add Row"],
-  ["insert-row", "Insert Row"],
+  ["insert-row", "Insert Rows..."],
   ["clone-row", "Clone Row"],
   ["delete-row", "Delete Row"],
   ["clear-row", "Clear Row"],
   ["hide-row", "Hide Row"],
   ["unhide-all", "Unhide All"],
   ["add-column", "Add Column"],
-  ["insert-column", "Insert Column"],
+  ["insert-column", "Insert Columns..."],
   ["delete-column", "Delete Column"],
   ["clear-column", "Clear Column"],
   ["hide-column", "Hide Column"],
@@ -92,14 +92,14 @@ const COMMAND_ACTIONS = new Map([
   ["select-all", { type: "handler", name: "selectAll" }],
   ["clear-selection", { type: "execute", name: "clearSelection" }],
   ["add-row", { type: "handler", name: "addRows" }],
-  ["insert-row", { type: "execute", name: "insertRow" }],
+  ["insert-row", { type: "handler", name: "insertRows" }],
   ["clone-row", { type: "handler", name: "cloneRows" }],
   ["delete-row", { type: "execute", name: "deleteRow" }],
   ["clear-row", { type: "execute", name: "clearRow" }],
   ["hide-row", { type: "execute", name: "hideRow" }],
   ["unhide-rows", { type: "execute", name: "unhideRows" }],
   ["add-column", { type: "handler", name: "addColumns" }],
-  ["insert-column", { type: "execute", name: "insertColumn" }],
+  ["insert-column", { type: "handler", name: "insertColumns" }],
   ["delete-column", { type: "execute", name: "deleteColumn" }],
   ["clear-column", { type: "execute", name: "clearColumn" }],
   ["hide-column", { type: "execute", name: "hideColumn" }],
@@ -152,7 +152,7 @@ export function commandActionForId(id) {
 export function rowCommandItems({ cloneDisabled = false } = {}) {
   return [
     { id: "add-row", label: "Add Rows..." },
-    { id: "insert-row", label: "Insert Row" },
+    { id: "insert-row", label: "Insert Rows..." },
     { id: "hide-row", label: "Hide Row(s)" },
     { id: "delete-row", label: "Delete Row(s)" },
     { id: "clone-row", label: "Clone Row", disabled: cloneDisabled }
@@ -162,7 +162,7 @@ export function rowCommandItems({ cloneDisabled = false } = {}) {
 export function columnCommandItems() {
   return [
     { id: "add-column", label: "Add Columns..." },
-    { id: "insert-column", label: "Insert Column" },
+    { id: "insert-column", label: "Insert Columns..." },
     { id: "hide-column", label: "Hide Column(s)" },
     { id: "delete-column", label: "Delete Column(s)" }
   ];

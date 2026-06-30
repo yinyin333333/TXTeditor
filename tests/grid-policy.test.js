@@ -24,6 +24,7 @@ import {
   classifyResizeHandle,
   columnColorIndex
 } from "../src/ui/grid-geometry.js";
+import { GridMetrics } from "../src/ui/grid-metrics.js";
 import {
   activeRowHeaderChromeSteps,
   cellBackground,
@@ -1317,6 +1318,52 @@ test("column-index band and row-index gutter stay aligned with scroll geometry",
   assert.equal(rows[1].top, CanvasGrid.prototype.screenYForRow.call(rowGrid, rows[1].row));
 });
 
+test("grid metrics reuse hidden-row prefix data for repeated hit tests", () => {
+  let hiddenChecks = 0;
+  const hiddenRows = new Set([1, 2, 6]);
+  hiddenRows.has = (value) => {
+    hiddenChecks += 1;
+    return Set.prototype.has.call(hiddenRows, value);
+  };
+  const doc = {
+    viewRevision: 1,
+    rowCount: 10,
+    defaultRowHeight: 26,
+    rowHeights: [26, 26, 26, 26, 52, 26, 26, 26, 26, 26],
+    hiddenRows,
+    hasCustomRowHeights: true
+  };
+  const metrics = new GridMetrics();
+
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+  const checksAfterBuild = hiddenChecks;
+
+  assert.equal(metrics.scrollableRowsHeight(), 208);
+  assert.equal(metrics.rowContentTop(7), 130);
+  assert.equal(metrics.rowAtContent(0), 0);
+  assert.equal(metrics.rowAtContent(80), 4);
+  assert.deepEqual(metrics.visibleRows({
+    scrollTop: 70,
+    viewportHeight: 120,
+    fixedTop: 24,
+    overscanPx: 26
+  }).map((row) => row.row), [3, 4, 5, 7, 8, 9]);
+  assert.equal(hiddenChecks, checksAfterBuild);
+});
+
+test("grid metrics invalidate when document view revision changes", () => {
+  const doc = TableDocument.fromText("x.txt", "a\n1\n2\n3", { dirty: false });
+  const metrics = new GridMetrics();
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+
+  assert.equal(metrics.scrollableRowsHeight(), 104);
+  doc.setRowsHidden([1, 2], true);
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+
+  assert.equal(metrics.scrollableRowsHeight(), 52);
+  assert.equal(metrics.rowAtContent(30), 3);
+});
+
 test("freeze state layout changes redraw the grid immediately", () => {
   const draws = [];
   const grid = {
@@ -1371,6 +1418,62 @@ test("freeze state layout changes redraw the grid immediately", () => {
   ]);
 });
 
+test("document switch restores scroll after rebuilding the target scroll surface", () => {
+  const restores = [];
+  const targetDoc = TableDocument.fromText("large.txt", "a\n1\n2\n3");
+  targetDoc.scrollLeft = 40;
+  targetDoc.scrollTop = 500;
+  targetDoc.selectionState = { focus: { row: 2, column: 0 }, anchor: { row: 2, column: 0 }, ranges: [{ top: 2, left: 0, bottom: 2, right: 0 }] };
+  const host = {
+    _scrollLeft: 0,
+    _scrollTop: 0,
+    _maxScrollLeft: 0,
+    _maxScrollTop: 0,
+    get scrollLeft() {
+      return this._scrollLeft;
+    },
+    set scrollLeft(value) {
+      this._scrollLeft = Math.max(0, Math.min(Number(value) || 0, this._maxScrollLeft));
+    },
+    get scrollTop() {
+      return this._scrollTop;
+    },
+    set scrollTop(value) {
+      this._scrollTop = Math.max(0, Math.min(Number(value) || 0, this._maxScrollTop));
+    }
+  };
+  const grid = {
+    _tooltip: null,
+    _lspHoverByCell: new Map(),
+    host,
+    selection: {
+      restore(snapshot) {
+        restores.push(snapshot.focus);
+      }
+    },
+    get scrollLeft() {
+      return Math.round(this.host.scrollLeft);
+    },
+    get scrollTop() {
+      return Math.round(this.host.scrollTop);
+    },
+    hideFirstColumnHoverPreview() {},
+    layout() {
+      this.host._maxScrollLeft = 100;
+      this.host._maxScrollTop = 1000;
+    },
+    draw() {}
+  };
+
+  CanvasGrid.prototype.setDocument.call(grid, targetDoc);
+
+  assert.equal(host.scrollLeft, 40);
+  assert.equal(host.scrollTop, 500);
+  assert.equal(targetDoc.scrollLeft, 40);
+  assert.equal(targetDoc.scrollTop, 500);
+  assert.deepEqual(restores, [{ row: 2, column: 0 }]);
+});
+
 test("initial canvas column fit is header-only and compact", () => {
   assert.equal(initialColumnFitWidth({ measuredHeaderWidth: 4, zoom: 1 }), 56);
   assert.equal(initialColumnFitWidth({ measuredHeaderWidth: 156, zoom: 2, padding: 24 }), 102);
@@ -1390,6 +1493,10 @@ test("initial canvas column fit is header-only and compact", () => {
     doc: {
       columnCount: 2,
       columnWidths: [],
+      viewRevision: 0,
+      markViewChanged() {
+        this.viewRevision += 1;
+      },
       getCell: (row, column) => {
         assert.equal(row, 0);
         return column === 0 ? "id" : "long header";
@@ -1399,6 +1506,7 @@ test("initial canvas column fit is header-only and compact", () => {
   CanvasGrid.prototype.autoFitInitialColumns.call(grid);
   assert.deepEqual(measured, ["id", "long header"]);
   assert.deepEqual(grid.doc.columnWidths, [56, 134]);
+  assert.equal(grid.doc.viewRevision, 1);
 });
 
 test("canvas drag row resizing opts into custom row-height layout", () => {

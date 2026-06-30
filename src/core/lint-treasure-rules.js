@@ -1,11 +1,11 @@
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, normalizeToken } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const TREASURE_LINT_RULES = [
-  rule("TC/ValidTreasure", "Valid treasure references", lintTreasureReferences),
-  rule("TC/ValidNegativePicks", "Valid negative picks", lintTreasureNegativePicks),
-  rule("TC/ValidProbs", "Valid probabilities", lintTreasureProbabilities)
+  rule("TC/ValidTreasure", "Valid treasure references", lintTreasureReferences, true, PROFILE_OPTIONS, "Checks treasureclassex.txt item entries against item codes, item types, set items, unique items, and treasure classes."),
+  rule("TC/ValidNegativePicks", "Valid negative picks", lintTreasureNegativePicks, true, PROFILE_OPTIONS, "Checks that negative picks values match the total probability sum for the treasure class row."),
+  rule("TC/ValidProbs", "Valid probabilities", lintTreasureProbabilities, true, PROFILE_OPTIONS, "Checks that each treasure class item entry has a numeric probability value.")
 ];
 
 export function lintTreasureReferences(index, ctx) {
