@@ -604,6 +604,8 @@ test("context menu command item registries preserve expected command groups", ()
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
+  const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
+  assert.match(commandSurfaceController, /label: "Fill"[\s\S]*label: "Math"[\s\S]*id: "go-to-definition"/);
 });
 
 test("Resize To Fit keeps the existing all-column command behavior", () => {

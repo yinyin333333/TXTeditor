@@ -52,7 +52,6 @@ export function createCommandSurfaceController({
     const focusRow = hit?.row ?? state.selection.focus.row;
     const focusCol = hit?.column ?? state.selection.focus.column;
     const entries = [
-      { id: "go-to-definition", label: "Go To Definition", disabled: !cellHasReference(focusRow, focusCol) },
       { type: "submenu", label: "Column Operations", items: columnCommandItems() },
       { type: "submenu", label: "Row Operations", items: rowItems() },
       { id: "resize-fit", label: "Resize To Fit" },
@@ -60,6 +59,7 @@ export function createCommandSurfaceController({
       { id: "unhide-all", label: "Unhide All", disabled: !canUnhide },
       { type: "submenu", label: "Fill", items: fillCommandItems() },
       { type: "submenu", label: "Math", items: mathCommandItems() },
+      { id: "go-to-definition", label: "Go To Definition", disabled: !cellHasReference(focusRow, focusCol) },
       { id: "cut", label: "Cut", shortcut: "Ctrl+X" },
       { id: "copy", label: "Copy", shortcut: "Ctrl+C" },
       { id: "paste", label: "Paste", shortcut: "Ctrl+V" }
