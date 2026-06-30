@@ -10,7 +10,8 @@ function createLspDocumentState() {
     openedUri: null,
     openedVersion: null,
     openPromise: null,
-    hoverReadyTimer: null
+    hoverReadyTimer: null,
+    fullUpdateTimer: null
   };
 }
 
@@ -27,6 +28,7 @@ export function lspDocumentState(doc) {
 export function resetLspDocumentState(doc, { version = 0 } = {}) {
   const state = lspDocumentState(doc);
   if (state.hoverReadyTimer != null) clearTimeout(state.hoverReadyTimer);
+  if (state.fullUpdateTimer != null) clearTimeout(state.fullUpdateTimer);
   Object.assign(state, createLspDocumentState(), { version });
   return state;
 }

@@ -24,6 +24,7 @@ import {
   classifyResizeHandle,
   columnColorIndex
 } from "../src/ui/grid-geometry.js";
+import { GridMetrics } from "../src/ui/grid-metrics.js";
 import {
   activeRowHeaderChromeSteps,
   cellBackground,
@@ -1315,6 +1316,52 @@ test("column-index band and row-index gutter stay aligned with scroll geometry",
   const rows = CanvasGrid.prototype.visibleRows.call(rowGrid);
   assert.equal(rows[0].top, CanvasGrid.prototype.screenYForRow.call(rowGrid, rows[0].row));
   assert.equal(rows[1].top, CanvasGrid.prototype.screenYForRow.call(rowGrid, rows[1].row));
+});
+
+test("grid metrics reuse hidden-row prefix data for repeated hit tests", () => {
+  let hiddenChecks = 0;
+  const hiddenRows = new Set([1, 2, 6]);
+  hiddenRows.has = (value) => {
+    hiddenChecks += 1;
+    return Set.prototype.has.call(hiddenRows, value);
+  };
+  const doc = {
+    viewRevision: 1,
+    rowCount: 10,
+    defaultRowHeight: 26,
+    rowHeights: [26, 26, 26, 26, 52, 26, 26, 26, 26, 26],
+    hiddenRows,
+    hasCustomRowHeights: true
+  };
+  const metrics = new GridMetrics();
+
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+  const checksAfterBuild = hiddenChecks;
+
+  assert.equal(metrics.scrollableRowsHeight(), 208);
+  assert.equal(metrics.rowContentTop(7), 130);
+  assert.equal(metrics.rowAtContent(0), 0);
+  assert.equal(metrics.rowAtContent(80), 4);
+  assert.deepEqual(metrics.visibleRows({
+    scrollTop: 70,
+    viewportHeight: 120,
+    fixedTop: 24,
+    overscanPx: 26
+  }).map((row) => row.row), [3, 4, 5, 7, 8, 9]);
+  assert.equal(hiddenChecks, checksAfterBuild);
+});
+
+test("grid metrics invalidate when document view revision changes", () => {
+  const doc = TableDocument.fromText("x.txt", "a\n1\n2\n3", { dirty: false });
+  const metrics = new GridMetrics();
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+
+  assert.equal(metrics.scrollableRowsHeight(), 104);
+  doc.setRowsHidden([1, 2], true);
+  metrics.updateRows({ doc, zoom: 1, scrollStartRow: 0 });
+
+  assert.equal(metrics.scrollableRowsHeight(), 52);
+  assert.equal(metrics.rowAtContent(30), 3);
 });
 
 test("freeze state layout changes redraw the grid immediately", () => {

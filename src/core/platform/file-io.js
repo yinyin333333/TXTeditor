@@ -1,13 +1,26 @@
 import { isTauriRuntime, tauriApi } from "./tauri-api.js";
-import { applySavedTextPayload, documentOpenResultFromNativeRead } from "./file-payloads.js";
+import {
+  applySavedTextPayload,
+  documentFromTextPayloadAsync,
+  documentOpenResultFromNativeReadAsync
+} from "./file-payloads.js";
 import { decodeBuffer } from "./text-codec.js";
 import { readNativeTextFiles } from "./native-read.js";
 import { tableFileState } from "../table-file-state.js";
+import { LARGE_FILE_THRESHOLDS } from "../large-file-policy.js";
 
 export async function readFileAsDocument(file, DocumentType) {
   const buffer = await file.arrayBuffer();
+  if (typeof globalThis.Worker !== "undefined" && file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) {
+    return documentFromTextPayloadAsync({
+      name: file.name,
+      path: file.name,
+      buffer,
+      fileSizeBytes: file.size
+    }, DocumentType);
+  }
   const { text, encoding } = decodeBuffer(buffer);
-  return DocumentType.fromText(file.name, text, { encoding, path: file.name });
+  return DocumentType.fromText(file.name, text, { encoding, path: file.name, fileSizeBytes: file.size });
 }
 
 export async function openFilesNative(DocumentType) {
@@ -33,7 +46,7 @@ export async function openNativePaths(paths, DocumentType, invokeFn = null) {
 export async function openNativePathsBulk(paths, DocumentType, invokeFn = null) {
   const invoke = invokeFn ?? (await tauriApi()).invoke;
   const payloads = await readNativeTextFiles(paths, invoke);
-  return payloads.map((result) => documentOpenResultFromNativeRead(result, DocumentType, { now: perfNow }));
+  return Promise.all(payloads.map((result) => documentOpenResultFromNativeReadAsync(result, DocumentType, { now: perfNow })));
 }
 
 export async function saveDocumentNative(doc, saveAs = false) {
@@ -44,11 +57,7 @@ export async function saveDocumentNative(doc, saveAs = false) {
     if (!target) return false;
   }
   const revision = tableFileState(doc).revision;
-  const text = doc.toText();
-  const payload = await api.invoke("write_text_file_safe", {
-    path: target,
-    text
-  });
+  const payload = await writeDocumentNative(api.invoke, target, doc);
   applySavedTextPayload(doc, payload, revision);
   return true;
 }
@@ -77,4 +86,29 @@ export async function listenForNativeDrops(callback) {
 
 function perfNow() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+async function writeDocumentNative(invoke, path, doc) {
+  if (typeof doc.toTextChunks !== "function") {
+    return invoke("write_text_file_safe", { path, text: doc.toText() });
+  }
+  const iterator = doc.toTextChunks()[Symbol.iterator]();
+  let current = iterator.next();
+  if (current.done) {
+    return invoke("write_text_file_chunk_safe", { path, text: "", first: true, last: true });
+  }
+  let first = true;
+  while (!current.done) {
+    const next = iterator.next();
+    const payload = await invoke("write_text_file_chunk_safe", {
+      path,
+      text: current.value ?? "",
+      first,
+      last: next.done
+    });
+    if (next.done) return payload;
+    first = false;
+    current = next;
+  }
+  throw new Error("Native document save did not finish.");
 }

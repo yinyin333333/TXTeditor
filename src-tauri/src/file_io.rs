@@ -1,6 +1,7 @@
 use crate::native_paths::file_path_to_string;
 use serde::Serialize;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -45,6 +46,7 @@ pub(crate) async fn save_file_dialog(
 #[tauri::command]
 pub(crate) fn read_text_file(path: String) -> Result<TextFilePayload, String> {
     let bytes = fs::read(&path).map_err(|err| err.to_string())?;
+    let size_bytes = bytes.len() as u64;
     let (text, encoding) = decode_text(bytes)?;
     let name = Path::new(&path)
         .file_name()
@@ -56,6 +58,7 @@ pub(crate) fn read_text_file(path: String) -> Result<TextFilePayload, String> {
         name,
         text,
         encoding,
+        size_bytes,
     })
 }
 
@@ -67,8 +70,33 @@ pub(crate) fn read_text_files(paths: Vec<String>) -> Vec<Result<TextFilePayload,
 #[tauri::command]
 pub(crate) fn write_text_file_safe(path: String, text: String) -> Result<SavePayload, String> {
     let target = PathBuf::from(&path);
+    let temp = temp_path_for(&target);
 
-    let mut temp = target.clone();
+    write_complete_temp_file(&temp, text.as_bytes()).map_err(|err| err.to_string())?;
+    finish_temp_write(path, &target, &temp)
+}
+
+#[tauri::command]
+pub(crate) fn write_text_file_chunk_safe(
+    path: String,
+    text: String,
+    first: bool,
+    last: bool,
+) -> Result<Option<SavePayload>, String> {
+    let target = PathBuf::from(&path);
+    let temp = temp_path_for(&target);
+    if let Err(err) = write_temp_file_chunk(&temp, text.as_bytes(), first, last) {
+        let _ = fs::remove_file(&temp);
+        return Err(err.to_string());
+    }
+    if !last {
+        return Ok(None);
+    }
+    finish_temp_write(path, &target, &temp).map(Some)
+}
+
+fn temp_path_for(target: &Path) -> PathBuf {
+    let mut temp = target.to_path_buf();
     let temp_name = format!(
         ".{}.tmp",
         target
@@ -77,16 +105,31 @@ pub(crate) fn write_text_file_safe(path: String, text: String) -> Result<SavePay
             .unwrap_or("txteditor")
     );
     temp.set_file_name(temp_name);
+    temp
+}
 
-    {
-        let mut file = fs::File::create(&temp).map_err(|err| err.to_string())?;
-        file.write_all(text.as_bytes())
-            .map_err(|err| err.to_string())?;
-        file.sync_all().map_err(|err| err.to_string())?;
+fn write_complete_temp_file(temp: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = fs::File::create(temp)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+fn write_temp_file_chunk(temp: &Path, bytes: &[u8], first: bool, last: bool) -> io::Result<()> {
+    let mut file = if first {
+        fs::File::create(temp)?
+    } else {
+        OpenOptions::new().append(true).open(temp)?
+    };
+    file.write_all(bytes)?;
+    if last {
+        file.sync_all()?;
     }
+    Ok(())
+}
 
-    replace_file_with_temp(&target, &temp)?;
-    sync_parent_dir(&target);
+fn finish_temp_write(path: String, target: &Path, temp: &Path) -> Result<SavePayload, String> {
+    replace_file_with_temp(target, temp)?;
+    sync_parent_dir(target);
 
     let name = target
         .file_name()
@@ -193,6 +236,7 @@ pub(crate) struct TextFilePayload {
     name: String,
     text: String,
     encoding: String,
+    size_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -306,6 +350,38 @@ mod tests {
         assert_eq!(payload.name, "new-file.txt");
         assert_eq!(fs::read_to_string(&target).unwrap(), "fresh\n");
         assert!(!dir.join(".new-file.txt.tmp").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_text_file_chunk_safe_appends_and_replaces_on_last_chunk() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-chunk-write-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("items.txt");
+        fs::write(&target, "old").unwrap();
+        let target_string = target.to_string_lossy().to_string();
+
+        let first =
+            write_text_file_chunk_safe(target_string.clone(), "id\n".to_string(), true, false)
+                .unwrap();
+        assert!(first.is_none());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        assert_eq!(fs::read_to_string(dir.join(".items.txt.tmp")).unwrap(), "id\n");
+
+        let payload =
+            write_text_file_chunk_safe(target_string.clone(), "1\n".to_string(), false, true)
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(payload.path, target_string);
+        assert_eq!(payload.name, "items.txt");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "id\n1\n");
+        assert!(!dir.join(".items.txt.tmp").exists());
 
         let _ = fs::remove_dir_all(&dir);
     }

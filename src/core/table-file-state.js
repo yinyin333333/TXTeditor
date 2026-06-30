@@ -1,6 +1,6 @@
 const tableFileStates = new WeakMap();
 
-const FILE_STATE_FIELDS = ["name", "path", "handle", "lineEnding", "finalNewline", "encoding", "dirty"];
+const FILE_STATE_FIELDS = ["name", "path", "handle", "lineEnding", "finalNewline", "encoding", "dirty", "fileSizeBytes", "estimatedCellCount", "largeFileMode", "largeFileReasons"];
 
 export function resetTableFileState(doc, name = "Untitled.txt", meta = {}) {
   const state = {
@@ -11,7 +11,11 @@ export function resetTableFileState(doc, name = "Untitled.txt", meta = {}) {
     finalNewline: meta.finalNewline ?? false,
     encoding: meta.encoding ?? "utf-8",
     dirty: meta.dirty ?? false,
-    revision: meta.revision ?? 0
+    revision: meta.revision ?? 0,
+    fileSizeBytes: Math.max(0, Math.floor(Number(meta.fileSizeBytes ?? meta.sizeBytes) || 0)),
+    estimatedCellCount: Math.max(0, Math.floor(Number(meta.estimatedCellCount) || 0)),
+    largeFileMode: Boolean(meta.largeFileMode),
+    largeFileReasons: Array.isArray(meta.largeFileReasons) ? [...meta.largeFileReasons] : []
   };
   tableFileStates.set(doc, state);
   defineTableFileStateAccessors(doc);
@@ -46,7 +50,7 @@ function defineTableFileStateAccessors(doc) {
         return tableFileState(this)[field];
       },
       set(value) {
-        tableFileState(this)[field] = field === "dirty" || field === "finalNewline" ? Boolean(value) : value;
+        tableFileState(this)[field] = field === "dirty" || field === "finalNewline" || field === "largeFileMode" ? Boolean(value) : value;
       }
     });
   }

@@ -1,14 +1,22 @@
-import { markTableContentDirty, resetTableFileState } from "./table-file-state.js";
+import { largeFileInfo } from "./large-file-policy.js";
+import { RangeSet } from "./range-set.js";
+import { markTableContentDirty, resetTableFileState, tableFileState } from "./table-file-state.js";
+import { parseTableText } from "./table-parser.js";
 import { autoFitColumnWidth, initialHeaderColumnWidth } from "./table-sizing.js";
-import { resetTableViewState, tableViewState } from "./table-view-state.js";
+import { markTableViewDirty, resetTableViewState, tableViewState } from "./table-view-state.js";
 
 export class TableDocument {
   constructor(name = "Untitled.txt", rows = [[]], meta = {}) {
     this.rows = rows.length ? rows : [[]];
+    Object.defineProperty(this, "serializedColumnCount", {
+      configurable: true,
+      writable: true,
+      value: meta.serializedColumnCount ?? null
+    });
     resetTableFileState(this, name, meta);
     resetTableViewState(this, meta);
     this.refreshShape();
-    if (!meta.columnWidths && meta.autoFitInitialColumns !== false) {
+    if (!this.largeFileMode && !meta.columnWidths && meta.autoFitInitialColumns !== false) {
       this.autoFitInitialColumns(meta.initialFitSampleRows ?? 300);
     }
   }
@@ -18,7 +26,8 @@ export class TableDocument {
   }
 
   set hiddenRows(value) {
-    tableViewState(this).hiddenRows = value instanceof Set ? value : new Set(value ?? []);
+    tableViewState(this).hiddenRows = RangeSet.from(value);
+    markTableViewDirty(this);
   }
 
   get hiddenColumns() {
@@ -26,7 +35,8 @@ export class TableDocument {
   }
 
   set hiddenColumns(value) {
-    tableViewState(this).hiddenColumns = value instanceof Set ? value : new Set(value ?? []);
+    tableViewState(this).hiddenColumns = RangeSet.from(value);
+    markTableViewDirty(this);
   }
 
   get columnWidths() {
@@ -35,6 +45,7 @@ export class TableDocument {
 
   set columnWidths(value) {
     tableViewState(this).columnWidths = Array.isArray(value) ? value : [...(value ?? [])];
+    markTableViewDirty(this);
   }
 
   get rowHeights() {
@@ -43,6 +54,7 @@ export class TableDocument {
 
   set rowHeights(value) {
     tableViewState(this).rowHeights = Array.isArray(value) ? value : [...(value ?? [])];
+    markTableViewDirty(this);
   }
 
   get defaultColumnWidth() {
@@ -51,6 +63,7 @@ export class TableDocument {
 
   set defaultColumnWidth(value) {
     tableViewState(this).defaultColumnWidth = value;
+    markTableViewDirty(this);
   }
 
   get defaultRowHeight() {
@@ -59,6 +72,7 @@ export class TableDocument {
 
   set defaultRowHeight(value) {
     tableViewState(this).defaultRowHeight = value;
+    markTableViewDirty(this);
   }
 
   get hasCustomRowHeights() {
@@ -67,6 +81,7 @@ export class TableDocument {
 
   set hasCustomRowHeights(value) {
     tableViewState(this).hasCustomRowHeights = Boolean(value);
+    markTableViewDirty(this);
   }
 
   get zoom() {
@@ -75,6 +90,7 @@ export class TableDocument {
 
   set zoom(value) {
     tableViewState(this).zoom = value;
+    markTableViewDirty(this);
   }
 
   get freezeFirstRow() {
@@ -83,6 +99,7 @@ export class TableDocument {
 
   set freezeFirstRow(value) {
     tableViewState(this).freezeFirstRow = Boolean(value);
+    markTableViewDirty(this);
   }
 
   get freezeFirstColumn() {
@@ -91,6 +108,7 @@ export class TableDocument {
 
   set freezeFirstColumn(value) {
     tableViewState(this).freezeFirstColumn = Boolean(value);
+    markTableViewDirty(this);
   }
 
   get scrollLeft() {
@@ -117,6 +135,14 @@ export class TableDocument {
     tableViewState(this).initialColumnFitApplied = Boolean(value);
   }
 
+  get viewRevision() {
+    return tableViewState(this).revision;
+  }
+
+  markViewChanged() {
+    markTableViewDirty(this);
+  }
+
   get selectionState() {
     return tableViewState(this).selection;
   }
@@ -126,15 +152,12 @@ export class TableDocument {
   }
 
   static fromText(name, text, meta = {}) {
-    const crlf = (text.match(/\r\n/g) ?? []).length;
-    const lf = (text.match(/(?<!\r)\n/g) ?? []).length;
-    const lineEnding = crlf >= lf && crlf > 0 ? "\r\n" : "\n";
-    const finalNewline = text.endsWith("\n") || text.endsWith("\r");
-    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const lines = normalized.split("\n");
-    if (finalNewline) lines.pop();
-    const rows = lines.map((line) => line.split("\t"));
-    return new TableDocument(name, rows, { ...meta, lineEnding, finalNewline });
+    const parsed = parseTableText(text);
+    return TableDocument.fromParsed(name, parsed, { ...meta, fileSizeBytes: meta.fileSizeBytes ?? meta.sizeBytes ?? String(text ?? "").length });
+  }
+
+  static fromParsed(name, parsed, meta = {}) {
+    return new TableDocument(name, parsed.rows, { ...meta, lineEnding: parsed.lineEnding, finalNewline: parsed.finalNewline });
   }
 
   refreshShape() {
@@ -147,6 +170,21 @@ export class TableDocument {
     if (this.columnWidths.length > this.columnCount) this.columnWidths.length = this.columnCount;
     while (this.rowHeights.length < this.rowCount) this.rowHeights.push(this.defaultRowHeight);
     if (this.rowHeights.length > this.rowCount) this.rowHeights.length = this.rowCount;
+    this.refreshLargeFileInfo();
+    markTableViewDirty(this);
+  }
+
+  refreshLargeFileInfo() {
+    const info = largeFileInfo({
+      fileSizeBytes: this.fileSizeBytes,
+      rowCount: this.rowCount,
+      columnCount: this.columnCount
+    });
+    const state = tableFileState(this);
+    state.fileSizeBytes = info.fileSizeBytes;
+    state.estimatedCellCount = info.estimatedCellCount;
+    state.largeFileMode = info.largeFileMode;
+    state.largeFileReasons = info.reasons;
   }
 
   get headers() {
@@ -182,15 +220,22 @@ export class TableDocument {
     this.applyCellChanges(changes, direction);
   }
 
-  insertRow(index, values = []) {
+  insertRows(index, countOrRows = 1) {
     const at = clamp(index, 0, this.rows.length);
-    const row = Array.from({ length: Math.max(this.columnCount, values.length) }, (_, i) => values[i] ?? "");
-    this.rows.splice(at, 0, row);
-    this.rowHeights.splice(at, 0, this.defaultRowHeight);
-    this.hiddenRows = shiftSetForInsert(this.hiddenRows, at, 1);
+    const rows = normalizeInsertRows(countOrRows, this.columnCount);
+    if (!rows.length) return { type: "insert-rows", index: at, rows: [], rowHeights: [] };
+    const rowHeights = Array.from({ length: rows.length }, () => this.defaultRowHeight);
+    spliceMany(this.rows, at, 0, rows);
+    spliceMany(this.rowHeights, at, 0, rowHeights);
+    this.hiddenRows = shiftSetForInsert(this.hiddenRows, at, rows.length);
     markTableContentDirty(this);
     this.refreshShape();
-    return { type: "insert-row", index: at, values: row };
+    return { type: "insert-rows", index: at, rows, rowHeights };
+  }
+
+  insertRow(index, values = []) {
+    const inserted = this.insertRows(index, [values]);
+    return { type: "insert-row", index: inserted.index, values: inserted.rows[0] ?? [] };
   }
 
   deleteRows(start, count = 1) {
@@ -205,16 +250,33 @@ export class TableDocument {
     return { type: "delete-rows", index: at, rows: removed, rowHeights: removedHeights };
   }
 
-  insertColumn(index, name = "") {
+  insertColumns(index, namesOrCount = 1, options = {}) {
     const at = clamp(index, 0, this.columnCount);
-    for (let row = 0; row < this.rows.length; row++) {
-      this.rows[row].splice(at, 0, row === 0 ? name : "");
+    const names = normalizeInsertColumnNames(namesOrCount, at);
+    const count = names.length;
+    if (!count) return { type: "insert-columns", index: at, names: [] };
+    const append = at >= this.columnCount;
+    const sparseAppend = options.sparseAppend !== false;
+    if (append && sparseAppend) {
+      const nextColumnCount = this.columnCount + count;
+      this.serializedColumnCount = Math.max(this.serializedColumnCount ?? 0, nextColumnCount);
+    } else {
+      const bodyValues = Array.from({ length: count }, () => "");
+      for (let rowIndex = 0; rowIndex < this.rows.length; rowIndex++) {
+        spliceMany(this.rows[rowIndex], at, 0, rowIndex === 0 ? names : bodyValues);
+      }
     }
-    this.columnWidths.splice(at, 0, 120);
-    this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, at, 1);
+    for (let i = 0; i < count; i++) this.rows[0][at + i] = names[i];
+    spliceMany(this.columnWidths, at, 0, Array.from({ length: count }, () => 120));
+    this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, at, count);
     markTableContentDirty(this);
     this.refreshShape();
-    return { type: "insert-column", index: at, name };
+    return { type: "insert-columns", index: at, names };
+  }
+
+  insertColumn(index, name = "") {
+    const inserted = this.insertColumns(index, [name], { sparseAppend: false });
+    return { type: "insert-column", index: inserted.index, name: inserted.names[0] ?? name };
   }
 
   deleteColumns(start, count = 1) {
@@ -225,12 +287,13 @@ export class TableDocument {
     this.hiddenColumns = shiftSetForDelete(this.hiddenColumns, at, safeCount);
     markTableContentDirty(this);
     this.refreshShape();
+    if (this.serializedColumnCount != null) this.serializedColumnCount = Math.min(this.serializedColumnCount, this.columnCount);
     return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths };
   }
 
   restoreRows(index, rows, rowHeights = []) {
-    this.rows.splice(index, 0, ...rows.map((row) => [...row]));
-    this.rowHeights.splice(index, 0, ...rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
+    spliceMany(this.rows, index, 0, rows.map((row) => [...row]));
+    spliceMany(this.rowHeights, index, 0, rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
     this.hiddenRows = shiftSetForInsert(this.hiddenRows, index, rows.length);
     markTableContentDirty(this);
     this.refreshShape();
@@ -242,9 +305,9 @@ export class TableDocument {
 
   restoreColumns(index, columns, widths = []) {
     for (let row = 0; row < this.rows.length; row++) {
-      this.rows[row].splice(index, 0, ...(columns[row] ?? []).map((value) => value ?? ""));
+      spliceMany(this.rows[row], index, 0, (columns[row] ?? []).map((value) => value ?? ""));
     }
-    this.columnWidths.splice(index, 0, ...columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
+    spliceMany(this.columnWidths, index, 0, columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
     this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, index, columns[0]?.length ?? 0);
     markTableContentDirty(this);
     this.refreshShape();
@@ -255,36 +318,35 @@ export class TableDocument {
   }
 
   setRowsHidden(rows, hidden) {
-    for (const row of rows) {
-      if (hidden) this.hiddenRows.add(row);
-      else this.hiddenRows.delete(row);
-    }
-    markTableContentDirty(this);
+    const changed = setHiddenRanges(this.hiddenRows, rows, hidden);
+    if (changed) markTableViewDirty(this);
   }
 
   setColumnsHidden(columns, hidden) {
-    for (const column of columns) {
-      if (hidden) this.hiddenColumns.add(column);
-      else this.hiddenColumns.delete(column);
-    }
-    markTableContentDirty(this);
+    const changed = setHiddenRanges(this.hiddenColumns, columns, hidden);
+    if (changed) markTableViewDirty(this);
   }
 
   setColumnWidth(column, width) {
-    this.columnWidths[column] = clamp(Math.round(width), 36, 2000);
-    markTableContentDirty(this);
+    const next = clamp(Math.round(width), 36, 2000);
+    if (this.columnWidths[column] === next) return;
+    this.columnWidths[column] = next;
+    markTableViewDirty(this);
   }
 
   setRowHeight(row, height) {
-    this.rowHeights[row] = clamp(Math.round(height), 18, 240);
+    const next = clamp(Math.round(height), 18, 240);
+    const changed = this.rowHeights[row] !== next || !this.hasCustomRowHeights;
+    this.rowHeights[row] = next;
     this.hasCustomRowHeights = true;
-    markTableContentDirty(this);
+    if (changed) markTableViewDirty(this);
   }
 
   resetRowHeights() {
     const changed = this.hasCustomRowHeights || this.rowHeights.some((height) => height !== this.defaultRowHeight);
     this.rowHeights = Array.from({ length: this.rowCount }, () => this.defaultRowHeight);
     this.hasCustomRowHeights = false;
+    if (changed) markTableViewDirty(this);
     return changed;
   }
 
@@ -294,23 +356,43 @@ export class TableDocument {
   }
 
   toText() {
-    const body = this.rows.map((row) => row.join("\t")).join(this.lineEnding);
+    const columnCount = this.serializedColumnCount && this.serializedColumnCount > 0 ? this.serializedColumnCount : null;
+    const body = this.rows.map((row) => serializeRow(row, columnCount)).join(this.lineEnding);
     return this.finalNewline ? body + this.lineEnding : body;
+  }
+
+  *toTextChunks({ chunkRows = 1000 } = {}) {
+    const safeChunkRows = Math.max(1, Math.floor(Number(chunkRows) || 1000));
+    const columnCount = this.serializedColumnCount && this.serializedColumnCount > 0 ? this.serializedColumnCount : null;
+    let chunk = "";
+    for (let rowIndex = 0; rowIndex < this.rows.length; rowIndex++) {
+      if (rowIndex > 0) chunk += this.lineEnding;
+      chunk += serializeRow(this.rows[rowIndex], columnCount);
+      if ((rowIndex + 1) % safeChunkRows === 0) {
+        yield chunk;
+        chunk = "";
+      }
+    }
+    if (this.finalNewline) chunk += this.lineEnding;
+    if (chunk || !this.rows.length) yield chunk;
   }
 
   autoFitColumn(column, sampleLimit = 300) {
     this.columnWidths[column] = autoFitColumnWidth(this.rows, column, sampleLimit);
+    markTableViewDirty(this);
   }
 
   autoFitRow(row) {
     this.rowHeights[row] = this.defaultRowHeight;
     this.hasCustomRowHeights = true;
+    markTableViewDirty(this);
   }
 
   autoFitInitialColumns(sampleLimit = 300) {
     for (let column = 0; column < this.columnCount; column++) {
       this.columnWidths[column] = initialHeaderColumnWidth(this.getCell(0, column));
     }
+    markTableViewDirty(this);
   }
 }
 
@@ -318,17 +400,70 @@ export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const MAX_SPLICE_ITEMS = 8192;
+
+function spliceMany(array, index, deleteCount, items) {
+  const values = Array.from(items);
+  if (values.length <= MAX_SPLICE_ITEMS) {
+    array.splice(index, deleteCount, ...values);
+    return;
+  }
+  const tail = array.slice(index + deleteCount);
+  array.length = index;
+  for (let offset = 0; offset < values.length; offset += MAX_SPLICE_ITEMS) {
+    array.push(...values.slice(offset, offset + MAX_SPLICE_ITEMS));
+  }
+  for (let offset = 0; offset < tail.length; offset += MAX_SPLICE_ITEMS) {
+    array.push(...tail.slice(offset, offset + MAX_SPLICE_ITEMS));
+  }
+}
+
+function normalizeInsertRows(countOrRows, columnCount) {
+  if (Array.isArray(countOrRows)) {
+    return countOrRows.map((row) => normalizeInsertRow(row, columnCount));
+  }
+  const count = Math.max(0, Math.floor(Number(countOrRows) || 0));
+  return Array.from({ length: count }, () => new Array(columnCount));
+}
+
+function normalizeInsertRow(row, columnCount) {
+  const source = Array.isArray(row) ? row : [];
+  return Array.from({ length: Math.max(columnCount, source.length) }, (_, index) => source[index] ?? "");
+}
+
+function normalizeInsertColumnNames(namesOrCount, index) {
+  if (Array.isArray(namesOrCount)) return namesOrCount.map((name, offset) => name ?? `Column${index + offset + 1}`);
+  const count = Math.max(0, Math.floor(Number(namesOrCount) || 0));
+  return Array.from({ length: count }, (_, offset) => `Column${index + offset + 1}`);
+}
+
+function serializeRow(row, columnCount) {
+  if (!columnCount || row.length >= columnCount) return row.join("\t");
+  const values = row.slice();
+  values.length = columnCount;
+  return values.join("\t");
+}
+
 function shiftSetForInsert(set, index, count) {
-  const shifted = new Set();
-  for (const value of set) shifted.add(value >= index ? value + count : value);
-  return shifted;
+  const source = RangeSet.from(set);
+  return source.shiftForInsert(index, count);
 }
 
 function shiftSetForDelete(set, index, count) {
-  const shifted = new Set();
-  for (const value of set) {
-    if (value < index) shifted.add(value);
-    else if (value >= index + count) shifted.add(value - count);
+  const source = RangeSet.from(set);
+  return source.shiftForDelete(index, count);
+}
+
+function setHiddenRanges(target, values, hidden) {
+  const ranges = RangeSet.from(values).ranges;
+  const before = rangeSignature(target);
+  for (const [start, end] of ranges) {
+    if (hidden) target.addRange(start, end);
+    else target.deleteRange(start, end);
   }
-  return shifted;
+  return before !== rangeSignature(target);
+}
+
+function rangeSignature(target) {
+  return target.ranges?.map(([start, end]) => `${start}:${end}`).join(",") ?? [...target].join(",");
 }

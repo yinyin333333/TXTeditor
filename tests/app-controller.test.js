@@ -9,6 +9,7 @@ import {
   SEARCH_SCOPE_ROW_TITLES,
   findInTable
 } from "../src/core/search.js";
+import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
@@ -338,6 +339,30 @@ test("document saves for the same file run in order", async () => {
   assert.equal(doc.dirty, false);
 });
 
+test("browser save writes document chunks without full serialization", async () => {
+  const text = Array.from({ length: 2505 }, (_, index) => index === 0 ? "id" : String(index)).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, { dirty: true });
+  const expected = doc.toText();
+  const writes = [];
+  doc.toText = () => {
+    throw new Error("save should stream chunks instead of calling toText");
+  };
+  doc.handle = {
+    async createWritable() {
+      return {
+        write: async (chunk) => writes.push(chunk),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  assert.equal(await controller.saveFile(), true);
+  assert.ok(writes.length > 1);
+  assert.equal(writes.join(""), expected);
+  assert.equal(doc.dirty, false);
+});
+
 test("document native saves for the same file run in order", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
@@ -346,7 +371,7 @@ test("document native saves for the same file run in order", async () => {
     __TAURI__: {
       core: {
         invoke(command, args) {
-          assert.equal(command, "write_text_file_safe");
+          assert.equal(command, "write_text_file_chunk_safe");
           const gate = deferred();
           writes.push({ args, gate });
           return gate.promise.then(() => ({ path: args.path, name: "items.txt" }));
@@ -367,6 +392,7 @@ test("document native saves for the same file run in order", async () => {
     writes[0].gate.resolve();
     await waitFor(() => writes.length === 2);
     assert.deepEqual(writes.map((write) => write.args.text), ["id\nold", "id\nnewer"]);
+    assert.deepEqual(writes.map((write) => [write.args.first, write.args.last]), [[true, true], [true, true]]);
     writes[1].gate.resolve();
 
     assert.equal(await first, true);
@@ -493,6 +519,41 @@ test("document download fallback saves committed editor text", async () => {
   }
 });
 
+test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm", async () => {
+  const doc = TableDocument.fromText("huge.txt", "a\tb\n1\t2", {
+    dirty: false,
+    fileSizeBytes: LARGE_FILE_THRESHOLDS.fileSizeBytes
+  });
+  let toTextCalls = 0;
+  doc.toText = () => {
+    toTextCalls += 1;
+    return "serialized";
+  };
+  const calls = [];
+  const { controller, state } = testDocumentController([], {
+    autoFitInitialColumns: () => calls.push("auto-fit"),
+    layout: () => calls.push("layout")
+  }, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspOpenDoc: () => {
+      calls.push("lsp-open");
+      doc.toText();
+    },
+    scheduleHoverPrewarm: () => calls.push("hover-prewarm"),
+    scheduleLegacyLintForOpen: () => calls.push("legacy-open")
+  });
+
+  await controller.addDocument(doc);
+
+  assert.equal(doc.largeFileMode, true);
+  assert.equal(doc.initialColumnFitApplied, true);
+  assert.equal(toTextCalls, 0);
+  assert.deepEqual(calls, []);
+  assert.match(state.lint.status, /Large file mode/);
+});
+
 test("closing the active tab commits editor changes before checking dirty state", async () => {
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
   const { controller, state } = testDocumentController(doc, {
@@ -543,6 +604,11 @@ test("context menu command item registries preserve expected command groups", ()
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
+});
+
+test("Resize To Fit keeps the existing all-column command behavior", () => {
+  const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
 });
 
 test("Open File and Open Folder sidebar buttons are constrained to one line", () => {
@@ -611,6 +677,7 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(appSource, /createCommandSurfaceController/);
   assert.match(appSource, /createShellController/);
   assert.doesNotMatch(appSource, /function renderWorkspaceFileList/);
+  assert.doesNotMatch(appSource, /Promise\.all\(targets\.map/);
   assert.match(commandController, /function runCommand/);
   assert.match(commandController, /function executeCommandAction/);
   assert.match(diagnosticsController, /function renderProblemsPanelIfNeeded/);
@@ -621,6 +688,8 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(workspaceFileListPolicy, /function renderWorkspaceFileList/);
   assert.match(lspController, /async function startWorkspace/);
   assert.match(lspController, /createLspHoverController/);
+  assert.match(lspController, /vector-open-skipped-large-file/);
+  assert.match(lspController, /vector-update-skipped-large-file/);
   assert.doesNotMatch(lspController, /async function requestHover/);
   assert.match(lspHoverController, /async function requestHover/);
   assert.match(lspHoverController, /function scheduleHoverPrewarm/);
@@ -962,7 +1031,7 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
 });
 
 function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
-  const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: "legacy" } };
+  const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: options.lintEngine ?? "legacy" } };
   const grid = {
     commitEdit: () => {},
     draw: () => {},
@@ -983,19 +1052,19 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     renderChrome: () => {},
     showError: options.showError ?? ((error) => { throw error; }),
     reportWindowCloseFailure: () => {},
-    lspOpenDoc: () => {},
+    lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
     lspCloseDoc: () => {},
     reportLspCloseFailure: () => {},
     lspStartWorkspace: () => {},
-    scheduleHoverPrewarm: () => {},
+    scheduleHoverPrewarm: options.scheduleHoverPrewarm ?? (() => {}),
     resetUndoManagerForDocument: () => {},
     resetLegacyWorkspaceIndex: () => {},
-    scheduleLegacyLintForOpen: () => {},
+    scheduleLegacyLintForOpen: options.scheduleLegacyLintForOpen ?? (() => {}),
     scheduleLegacyLintFull: () => {},
     cancelLegacyLintJobs: () => {},
-    isVectorLintEngine: () => false,
-    isLegacyLintEngine: () => true,
+    isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
+    isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
     updateGridDiagnostics: () => {},
     scrollProblemsToActiveFile: () => {}
   });

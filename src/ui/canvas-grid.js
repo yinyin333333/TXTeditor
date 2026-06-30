@@ -1,6 +1,7 @@
 import { clamp } from "../core/table-model.js";
 import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction, keyboardEditStartAction } from "./edit-policy.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
+import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
 import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, edgeCellScrollState } from "./grid-viewport-policy.js";
@@ -70,6 +71,7 @@ export class CanvasGrid {
     this.vectorLspHoverEnabled = true;
     this.hoverSuspended = false;
     this.diagnosticsByCell = new Map();
+    this.metrics = new GridMetrics();
     this.raf = 0;
     this.renderStats = createGridRenderStats();
     window.__txteditorGridDiagnostics = this.renderStats;
@@ -257,24 +259,22 @@ export class CanvasGrid {
     return this.doc.freezeFirstRow ? 1 : 0;
   }
 
+  gridMetrics() {
+    if (!this.metrics) this.metrics = new GridMetrics();
+    const scrollStartRow = typeof this.scrollStartRow === "function" ? this.scrollStartRow() : CanvasGrid.prototype.scrollStartRow.call(this);
+    const scrollStartColumn = typeof this.scrollStartColumn === "function" ? this.scrollStartColumn() : CanvasGrid.prototype.scrollStartColumn.call(this);
+    const zoom = Number.isFinite(Number(this.zoom)) ? Number(this.zoom) : 1;
+    this.metrics.updateRows({ doc: this.doc, zoom, scrollStartRow });
+    this.metrics.updateColumns({ doc: this.doc, zoom, scrollStartColumn });
+    return this.metrics;
+  }
+
   scrollableColumnWidth() {
-    let width = 0;
-    for (let col = this.scrollStartColumn(); col < this.doc.columnCount; col++) {
-      if (!this.doc.hiddenColumns.has(col)) width += this.scaledColumnWidth(col);
-    }
-    return width;
+    return CanvasGrid.prototype.gridMetrics.call(this).scrollableColumnWidth();
   }
 
   scrollableRowsHeight() {
-    if (this.doc.hiddenRows.size === 0 && !this.doc.hasCustomRowHeights) {
-      const start = this.scrollStartRow();
-      return Math.max(0, this.doc.rowCount - start) * this.rowHeight;
-    }
-    let height = 0;
-    for (let row = this.scrollStartRow(); row < this.doc.rowCount; row++) {
-      if (!this.doc.hiddenRows.has(row)) height += this.scaledRowHeight(row);
-    }
-    return height;
+    return CanvasGrid.prototype.gridMetrics.call(this).scrollableRowsHeight();
   }
 
   visibleTableHeight() {
@@ -296,91 +296,37 @@ export class CanvasGrid {
   }
 
   columnContentLeft(column) {
-    let x = 0;
-    for (let col = this.scrollStartColumn(); col < column; col++) {
-      if (!this.doc.hiddenColumns.has(col)) x += this.scaledColumnWidth(col);
-    }
-    return x;
+    return CanvasGrid.prototype.gridMetrics.call(this).columnContentLeft(column);
   }
 
   rowContentTop(row) {
-    if (this.doc.hiddenRows.size === 0 && !this.doc.hasCustomRowHeights) {
-      return Math.max(0, row - this.scrollStartRow()) * this.rowHeight;
-    }
-    let y = 0;
-    for (let r = this.scrollStartRow(); r < row; r++) {
-      if (!this.doc.hiddenRows.has(r)) y += this.scaledRowHeight(r);
-    }
-    return y;
+    return CanvasGrid.prototype.gridMetrics.call(this).rowContentTop(row);
   }
 
   columnAtContent(x) {
-    let left = 0;
-    for (let col = this.scrollStartColumn(); col < this.doc.columnCount; col++) {
-      if (this.doc.hiddenColumns.has(col)) continue;
-      const width = this.scaledColumnWidth(col);
-      if (x >= left && x < left + width) return col;
-      left += width;
-    }
-    return Math.max(0, this.doc.columnCount - 1);
+    return CanvasGrid.prototype.gridMetrics.call(this).columnAtContent(x);
   }
 
   rowAtContent(y) {
-    if (this.doc.hiddenRows.size === 0 && !this.doc.hasCustomRowHeights) {
-      return clamp(this.scrollStartRow() + Math.floor(y / this.rowHeight), 0, this.doc.rowCount - 1);
-    }
-    let top = 0;
-    for (let row = this.scrollStartRow(); row < this.doc.rowCount; row++) {
-      if (this.doc.hiddenRows.has(row)) continue;
-      const height = this.scaledRowHeight(row);
-      if (y >= top && y < top + height) return row;
-      top += height;
-    }
-    return Math.max(0, this.doc.rowCount - 1);
+    return CanvasGrid.prototype.gridMetrics.call(this).rowAtContent(y);
   }
 
   visibleColumns() {
-    const columns = [];
-    let left = this.rowHeaderWidth + this.frozenColumnWidth() - this.scrollLeft;
-    const rightLimit = this.host.clientWidth + OVERSCAN_COLUMNS_PX;
-    for (let col = this.scrollStartColumn(); col < this.doc.columnCount; col++) {
-      if (this.doc.hiddenColumns.has(col)) continue;
-      const width = this.scaledColumnWidth(col);
-      if (left + width >= this.rowHeaderWidth + this.frozenColumnWidth() - OVERSCAN_COLUMNS_PX && left <= rightLimit) {
-        columns.push({ column: col, left, width });
-      }
-      left += width;
-      if (left > rightLimit) break;
-    }
-    return columns;
+    return CanvasGrid.prototype.gridMetrics.call(this).visibleColumns({
+      scrollLeft: this.scrollLeft,
+      viewportWidth: this.host.clientWidth,
+      fixedLeft: this.rowHeaderWidth + this.frozenColumnWidth(),
+      overscanPx: OVERSCAN_COLUMNS_PX
+    });
   }
 
   visibleRows() {
-    const rows = [];
-    const topLimit = this.headerHeight + this.frozenRowHeight();
-    const bottomLimit = this.host.clientHeight + this.rowHeight * OVERSCAN_ROWS;
-    if (this.doc.hiddenRows.size === 0 && !this.doc.hasCustomRowHeights) {
-      const start = this.scrollStartRow();
-      const first = Math.max(start, start + Math.floor(this.scrollTop / this.rowHeight) - OVERSCAN_ROWS);
-      const visibleCount = Math.ceil(this.host.clientHeight / this.rowHeight) + OVERSCAN_ROWS * 2 + 2;
-      for (let row = first; row < Math.min(this.doc.rowCount, first + visibleCount); row++) {
-        rows.push({
-          row,
-          top: topLimit + (row - start) * this.rowHeight - this.scrollTop,
-          height: this.scaledRowHeight(row)
-        });
-      }
-      return rows;
-    }
-    let top = topLimit - this.scrollTop;
-    for (let row = this.scrollStartRow(); row < this.doc.rowCount; row++) {
-      if (this.doc.hiddenRows.has(row)) continue;
-      const height = this.scaledRowHeight(row);
-      if (top + height >= topLimit - this.rowHeight * OVERSCAN_ROWS && top <= bottomLimit) rows.push({ row, top, height });
-      top += height;
-      if (top > bottomLimit) break;
-    }
-    return rows;
+    return CanvasGrid.prototype.gridMetrics.call(this).visibleRows({
+      scrollTop: this.scrollTop,
+      viewportHeight: this.host.clientHeight,
+      fixedTop: this.headerHeight + this.frozenRowHeight(),
+      overscanPx: this.rowHeight * OVERSCAN_ROWS
+    });
   }
 
   visibleRowIndexes() {

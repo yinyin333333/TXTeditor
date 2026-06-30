@@ -59,10 +59,11 @@ import {
   normaliseGridFont
 } from "./ui/app-settings-policy.js";
 import {
+  columnRangesFromRanges,
   columnsFromRanges,
   indexRange,
   keepSelectionVisible as keepSelectionOnVisibleRow,
-  rowOperationTargets,
+  rowOperationTargetRanges,
   rowsFromRanges
 } from "./ui/row-operation-policy.js";
 import {
@@ -208,6 +209,7 @@ const commandController = createCommandController({
   rowsFromSelection,
   rowsForRowOperation,
   columnsFromSelection,
+  columnsForColumnOperation,
   showError,
   handlers: {
     openFile,
@@ -547,18 +549,24 @@ function execute(command, changedRows = null) {
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
-  command.redo(activeDoc());
-  markLegacyLintDocChanged(doc);
+  command.redo(doc);
   activeUndo().push(command);
+  finishCommand(doc, command, changedRows, "edit", started);
+}
+
+function finishCommand(doc, command, changedRows = null, context = "edit", started = perfNow()) {
+  const contentChanged = command.contentChanged !== false;
+  if (contentChanged) markLegacyLintDocChanged(doc);
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
   saveSelectionState(doc);
   grid.layout();
-  if (documentChangeSyncRoute(state.lint.engine) === "vector-update") {
-    lspUpdateDoc(doc, changedRows).catch((error) => handleLspUpdateError(doc, error, "edit"));
-  } else {
+  const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange ?? changedRows : command.lspChange ?? changedRows;
+  if (contentChanged && documentChangeSyncRoute(state.lint.engine) === "vector-update") {
+    lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
+  } else if (contentChanged && !doc.largeFileMode) {
     scheduleLegacyLintForEdit(doc);
   }
-  recordUiPerf("row-command", started, { changedRows: changedRows?.length ?? 0 });
+  recordUiPerf("row-command", started, { changedRows: Array.isArray(lspChange) ? lspChange.length : lspChange?.rows?.length ?? 0, contentChanged });
   renderChrome();
 }
 
@@ -698,28 +706,14 @@ async function loadFixture(size) {
 
 function undo() {
   const doc = activeDoc();
-  if (activeUndo().undo(doc)) {
-    markLegacyLintDocChanged(doc);
-    keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
-    saveSelectionState(doc);
-    grid.layout();
-    if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "undo"));
-    else scheduleLegacyLintForEdit(doc);
-    renderChrome();
-  }
+  const command = activeUndo().undo(doc);
+  if (command) finishCommand(doc, command, null, "undo");
 }
 
 function redo() {
   const doc = activeDoc();
-  if (activeUndo().redo(doc)) {
-    markLegacyLintDocChanged(doc);
-    keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
-    saveSelectionState(doc);
-    grid.layout();
-    if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "redo"));
-    else scheduleLegacyLintForEdit(doc);
-    renderChrome();
-  }
+  const command = activeUndo().redo(doc);
+  if (command) finishCommand(doc, command, null, "redo");
 }
 
 function runCommand(id) {
@@ -884,12 +878,12 @@ function toggleFreeze(kind) {
 
 function unhideAll() {
   const doc = activeDoc();
-  const rows = [...doc.hiddenRows];
-  const columns = [...doc.hiddenColumns];
-  if (!rows.length && !columns.length) return;
+  const rows = doc.hiddenRows;
+  const columns = doc.hiddenColumns;
+  if (!rows.size && !columns.size) return;
   const commands = [
-    rows.length ? hiddenRowsCommand(rows, false) : null,
-    columns.length ? hiddenColumnsCommand(columns, false) : null
+    rows.size ? hiddenRowsCommand(rows, false) : null,
+    columns.size ? hiddenColumnsCommand(columns, false) : null
   ].filter(Boolean);
   const command = makeCustomCommand("Unhide All", {
     redo(target) {
@@ -897,7 +891,10 @@ function unhideAll() {
     },
     undo(target) {
       for (let i = commands.length - 1; i >= 0; i--) commands[i].undo(target);
-    }
+    },
+    contentChanged: false,
+    viewChanged: true,
+    lspChange: { kind: "none" }
   });
   execute(command);
 }
@@ -1083,10 +1080,10 @@ async function autoFitColumns(columns) {
   const doc = activeDoc();
   const targets = [...new Set(columns)].filter((column) => column >= 0 && column < doc.columnCount && !doc.hiddenColumns.has(column));
   if (!targets.length) return;
-  const wasDirty = doc.dirty;
-  const widths = await Promise.all(targets.map((col) => grid.measureColumnFitWidth(col, { yieldEvery: 0 })));
-  targets.forEach((col, i) => doc.setColumnWidth(col, widths[i]));
-  doc.dirty = wasDirty;
+  for (let i = 0; i < targets.length; i++) {
+    doc.setColumnWidth(targets[i], await grid.measureColumnFitWidth(targets[i]));
+    if (i % 16 === 15) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
   grid.layout();
   renderChrome();
 }
@@ -1107,7 +1104,10 @@ function cloneRows() {
 
 function commitResize(resize) {
   if (!resize || resize.before === resize.current) return;
-  renderChrome();
+  const command = resize.kind === "column"
+    ? resizeColumnCommand(resize.index, resize.before, resize.current)
+    : resizeRowCommand(resize.index, resize.before, resize.current);
+  execute(command);
 }
 
 function showPalette() {
@@ -1175,7 +1175,7 @@ function rowsForContextOperation() {
 
 function rowsForRowOperation() {
   const doc = activeDoc();
-  return rowOperationTargets({
+  return rowOperationTargetRanges({
     selection: state.selection,
     contextHit: state.contextMenuOpen ? state.contextHit : null,
     rowCount: doc.rowCount,
@@ -1186,6 +1186,8 @@ function rowsForRowOperation() {
 function columnsFromSelection() {
   return columnsFromRanges(state.selection.ranges);
 }
+
+function columnsForColumnOperation() { return columnRangesFromRanges(state.selection.ranges, activeDoc().columnCount); }
 
 function lintDocKey(doc) {
   return lintPathKey(doc?.path || doc?.name || "");

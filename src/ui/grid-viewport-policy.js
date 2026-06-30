@@ -138,6 +138,7 @@ export function applyResizeDragState({ doc, resizing, hit }) {
       min: 36
     });
     doc.columnWidths[resizing.index] = next;
+    doc.markViewChanged?.();
     return { value: next, guide: { kind: "column", x: hit.x }, hasCustomRowHeights: doc.hasCustomRowHeights };
   }
 
@@ -150,5 +151,6 @@ export function applyResizeDragState({ doc, resizing, hit }) {
   });
   doc.rowHeights[resizing.index] = next;
   doc.hasCustomRowHeights = true;
+  doc.markViewChanged?.();
   return { value: next, guide: { kind: "row", y: hit.y }, hasCustomRowHeights: true };
 }

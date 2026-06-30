@@ -47,6 +47,7 @@ import { reportBackgroundTaskFailure } from "../../core/background-task-status.j
 import { createLspHoverController } from "./lsp-hover-controller.js";
 
 const HOVER_READY_FALLBACK_MS = 1200;
+const DEFERRED_FULL_UPDATE_DELAY_MS = 250;
 const MAX_LOG_ENTRIES = 500;
 
 export function mapLspDiagnosticToDisplay(diagnostic, {
@@ -227,6 +228,16 @@ export function createLspController({
     }
   }
 
+  function scheduleDeferredFullUpdate(doc, reason) {
+    const docState = lspDocumentState(doc);
+    if (docState.fullUpdateTimer != null) clearTimeout(docState.fullUpdateTimer);
+    docState.fullUpdateTimer = setTimeout(() => {
+      docState.fullUpdateTimer = null;
+      updateDoc(doc, { kind: "full", reason }).catch((error) => handleUpdateError(doc, error, `deferred-${reason}`));
+    }, DEFERRED_FULL_UPDATE_DELAY_MS);
+    recordLintEngineEvent("vector-update-deferred", { fileName: doc?.name, reason, delayMs: DEFERRED_FULL_UPDATE_DELAY_MS });
+  }
+
   function scheduleHoverReadyFallback(doc, uri, reason) {
     clearHoverReadyFallback(doc);
     const docState = lspDocumentState(doc);
@@ -295,6 +306,10 @@ export function createLspController({
   }
 
   async function openDoc(doc) {
+    if (doc?.largeFileMode) {
+      recordLintEngineEvent("vector-open-skipped-large-file", { fileName: doc?.name, reasons: doc?.largeFileReasons ?? [] });
+      return;
+    }
     const uri = docToUri(doc);
     const docState = lspDocumentState(doc);
     const version = ensureLspDocumentVersion(doc);
@@ -362,6 +377,10 @@ export function createLspController({
   }
 
   async function updateDoc(doc, changedRows = null) {
+    if (doc?.largeFileMode && !isIncrementalRowChange(changedRows)) {
+      recordLintEngineEvent("vector-update-skipped-large-file", { fileName: doc?.name, changeKind: changedRows?.kind ?? "full" });
+      return;
+    }
     const uri = docToUri(doc);
     const policy = lspUpdateDocumentPolicy({
       vectorEngine: isVectorLintEngine(),
@@ -370,11 +389,19 @@ export function createLspController({
       changedRows
     });
     if (policy.action === "skip-legacy") {
-      recordLintEngineEvent("vector-update-skipped-legacy", { fileName: doc?.name, changedRows: changedRows?.length ?? null });
+      recordLintEngineEvent("vector-update-skipped-legacy", { fileName: doc?.name, changedRows: policy.changedRowCount ?? null });
       return;
     }
-    if (policy.action === "skip-not-started" || policy.action === "skip-no-uri") return;
+    if (policy.action === "skip-not-started" || policy.action === "skip-no-uri" || policy.action === "skip-no-change") return;
+    if (policy.action === "update-full-deferred") return scheduleDeferredFullUpdate(doc, policy.reason);
     const docState = lspDocumentState(doc);
+    if (docState.fullUpdateTimer != null && policy.action === "update-incremental") {
+      return scheduleDeferredFullUpdate(doc, "pending-structural-change");
+    }
+    if (docState.fullUpdateTimer != null) {
+      clearTimeout(docState.fullUpdateTimer);
+      docState.fullUpdateTimer = null;
+    }
     hoverController.clearHoverCacheForUri(uri);
     const version = nextLspDocumentVersion(doc);
     hoverController.invalidateHover(false, "document-version-changed");
@@ -384,14 +411,18 @@ export function createLspController({
     docState.openedVersion = version;
     scheduleHoverReadyFallback(doc, uri, "post-change-diagnostics-fallback");
     if (policy.action === "update-incremental") {
-      const changes = lspChangedRowsToIncrementalChanges(doc, changedRows);
-      recordLspTraffic(uri, "lsp_update_file_incremental", { fileName: doc.name, documentVersion: version, changedRows: changedRows.length });
+      const changes = lspChangedRowsToIncrementalChanges(doc, policy.change);
+      recordLspTraffic(uri, "lsp_update_file_incremental", { fileName: doc.name, documentVersion: version, changedRows: policy.changedRowCount });
       await lspUpdateFileIncremental(uri, version, changes);
     } else {
       recordLspTraffic(uri, "lsp_update_file", { fileName: doc.name, documentVersion: version });
       await lspUpdateFile(uri, version, doc.toText());
     }
     clearLspUpdateFailureStatus(state, renderChrome);
+  }
+
+  function isIncrementalRowChange(change) {
+    return Array.isArray(change) || change?.kind === "replaceRows";
   }
 
   function handleUpdateError(doc, error, context) {

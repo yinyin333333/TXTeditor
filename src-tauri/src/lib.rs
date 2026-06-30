@@ -20,6 +20,7 @@ pub fn run() {
             file_io::read_text_file,
             file_io::read_text_files,
             file_io::write_text_file_safe,
+            file_io::write_text_file_chunk_safe,
             workspace_files::list_workspace_files,
             config::get_config,
             config::save_config,

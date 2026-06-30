@@ -26,6 +26,7 @@ export function createCommandController({
   rowsFromSelection,
   rowsForRowOperation = rowsFromSelection,
   columnsFromSelection,
+  columnsForColumnOperation = columnsFromSelection,
   showError,
   handlers
 }) {
@@ -58,12 +59,12 @@ export function createCommandController({
     if (name === "deleteRow") return execute(deleteRowsCommand(doc, rect.top, rect.bottom - rect.top + 1));
     if (name === "clearRow") return execute(clearRangeCommand(doc, { top: rect.top, bottom: rect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row"));
     if (name === "hideRow") return execute(hiddenRowsCommand(rowsForRowOperation(), true));
-    if (name === "unhideRows") return execute(hiddenRowsCommand([...doc.hiddenRows], false));
+    if (name === "unhideRows") return execute(hiddenRowsCommand(doc.hiddenRows, false));
     if (name === "insertColumn") return execute(insertColumnCommand(doc, rect.left));
     if (name === "deleteColumn") return execute(deleteColumnsCommand(doc, rect.left, rect.right - rect.left + 1));
     if (name === "clearColumn") return execute(clearRangeCommand(doc, { top: 0, bottom: doc.rowCount - 1, left: rect.left, right: rect.right }, "Clear Column"));
-    if (name === "hideColumn") return execute(hiddenColumnsCommand(columnsFromSelection(), true));
-    if (name === "unhideColumns") return execute(hiddenColumnsCommand([...doc.hiddenColumns], false));
+    if (name === "hideColumn") return execute(hiddenColumnsCommand(columnsForColumnOperation(), true));
+    if (name === "unhideColumns") return execute(hiddenColumnsCommand(doc.hiddenColumns, false));
     if (name === "fill") return execute(fillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
     if (name === "incrementFill") return execute(incrementFillSelectedCellsCommand(doc, state.selection.ranges, state.selection.anchor));
   }

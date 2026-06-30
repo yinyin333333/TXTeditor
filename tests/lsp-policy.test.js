@@ -11,7 +11,8 @@ import {
   lspChangedRowsToIncrementalChanges,
   lspHoverReady,
   lspOpenDocumentPolicy,
-  lspUpdateDocumentPolicy
+  lspUpdateDocumentPolicy,
+  normalizeLspDocumentChange
 } from "../src/core/lsp-session-policy.js";
 import {
   docToUri,
@@ -1532,17 +1533,38 @@ test("Vector-LSP traffic counters and idempotent didOpen state are exposed for r
     lspStarted: true,
     uri: "file:///skills.txt",
     changedRows: [1, 3]
-  }), { action: "update-incremental", changedRowCount: 2 });
+  }), { action: "update-incremental", changedRowCount: 2, change: { kind: "replaceRows", rows: [1, 3] } });
   assert.deepEqual(lspUpdateDocumentPolicy({
     vectorEngine: true,
     lspStarted: true,
     uri: "file:///skills.txt",
     changedRows: null
-  }), { action: "update-full", changedRowCount: 0 });
+  }), { action: "update-full", changedRowCount: 0, change: { kind: "full", reason: "unspecified" } });
+  assert.deepEqual(lspUpdateDocumentPolicy({
+    vectorEngine: true,
+    lspStarted: true,
+    uri: "file:///skills.txt",
+    changedRows: { kind: "none" }
+  }), { action: "skip-no-change", changedRowCount: 0, change: { kind: "none" } });
+  assert.deepEqual(lspUpdateDocumentPolicy({
+    vectorEngine: true,
+    lspStarted: true,
+    uri: "file:///skills.txt",
+    changedRows: { kind: "insertRows", index: 10, count: 10000 }
+  }), {
+    action: "update-full-deferred",
+    changedRowCount: 0,
+    change: { kind: "insertRows", index: 10, count: 10000 },
+    reason: "insertRows"
+  });
+  assert.deepEqual(normalizeLspDocumentChange({ kind: "replaceRows", rows: null }), { kind: "replaceRows", rows: [] });
   const changedDoc = TableDocument.fromText("skills.txt", "id\tname\n1\tcap\n2\tboots", { dirty: false });
   assert.deepEqual(lspChangedRowsToIncrementalChanges(changedDoc, [1, 9]), [
     { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0xFFFFFF } }, text: "1\tcap" },
     { range: { start: { line: 9, character: 0 }, end: { line: 9, character: 0xFFFFFF } }, text: "" }
+  ]);
+  assert.deepEqual(lspChangedRowsToIncrementalChanges(changedDoc, { kind: "replaceRows", rows: [2] }), [
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0xFFFFFF } }, text: "2\tboots" }
   ]);
   assert.equal(lspHoverReady({
     vectorHoverEnabled: true,

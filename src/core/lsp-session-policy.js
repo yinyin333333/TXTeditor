@@ -13,10 +13,35 @@ export function lspUpdateDocumentPolicy({ vectorEngine, lspStarted, uri, changed
   if (!vectorEngine) return { action: "skip-legacy", event: "vector-update-skipped-legacy" };
   if (!lspStarted) return { action: "skip-not-started" };
   if (!uri) return { action: "skip-no-uri" };
+  const change = normalizeLspDocumentChange(changedRows);
+  if (change.kind === "none") return { action: "skip-no-change", changedRowCount: 0, change };
+  if (change.kind === "replaceRows") {
+    return {
+      action: change.rows.length ? "update-incremental" : "update-full",
+      changedRowCount: change.rows.length,
+      change
+    };
+  }
+  if (change.kind !== "full") {
+    return {
+      action: "update-full-deferred",
+      changedRowCount: 0,
+      change,
+      reason: change.kind
+    };
+  }
   return {
-    action: changedRows?.length ? "update-incremental" : "update-full",
-    changedRowCount: changedRows?.length ?? 0
+    action: "update-full",
+    changedRowCount: 0,
+    change
   };
+}
+
+export function normalizeLspDocumentChange(change) {
+  if (Array.isArray(change)) return { kind: "replaceRows", rows: change };
+  if (change?.kind === "replaceRows") return { ...change, rows: Array.isArray(change.rows) ? change.rows : [] };
+  if (change?.kind) return change;
+  return { kind: "full", reason: "unspecified" };
 }
 
 export function lspHoverReady({ vectorHoverEnabled, lspStarted, uri, docState }) {
@@ -24,7 +49,8 @@ export function lspHoverReady({ vectorHoverEnabled, lspStarted, uri, docState })
 }
 
 export function lspChangedRowsToIncrementalChanges(doc, changedRows) {
-  return changedRows.map((row) => ({
+  const rows = Array.isArray(changedRows) ? changedRows : normalizeLspDocumentChange(changedRows).rows ?? [];
+  return rows.map((row) => ({
     range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
     text: doc.rows[row]?.join("\t") ?? ""
   }));
