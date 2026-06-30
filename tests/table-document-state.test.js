@@ -215,10 +215,10 @@ test("row index highlight is reserved for full-row selection", () => {
 test("insert and delete row are grouped undoable commands", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
-  const insert = insertRowCommand(doc, 1, ["x", "y"]);
+  const insert = insertRowCommand(doc, 1);
   insert.redo(doc);
   undo.push(insert);
-  assert.equal(doc.getCell(1, 0), "x");
+  assert.equal(doc.getCell(1, 0), "");
   undo.undo(doc);
   assert.equal(doc.getCell(1, 0), "1");
 
@@ -272,7 +272,7 @@ test("insert row and insert column commands can batch custom counts", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4");
   const undo = new UndoManager();
 
-  const rows = insertRowCommand(doc, 1, [], 2);
+  const rows = insertRowCommand(doc, 1, 2);
   rows.redo(doc);
   undo.push(rows);
   assert.equal(rows.label, "Insert 2 Row(s)");
@@ -283,7 +283,7 @@ test("insert row and insert column commands can batch custom counts", () => {
   assert.equal(doc.rowCount, 3);
   assert.equal(doc.getCell(1, 0), "1");
 
-  const columns = insertColumnCommand(doc, 1, "new_column", 2);
+  const columns = insertColumnCommand(doc, 1, 2);
   columns.redo(doc);
   undo.push(columns);
   assert.equal(columns.label, "Insert 2 Column(s)");
@@ -399,10 +399,10 @@ test("add columns command uses one batched insert and undo restores shape", () =
 test("insert and delete column are grouped undoable commands", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
-  const insert = insertColumnCommand(doc, 1, "new");
+  const insert = insertColumnCommand(doc, 1);
   insert.redo(doc);
   undo.push(insert);
-  assert.equal(doc.getCell(0, 1), "new");
+  assert.equal(doc.getCell(0, 1), "");
   undo.undo(doc);
   assert.equal(doc.getCell(0, 1), "b");
 

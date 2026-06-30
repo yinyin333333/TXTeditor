@@ -170,15 +170,12 @@ export function arithmeticRangesCommand(doc, ranges, operator, operand) {
   return makeCellCommand(`Math ${operator} ${amount}`, doc, edits);
 }
 
-export function insertRowCommand(doc, index, values = [], count = 1) {
+export function insertRowCommand(doc, index, count = 1) {
   const at = clamp(index, 0, doc.rowCount);
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
-  const insertRows = values.length
-    ? Array.from({ length: safeCount }, (_, offset) => offset === 0 ? values : [])
-    : safeCount;
   return makeCustomCommand(safeCount === 1 ? "Insert Row" : `Insert ${safeCount} Row(s)`, {
     redo(target) {
-      target.insertRows(at, insertRows);
+      target.insertRows(at, safeCount);
     },
     undo(target) {
       target.removeRows(at, safeCount);
@@ -241,15 +238,12 @@ export function deleteRowsCommand(doc, index, count = 1) {
   });
 }
 
-export function insertColumnCommand(doc, index, name = "new_column", count = 1) {
+export function insertColumnCommand(doc, index, count = 1) {
   const at = clamp(index, 0, doc.columnCount);
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
-  const names = name === "new_column"
-    ? Array.from({ length: safeCount }, () => "")
-    : Array.from({ length: safeCount }, (_, offset) => offset === 0 ? name : "");
   return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
-      target.insertColumns(at, names, { sparseAppend: false });
+      target.insertColumns(at, Array.from({ length: safeCount }, () => ""), { sparseAppend: false });
     },
     undo(target) {
       target.removeColumns(at, safeCount);

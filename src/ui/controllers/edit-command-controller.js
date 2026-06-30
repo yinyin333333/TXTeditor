@@ -71,7 +71,7 @@ export function createEditCommandController({
       defaultValue: 1,
       min: 1
     });
-    if (count !== null) execute(insertRowCommand(activeDoc(), state.selection.rect.top, [], count));
+    if (count !== null) execute(insertRowCommand(activeDoc(), state.selection.rect.top, count));
   }
 
   async function addColumns() {
@@ -91,7 +91,7 @@ export function createEditCommandController({
       defaultValue: 1,
       min: 1
     });
-    if (count !== null) execute(insertColumnCommand(activeDoc(), state.selection.rect.left, "new_column", count));
+    if (count !== null) execute(insertColumnCommand(activeDoc(), state.selection.rect.left, count));
   }
 
   async function math(kind) {
