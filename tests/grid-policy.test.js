@@ -1437,6 +1437,10 @@ test("initial canvas column fit is header-only and compact", () => {
     doc: {
       columnCount: 2,
       columnWidths: [],
+      viewRevision: 0,
+      markViewChanged() {
+        this.viewRevision += 1;
+      },
       getCell: (row, column) => {
         assert.equal(row, 0);
         return column === 0 ? "id" : "long header";
@@ -1446,6 +1450,7 @@ test("initial canvas column fit is header-only and compact", () => {
   CanvasGrid.prototype.autoFitInitialColumns.call(grid);
   assert.deepEqual(measured, ["id", "long header"]);
   assert.deepEqual(grid.doc.columnWidths, [56, 134]);
+  assert.equal(grid.doc.viewRevision, 1);
 });
 
 test("canvas drag row resizing opts into custom row-height layout", () => {

@@ -757,6 +757,7 @@ export class CanvasGrid {
         padding
       });
     }
+    this.doc.markViewChanged?.();
   }
 
   cellBox(row, column) {
