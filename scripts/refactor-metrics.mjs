@@ -183,7 +183,7 @@ for (const target of metricTargets) {
 }
 
 const locLimits = [
-  ["src/app.js", 1200],
+  ["src/app.js", 760],
   ["src/ui/canvas-grid.js", 900],
   ["src/ui/controllers/lsp-controller.js", 850]
 ];

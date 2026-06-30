@@ -607,8 +607,8 @@ test("context menu command item registries preserve expected command groups", ()
 });
 
 test("Resize To Fit keeps the existing all-column command behavior", () => {
-  const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(appSource, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
+  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
+  assert.match(gridCommandController, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
 });
 
 test("Open File and Open Folder sidebar buttons are constrained to one line", () => {
@@ -650,13 +650,19 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.equal(panelVisibilityStorageValue(false), "hidden");
 });
 
-test("phase 3 ownership boundaries keep app shell and grid behavior in owners", () => {
+test("app ownership boundaries keep shell wiring and extracted helpers in owners", () => {
   const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const canvasSource = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   const lspController = readFileSync(new URL("../src/ui/controllers/lsp-controller.js", import.meta.url), "utf8");
   const lspHoverController = readFileSync(new URL("../src/ui/controllers/lsp-hover-controller.js", import.meta.url), "utf8");
   const lspUriPolicy = readFileSync(new URL("../src/core/lsp-uri-policy.js", import.meta.url), "utf8");
   const appRuntimeUtils = readFileSync(new URL("../src/ui/app-runtime-utils.js", import.meta.url), "utf8");
+  const appStartupState = readFileSync(new URL("../src/ui/app-startup-state.js", import.meta.url), "utf8");
+  const appElements = readFileSync(new URL("../src/ui/app-elements.js", import.meta.url), "utf8");
+  const appPerf = readFileSync(new URL("../src/ui/app-perf.js", import.meta.url), "utf8");
+  const appEventController = readFileSync(new URL("../src/ui/controllers/app-event-controller.js", import.meta.url), "utf8");
+  const editCommandController = readFileSync(new URL("../src/ui/controllers/edit-command-controller.js", import.meta.url), "utf8");
+  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
   const settingsController = readFileSync(new URL("../src/ui/controllers/settings-controller.js", import.meta.url), "utf8");
   const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
   const commandController = readFileSync(new URL("../src/ui/controllers/command-controller.js", import.meta.url), "utf8");
@@ -666,7 +672,7 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
-  assert.ok(appSource.split(/\r?\n/).length <= 1200);
+  assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
   assert.ok(lspController.split(/\r?\n/).length <= 850);
   assert.match(appSource, /createCommandController/);
@@ -678,6 +684,9 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(appSource, /createShellController/);
   assert.doesNotMatch(appSource, /function renderWorkspaceFileList/);
   assert.doesNotMatch(appSource, /Promise\.all\(targets\.map/);
+  assert.doesNotMatch(appSource, /function wireEvents/);
+  assert.doesNotMatch(appSource, /async function copySelection/);
+  assert.doesNotMatch(appSource, /async function autoFitColumns/);
   assert.match(commandController, /function runCommand/);
   assert.match(commandController, /function executeCommandAction/);
   assert.match(diagnosticsController, /function renderProblemsPanelIfNeeded/);
@@ -696,6 +705,12 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(lspUriPolicy, /function docToUri/);
   assert.match(lspUriPolicy, /function uriToFileKey/);
   assert.match(appRuntimeUtils, /function createToastFeedback/);
+  assert.match(appStartupState, /function createInitialAppState/);
+  assert.match(appElements, /APP_ELEMENT_IDS/);
+  assert.match(appPerf, /function createAppPerf/);
+  assert.match(appEventController, /function wireEvents/);
+  assert.match(editCommandController, /async function pasteSelection/);
+  assert.match(gridCommandController, /async function autoFitColumns/);
   assert.match(settingsController, /function showSettings/);
   assert.match(settingsController, /function setLintEngine/);
   assert.match(commandSurfaceController, /function showContextMenu/);
