@@ -30,6 +30,7 @@ export function createDocumentController({
   grid,
   emptyDoc,
   activeDoc,
+  saveSelectionState,
   applyFreezeToDoc,
   renderChrome,
   showError,
@@ -99,6 +100,7 @@ export function createDocumentController({
   async function addDocument(doc) {
     const plan = documentOpenPlan(state.docs, doc);
     if (plan.action === "activate-existing") {
+      saveSelectionState();
       state.active = plan.activeIndex;
       grid.setDocument(activeDoc());
       renderChrome();
@@ -107,6 +109,7 @@ export function createDocumentController({
     resetUndoManagerForDocument(doc);
     doc.zoom = 1;
     state.docs.push(doc);
+    saveSelectionState();
     state.active = plan.activeIndex;
     applyFreezeToDoc(doc);
     grid.setDocument(doc);

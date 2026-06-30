@@ -241,6 +241,7 @@ const documentController = createDocumentController({
   grid,
   emptyDoc: EMPTY_DOC,
   activeDoc,
+  saveSelectionState,
   applyFreezeToDoc,
   renderChrome,
   showError,
@@ -432,6 +433,10 @@ function hasOpenDocument() {
 function saveSelectionState(doc = activeDoc()) {
   if (!hasOpenDocument() || doc === EMPTY_DOC || typeof state.selection.snapshot !== "function") return;
   doc.selectionState = state.selection.snapshot();
+  if (grid.doc === doc) {
+    doc.scrollLeft = grid.scrollLeft;
+    doc.scrollTop = grid.scrollTop;
+  }
 }
 
 function activeUndo() {

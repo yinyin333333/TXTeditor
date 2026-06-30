@@ -109,15 +109,20 @@ export class CanvasGrid {
   }
 
   setDocument(doc) {
+    const scrollLeft = Math.max(0, doc.scrollLeft ?? 0);
+    const scrollTop = Math.max(0, doc.scrollTop ?? 0);
     if (this._tooltip && shouldClearHoverForInteraction({ documentChanged: true })) this.clearHoverState();
     else this.hideFirstColumnHoverPreview();
     this.doc = doc;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
     typeof this.selection.restore === "function" ? this.selection.restore(doc.selectionState, doc.rowCount, doc.columnCount) : this.selection.set(0, 0);
-    this.host.scrollLeft = Math.max(0, doc.scrollLeft ?? 0);
-    this.host.scrollTop = Math.max(0, doc.scrollTop ?? 0);
     this.layout();
+    this.host.scrollLeft = scrollLeft;
+    this.host.scrollTop = scrollTop;
+    doc.scrollLeft = this.scrollLeft;
+    doc.scrollTop = this.scrollTop;
+    this.draw();
   }
 
   setFontFamily(fontFamily) {

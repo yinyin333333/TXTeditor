@@ -556,6 +556,80 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
   assert.match(state.lint.status, /Large file mode/);
 });
 
+test("opening another document saves the outgoing selection and scroll state", async () => {
+  const active = TableDocument.fromText("active.txt", "id\nactive");
+  const next = TableDocument.fromText("next.txt", "id\nnext");
+  const selection = new SelectionModel();
+  const gridState = {
+    scrollLeft: 12,
+    scrollTop: 240,
+    autoFitInitialColumns: () => {},
+    layout: () => {},
+    setDocument(doc) {
+      this.scrollLeft = doc.scrollLeft ?? 0;
+      this.scrollTop = doc.scrollTop ?? 0;
+    }
+  };
+  let stateRef;
+  const saves = [];
+  selection.set(1, 0);
+  const { controller, state } = testDocumentController(active, gridState, {
+    saveSelectionState: () => {
+      const doc = stateRef.docs[stateRef.active];
+      saves.push(doc.name);
+      doc.selectionState = selection.snapshot();
+      doc.scrollLeft = gridState.scrollLeft;
+      doc.scrollTop = gridState.scrollTop;
+    }
+  });
+  stateRef = state;
+
+  await controller.addDocument(next);
+
+  assert.equal(state.active, 1);
+  assert.deepEqual(saves, ["active.txt"]);
+  assert.deepEqual(active.selectionState.focus, { row: 1, column: 0 });
+  assert.equal(active.scrollLeft, 12);
+  assert.equal(active.scrollTop, 240);
+});
+
+test("activating an already-open document saves the outgoing selection and scroll state", async () => {
+  const active = TableDocument.fromText("active.txt", "id\nactive", { path: "Data/active.txt" });
+  const existing = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
+  const duplicate = TableDocument.fromText("target-copy.txt", "id\ntarget", { path: "Data/target.txt" });
+  const selection = new SelectionModel();
+  const gridState = {
+    scrollLeft: 7,
+    scrollTop: 360,
+    setDocument(doc) {
+      this.scrollLeft = doc.scrollLeft ?? 0;
+      this.scrollTop = doc.scrollTop ?? 0;
+    }
+  };
+  let stateRef;
+  const saves = [];
+  selection.set(1, 0);
+  const { controller, state } = testDocumentController([active, existing], gridState, {
+    saveSelectionState: () => {
+      const doc = stateRef.docs[stateRef.active];
+      saves.push(doc.name);
+      doc.selectionState = selection.snapshot();
+      doc.scrollLeft = gridState.scrollLeft;
+      doc.scrollTop = gridState.scrollTop;
+    }
+  });
+  stateRef = state;
+
+  await controller.addDocument(duplicate);
+
+  assert.equal(state.active, 1);
+  assert.equal(state.docs.length, 2);
+  assert.deepEqual(saves, ["active.txt"]);
+  assert.deepEqual(active.selectionState.focus, { row: 1, column: 0 });
+  assert.equal(active.scrollLeft, 7);
+  assert.equal(active.scrollTop, 360);
+});
+
 test("closing the active tab commits editor changes before checking dirty state", async () => {
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
   const { controller, state } = testDocumentController(doc, {
@@ -1067,6 +1141,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     grid,
     emptyDoc: TableDocument.fromText("empty.txt", ""),
     activeDoc: () => state.docs[state.active],
+    saveSelectionState: options.saveSelectionState ?? (() => {}),
     applyFreezeToDoc: () => {},
     renderChrome: () => {},
     showError: options.showError ?? ((error) => { throw error; }),
