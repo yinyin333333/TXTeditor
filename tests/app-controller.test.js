@@ -224,6 +224,8 @@ test("command registry preserves public command labels and availability policy",
   assert.equal(canRunCommandWithoutDocument("go-to-definition"), false);
   assert.deepEqual(commandActionForId("open-file"), { type: "handler", name: "openFile" });
   assert.deepEqual(commandActionForId("load-fixture-20k"), { type: "fixture", size: 20000 });
+  assert.deepEqual(commandActionForId("insert-row"), { type: "handler", name: "insertRows" });
+  assert.deepEqual(commandActionForId("insert-column"), { type: "handler", name: "insertColumns" });
   assert.deepEqual(commandActionForId("math-add"), { type: "math", kind: "add" });
   assert.deepEqual(commandActionForId("toggle-freeze-row"), { type: "freeze", kind: "row" });
   assert.deepEqual(commandActionForId("resize-selected-fit"), { type: "resize", useSelection: true });

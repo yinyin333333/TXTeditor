@@ -170,19 +170,22 @@ export function arithmeticRangesCommand(doc, ranges, operator, operand) {
   return makeCellCommand(`Math ${operator} ${amount}`, doc, edits);
 }
 
-export function insertRowCommand(doc, index, values = []) {
+export function insertRowCommand(doc, index, values = [], count = 1) {
   const at = clamp(index, 0, doc.rowCount);
-  let inserted = null;
-  return makeCustomCommand("Insert Row", {
+  const safeCount = Math.max(1, Math.floor(Number(count) || 1));
+  const insertRows = values.length
+    ? Array.from({ length: safeCount }, (_, offset) => offset === 0 ? values : [])
+    : safeCount;
+  return makeCustomCommand(safeCount === 1 ? "Insert Row" : `Insert ${safeCount} Row(s)`, {
     redo(target) {
-      inserted = target.insertRow(at, values);
+      target.insertRows(at, insertRows);
     },
     undo(target) {
-      target.removeRows(at, inserted?.values ? 1 : 1);
+      target.removeRows(at, safeCount);
     },
     contentChanged: true,
-    lspChange: { kind: "insertRows", index: at, count: 1 },
-    undoLspChange: { kind: "deleteRows", index: at, count: 1 }
+    lspChange: { kind: "insertRows", index: at, count: safeCount },
+    undoLspChange: { kind: "deleteRows", index: at, count: safeCount }
   });
 }
 
@@ -238,18 +241,22 @@ export function deleteRowsCommand(doc, index, count = 1) {
   });
 }
 
-export function insertColumnCommand(doc, index, name = "new_column") {
+export function insertColumnCommand(doc, index, name = "new_column", count = 1) {
   const at = clamp(index, 0, doc.columnCount);
-  return makeCustomCommand("Insert Column", {
+  const safeCount = Math.max(1, Math.floor(Number(count) || 1));
+  const names = name === "new_column"
+    ? Array.from({ length: safeCount }, () => "")
+    : Array.from({ length: safeCount }, (_, offset) => offset === 0 ? name : "");
+  return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
-      target.insertColumn(at, name === "new_column" ? `Column${at + 1}` : name);
+      target.insertColumns(at, names, { sparseAppend: false });
     },
     undo(target) {
-      target.removeColumns(at, 1);
+      target.removeColumns(at, safeCount);
     },
     contentChanged: true,
-    lspChange: { kind: "insertColumns", index: at, count: 1 },
-    undoLspChange: { kind: "deleteColumns", index: at, count: 1 }
+    lspChange: { kind: "insertColumns", index: at, count: safeCount },
+    undoLspChange: { kind: "deleteColumns", index: at, count: safeCount }
   });
 }
 
@@ -258,7 +265,7 @@ export function addColumnsCommand(doc, count = 1) {
   const at = doc.columnCount;
   return makeCustomCommand(`Add ${safeCount} Column(s)`, {
     redo(target) {
-      target.insertColumns(at, safeCount);
+      target.insertColumns(at, Array.from({ length: safeCount }, () => ""));
     },
     undo(target) {
       target.removeColumns(at, safeCount);

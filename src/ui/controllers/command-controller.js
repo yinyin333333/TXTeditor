@@ -12,9 +12,7 @@ import {
   fillSelectedCellsCommand,
   hiddenColumnsCommand,
   hiddenRowsCommand,
-  incrementFillSelectedCellsCommand,
-  insertColumnCommand,
-  insertRowCommand
+  incrementFillSelectedCellsCommand
 } from "../../core/operations.js";
 
 export function createCommandController({
@@ -55,12 +53,10 @@ export function createCommandController({
 
   function executeCommandAction(name, doc, rect) {
     if (name === "clearSelection") return execute(clearRangesCommand(doc, state.selection.ranges));
-    if (name === "insertRow") return execute(insertRowCommand(doc, rect.top));
     if (name === "deleteRow") return execute(deleteRowsCommand(doc, rect.top, rect.bottom - rect.top + 1));
     if (name === "clearRow") return execute(clearRangeCommand(doc, { top: rect.top, bottom: rect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row"));
     if (name === "hideRow") return execute(hiddenRowsCommand(rowsForRowOperation(), true));
     if (name === "unhideRows") return execute(hiddenRowsCommand(doc.hiddenRows, false));
-    if (name === "insertColumn") return execute(insertColumnCommand(doc, rect.left));
     if (name === "deleteColumn") return execute(deleteColumnsCommand(doc, rect.left, rect.right - rect.left + 1));
     if (name === "clearColumn") return execute(clearRangeCommand(doc, { top: 0, bottom: doc.rowCount - 1, left: rect.left, right: rect.right }, "Clear Column"));
     if (name === "hideColumn") return execute(hiddenColumnsCommand(columnsForColumnOperation(), true));

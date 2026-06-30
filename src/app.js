@@ -285,7 +285,9 @@ const {
   pasteSelection,
   selectAll,
   addRows,
+  insertRows,
   addColumns,
+  insertColumns,
   math
 } = editCommandController;
 const commandController = createCommandController({
@@ -313,8 +315,10 @@ const commandController = createCommandController({
     cutSelection,
     selectAll,
     addRows,
+    insertRows,
     cloneRows,
     addColumns,
+    insertColumns,
     unhideAll,
     toggleColorize: settingsController.toggleColorize,
     toggleVectorLspHover: settingsController.toggleVectorLspHover,

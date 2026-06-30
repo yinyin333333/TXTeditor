@@ -5,6 +5,8 @@ import {
   arithmeticCommand,
   clearRangesCommand,
   copyRanges,
+  insertColumnCommand,
+  insertRowCommand,
   pasteTextToRangesCommand
 } from "../../core/operations.js";
 import {
@@ -62,6 +64,16 @@ export function createEditCommandController({
     if (count !== null) execute(addRowsCommand(activeDoc(), count));
   }
 
+  async function insertRows() {
+    const count = await promptNumber({
+      title: "Insert Rows",
+      message: "Number of rows to insert:",
+      defaultValue: 1,
+      min: 1
+    });
+    if (count !== null) execute(insertRowCommand(activeDoc(), state.selection.rect.top, [], count));
+  }
+
   async function addColumns() {
     const count = await promptNumber({
       title: "Add Columns",
@@ -70,6 +82,16 @@ export function createEditCommandController({
       min: 1
     });
     if (count !== null) execute(addColumnsCommand(activeDoc(), count));
+  }
+
+  async function insertColumns() {
+    const count = await promptNumber({
+      title: "Insert Columns",
+      message: "Number of columns to insert:",
+      defaultValue: 1,
+      min: 1
+    });
+    if (count !== null) execute(insertColumnCommand(activeDoc(), state.selection.rect.left, "new_column", count));
   }
 
   async function math(kind) {
@@ -91,7 +113,9 @@ export function createEditCommandController({
     pasteSelection,
     selectAll,
     addRows,
+    insertRows,
     addColumns,
+    insertColumns,
     math
   };
 }

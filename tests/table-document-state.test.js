@@ -263,9 +263,37 @@ test("add row and add column append grouped undoable changes", () => {
   columns.redo(doc);
   undo.push(columns);
   assert.equal(doc.columnCount, 4);
-  assert.equal(doc.getCell(0, 2), "Column3");
+  assert.equal(doc.getCell(0, 2), "");
   undo.undo(doc);
   assert.equal(doc.columnCount, 2);
+});
+
+test("insert row and insert column commands can batch custom counts", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4");
+  const undo = new UndoManager();
+
+  const rows = insertRowCommand(doc, 1, [], 2);
+  rows.redo(doc);
+  undo.push(rows);
+  assert.equal(rows.label, "Insert 2 Row(s)");
+  assert.deepEqual(rows.lspChange, { kind: "insertRows", index: 1, count: 2 });
+  assert.equal(doc.rowCount, 5);
+  assert.equal(doc.getCell(3, 0), "1");
+  undo.undo(doc);
+  assert.equal(doc.rowCount, 3);
+  assert.equal(doc.getCell(1, 0), "1");
+
+  const columns = insertColumnCommand(doc, 1, "new_column", 2);
+  columns.redo(doc);
+  undo.push(columns);
+  assert.equal(columns.label, "Insert 2 Column(s)");
+  assert.deepEqual(columns.lspChange, { kind: "insertColumns", index: 1, count: 2 });
+  assert.equal(doc.columnCount, 4);
+  assert.equal(doc.getCell(0, 1), "");
+  assert.equal(doc.getCell(0, 2), "");
+  undo.undo(doc);
+  assert.equal(doc.columnCount, 2);
+  assert.equal(doc.getCell(0, 1), "b");
 });
 
 test("bulk row insertion refreshes shape once and shifts hidden rows once", () => {
@@ -363,7 +391,7 @@ test("add columns command uses one batched insert and undo restores shape", () =
   assert.equal(insertColumnsCalls, 1);
   assert.equal(insertColumnCalls, 0);
   assert.equal(doc.columnCount, 10002);
-  assert.equal(doc.getCell(0, 10001), "Column10002");
+  assert.equal(doc.getCell(0, 10001), "");
   command.undo(doc);
   assert.equal(doc.columnCount, 2);
 });
