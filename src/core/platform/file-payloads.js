@@ -4,9 +4,6 @@ import { LARGE_FILE_THRESHOLDS } from "../large-file-policy.js";
 export function normalizeNativeReadResult(entry, fallbackPath, bulkRead) {
   if (entry?.Ok) return { path: entry.Ok.path ?? fallbackPath, payload: entry.Ok, bulkRead };
   if (entry?.Err) return { path: fallbackPath, error: String(entry.Err), bulkRead };
-  if (entry?.ok) return { path: entry.ok.path ?? fallbackPath, payload: entry.ok, bulkRead };
-  if (entry?.err) return { path: fallbackPath, error: String(entry.err), bulkRead };
-  if (entry?.path && typeof entry.text === "string") return { path: entry.path, payload: entry, bulkRead };
   return { path: fallbackPath, error: "Unexpected native read result.", bulkRead };
 }
 
@@ -31,38 +28,14 @@ export async function documentFromTextPayloadAsync(payload, DocumentType) {
   return documentFromTextPayload(payload, DocumentType);
 }
 
-export function documentFromParsedPayload(payload, parsed, DocumentType) {
+function documentFromParsedPayload(payload, parsed, DocumentType) {
   const meta = {
     path: payload.path,
     encoding: payload.encoding,
     fileSizeBytes: payload.fileSizeBytes ?? payload.sizeBytes ?? payload.size_bytes,
     dirty: false
   };
-  if (typeof DocumentType.fromParsed === "function") return DocumentType.fromParsed(payload.name, parsed, meta);
-  return new DocumentType(payload.name, parsed.rows, { ...meta, lineEnding: parsed.lineEnding, finalNewline: parsed.finalNewline });
-}
-
-export function documentOpenResultFromNativeRead(result, DocumentType, { now = defaultNow } = {}) {
-  if (result.error) return result;
-  const started = now();
-  try {
-    const doc = documentFromTextPayload(result.payload, DocumentType);
-    return {
-      path: result.payload.path,
-      name: result.payload.name,
-      bulkRead: result.bulkRead,
-      parseMs: elapsedMs(started, now),
-      doc
-    };
-  } catch (error) {
-    return {
-      path: result.payload.path,
-      name: result.payload.name,
-      bulkRead: result.bulkRead,
-      parseMs: elapsedMs(started, now),
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
+  return DocumentType.fromParsed(payload.name, parsed, meta);
 }
 
 export async function documentOpenResultFromNativeReadAsync(result, DocumentType, { now = defaultNow } = {}) {

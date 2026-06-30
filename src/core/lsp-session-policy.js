@@ -38,8 +38,7 @@ export function lspUpdateDocumentPolicy({ vectorEngine, lspStarted, uri, changed
 }
 
 export function normalizeLspDocumentChange(change) {
-  if (Array.isArray(change)) return { kind: "replaceRows", rows: change };
-  if (change?.kind === "replaceRows") return { ...change, rows: Array.isArray(change.rows) ? change.rows : [] };
+  if (change?.kind === "replaceRows") return change;
   if (change?.kind) return change;
   return { kind: "full", reason: "unspecified" };
 }
@@ -49,7 +48,7 @@ export function lspHoverReady({ vectorHoverEnabled, lspStarted, uri, docState })
 }
 
 export function lspChangedRowsToIncrementalChanges(doc, changedRows) {
-  const rows = Array.isArray(changedRows) ? changedRows : normalizeLspDocumentChange(changedRows).rows ?? [];
+  const rows = normalizeLspDocumentChange(changedRows).rows ?? [];
   return rows.map((row) => ({
     range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
     text: doc.rows[row]?.join("\t") ?? ""

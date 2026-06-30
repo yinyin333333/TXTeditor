@@ -181,7 +181,6 @@ export function insertRowCommand(doc, index, values = []) {
       target.removeRows(at, inserted?.values ? 1 : 1);
     },
     contentChanged: true,
-    structuralChange: { kind: "insertRows", index: at, count: 1 },
     lspChange: { kind: "insertRows", index: at, count: 1 },
     undoLspChange: { kind: "deleteRows", index: at, count: 1 }
   });
@@ -198,7 +197,6 @@ export function addRowsCommand(doc, count = 1) {
       target.removeRows(at, safeCount);
     },
     contentChanged: true,
-    structuralChange: { kind: "insertRows", index: at, count: safeCount },
     lspChange: { kind: "insertRows", index: at, count: safeCount },
     undoLspChange: { kind: "deleteRows", index: at, count: safeCount }
   });
@@ -219,7 +217,6 @@ export function cloneRowsCommand(doc, rows, insertAt = null) {
       target.removeRows(at, values.length);
     },
     contentChanged: true,
-    structuralChange: { kind: "insertRows", index: at, count: values.length },
     lspChange: { kind: "insertRows", index: at, count: values.length },
     undoLspChange: { kind: "deleteRows", index: at, count: values.length }
   });
@@ -236,7 +233,6 @@ export function deleteRowsCommand(doc, index, count = 1) {
       target.restoreRows(at, deleted.rows, deleted.rowHeights);
     },
     contentChanged: true,
-    structuralChange: { kind: "deleteRows", index: at, count },
     lspChange: { kind: "deleteRows", index: at, count },
     undoLspChange: { kind: "insertRows", index: at, count }
   });
@@ -252,7 +248,6 @@ export function insertColumnCommand(doc, index, name = "new_column") {
       target.removeColumns(at, 1);
     },
     contentChanged: true,
-    structuralChange: { kind: "insertColumns", index: at, count: 1 },
     lspChange: { kind: "insertColumns", index: at, count: 1 },
     undoLspChange: { kind: "deleteColumns", index: at, count: 1 }
   });
@@ -269,7 +264,6 @@ export function addColumnsCommand(doc, count = 1) {
       target.removeColumns(at, safeCount);
     },
     contentChanged: true,
-    structuralChange: { kind: "insertColumns", index: at, count: safeCount },
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
     undoLspChange: { kind: "deleteColumns", index: at, count: safeCount }
   });
@@ -286,7 +280,6 @@ export function deleteColumnsCommand(doc, index, count = 1) {
       target.restoreColumns(at, deleted.columns, deleted.columnWidths);
     },
     contentChanged: true,
-    structuralChange: { kind: "deleteColumns", index: at, count },
     lspChange: { kind: "deleteColumns", index: at, count },
     undoLspChange: { kind: "insertColumns", index: at, count }
   });
@@ -303,7 +296,6 @@ export function hiddenRowsCommand(rows, hidden) {
       target.setRowsHidden(targets, !hidden);
     },
     contentChanged: false,
-    viewChanged: true,
     lspChange: { kind: "none" }
   });
 }
@@ -319,7 +311,6 @@ export function hiddenColumnsCommand(columns, hidden) {
       target.setColumnsHidden(targets, !hidden);
     },
     contentChanged: false,
-    viewChanged: true,
     lspChange: { kind: "none" }
   });
 }
@@ -334,7 +325,6 @@ export function resizeColumnCommand(column, before, after) {
       target.setColumnWidth(column, before);
     },
     contentChanged: false,
-    viewChanged: true,
     lspChange: { kind: "none" }
   });
 }
@@ -349,7 +339,6 @@ export function resizeRowCommand(row, before, after) {
       target.setRowHeight(row, before);
     },
     contentChanged: false,
-    viewChanged: true,
     lspChange: { kind: "none" }
   });
 }

@@ -355,10 +355,6 @@ export function createDocumentController({
   }
 
   async function writeDocumentText(writable, doc) {
-    if (typeof doc.toTextChunks !== "function") {
-      await writable.write(doc.toText());
-      return;
-    }
     for (const chunk of doc.toTextChunks()) {
       if (chunk) await writable.write(chunk);
     }

@@ -428,7 +428,7 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
     assert.equal(lspDocumentState(doc).hoverReady, true);
 
     doc.setCell(1, 2, "0");
-    await controller.updateDoc(doc, [1]);
+    await controller.updateDoc(doc, { kind: "replaceRows", rows: [1] });
     await listeners.get("lsp-diagnostics-changed")?.({ payload: uri });
     assert.equal(state.lint.diagnostics.length, 0);
     await controller.requestHover(1, 1);
@@ -1526,13 +1526,13 @@ test("Vector-LSP traffic counters and idempotent didOpen state are exposed for r
     vectorEngine: false,
     lspStarted: true,
     uri: "file:///skills.txt",
-    changedRows: [1]
+    changedRows: { kind: "replaceRows", rows: [1] }
   }), { action: "skip-legacy", event: "vector-update-skipped-legacy" });
   assert.deepEqual(lspUpdateDocumentPolicy({
     vectorEngine: true,
     lspStarted: true,
     uri: "file:///skills.txt",
-    changedRows: [1, 3]
+    changedRows: { kind: "replaceRows", rows: [1, 3] }
   }), { action: "update-incremental", changedRowCount: 2, change: { kind: "replaceRows", rows: [1, 3] } });
   assert.deepEqual(lspUpdateDocumentPolicy({
     vectorEngine: true,
@@ -1557,9 +1557,8 @@ test("Vector-LSP traffic counters and idempotent didOpen state are exposed for r
     change: { kind: "insertRows", index: 10, count: 10000 },
     reason: "insertRows"
   });
-  assert.deepEqual(normalizeLspDocumentChange({ kind: "replaceRows", rows: null }), { kind: "replaceRows", rows: [] });
   const changedDoc = TableDocument.fromText("skills.txt", "id\tname\n1\tcap\n2\tboots", { dirty: false });
-  assert.deepEqual(lspChangedRowsToIncrementalChanges(changedDoc, [1, 9]), [
+  assert.deepEqual(lspChangedRowsToIncrementalChanges(changedDoc, { kind: "replaceRows", rows: [1, 9] }), [
     { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0xFFFFFF } }, text: "1\tcap" },
     { range: { start: { line: 9, character: 0 }, end: { line: 9, character: 0xFFFFFF } }, text: "" }
   ]);

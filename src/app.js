@@ -544,23 +544,23 @@ function effectiveVectorLspHoverEnabled() {
   return effectiveVectorLspHover({ engine: state.lint.engine, vectorLspHover: state.vectorLspHover });
 }
 
-function execute(command, changedRows = null) {
+function execute(command) {
   if (!hasOpenDocument()) return showError("Open a file before editing.");
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
   command.redo(doc);
   activeUndo().push(command);
-  finishCommand(doc, command, changedRows, "edit", started);
+  finishCommand(doc, command, "edit", started);
 }
 
-function finishCommand(doc, command, changedRows = null, context = "edit", started = perfNow()) {
+function finishCommand(doc, command, context = "edit", started = perfNow()) {
   const contentChanged = command.contentChanged !== false;
   if (contentChanged) markLegacyLintDocChanged(doc);
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
   saveSelectionState(doc);
   grid.layout();
-  const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange ?? changedRows : command.lspChange ?? changedRows;
+  const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange : command.lspChange;
   if (contentChanged && documentChangeSyncRoute(state.lint.engine) === "vector-update") {
     lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
   } else if (contentChanged && !doc.largeFileMode) {
@@ -571,7 +571,7 @@ function finishCommand(doc, command, changedRows = null, context = "edit", start
 }
 
 function applyEdits(edits, label = "Edit Cells") {
-  execute(makeCellCommand(label, activeDoc(), edits), [...new Set(edits.map((e) => e.row))]);
+  execute(makeCellCommand(label, activeDoc(), edits));
 }
 
 function wireEvents() {
@@ -707,13 +707,13 @@ async function loadFixture(size) {
 function undo() {
   const doc = activeDoc();
   const command = activeUndo().undo(doc);
-  if (command) finishCommand(doc, command, null, "undo");
+  if (command) finishCommand(doc, command, "undo");
 }
 
 function redo() {
   const doc = activeDoc();
   const command = activeUndo().redo(doc);
-  if (command) finishCommand(doc, command, null, "redo");
+  if (command) finishCommand(doc, command, "redo");
 }
 
 function runCommand(id) {
@@ -893,7 +893,6 @@ function unhideAll() {
       for (let i = commands.length - 1; i >= 0; i--) commands[i].undo(target);
     },
     contentChanged: false,
-    viewChanged: true,
     lspChange: { kind: "none" }
   });
   execute(command);

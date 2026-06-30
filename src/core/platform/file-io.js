@@ -89,9 +89,6 @@ function perfNow() {
 }
 
 async function writeDocumentNative(invoke, path, doc) {
-  if (typeof doc.toTextChunks !== "function") {
-    return invoke("write_text_file_safe", { path, text: doc.toText() });
-  }
   const iterator = doc.toTextChunks()[Symbol.iterator]();
   let current = iterator.next();
   if (current.done) {

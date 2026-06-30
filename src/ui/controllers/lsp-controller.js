@@ -422,7 +422,7 @@ export function createLspController({
   }
 
   function isIncrementalRowChange(change) {
-    return Array.isArray(change) || change?.kind === "replaceRows";
+    return change?.kind === "replaceRows";
   }
 
   function handleUpdateError(doc, error, context) {

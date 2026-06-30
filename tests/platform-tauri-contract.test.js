@@ -33,12 +33,10 @@ import {
   applySavedTextPayload,
   documentFromTextPayloadAsync,
   documentFromTextPayload,
-  documentOpenResultFromNativeRead,
   normalizeNativeReadResult
 } from "../src/core/platform/file-payloads.js";
 import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { tableFileState } from "../src/core/table-file-state.js";
-import { readNativeTextFiles } from "../src/core/platform/native-read.js";
 import {
   legacyWorkspaceFileSignature,
   legacyWorkspaceIndexCacheHit,
@@ -131,21 +129,6 @@ test("platform file payload helpers normalize native reads and saved document me
     error: "nope",
     bulkRead: true
   });
-  assert.deepEqual(normalizeNativeReadResult({ ok: { name: "b.txt", text: "id\n2" } }, "fallback-b.txt", false), {
-    path: "fallback-b.txt",
-    payload: { name: "b.txt", text: "id\n2" },
-    bulkRead: false
-  });
-  assert.deepEqual(normalizeNativeReadResult({ err: "bad" }, "fallback-c.txt", false), {
-    path: "fallback-c.txt",
-    error: "bad",
-    bulkRead: false
-  });
-  assert.deepEqual(normalizeNativeReadResult({ path: "direct.txt", name: "direct.txt", text: "id\n3" }, "fallback-d.txt", true), {
-    path: "direct.txt",
-    payload: { path: "direct.txt", name: "direct.txt", text: "id\n3" },
-    bulkRead: true
-  });
   assert.deepEqual(normalizeNativeReadResult({}, "fallback-e.txt", true), {
     path: "fallback-e.txt",
     error: "Unexpected native read result.",
@@ -170,38 +153,6 @@ test("platform file payload helpers normalize native reads and saved document me
   assert.equal(doc.name, "renamed.txt");
   assert.equal(doc.dirty, false);
 
-  const ticks = [10, 12.345, 20, 20.004];
-  const opened = documentOpenResultFromNativeRead({
-    path: "ok.txt",
-    payload: { path: "ok.txt", name: "ok.txt", text: "id\n1", encoding: "utf-8", sizeBytes: 4 },
-    bulkRead: true
-  }, TableDocument, { now: () => ticks.shift() });
-  assert.equal(opened.path, "ok.txt");
-  assert.equal(opened.name, "ok.txt");
-  assert.equal(opened.bulkRead, true);
-  assert.equal(opened.parseMs, 2.35);
-  assert.equal(opened.doc.fileSizeBytes, 4);
-  assert.equal(opened.doc.toText(), "id\n1");
-  assert.equal(opened.doc.dirty, false);
-
-  const badDocumentType = {
-    fromText() {
-      throw new Error("parse failed");
-    }
-  };
-  assert.deepEqual(documentOpenResultFromNativeRead({
-    path: "bad.txt",
-    payload: { path: "bad.txt", name: "bad.txt", text: "broken", encoding: "utf-8" },
-    bulkRead: false
-  }, badDocumentType, { now: () => ticks.shift() }), {
-    path: "bad.txt",
-    name: "bad.txt",
-    bulkRead: false,
-    parseMs: 0,
-    error: "parse failed"
-  });
-  const readFailure = { path: "missing.txt", error: "read failed", bulkRead: true };
-  assert.equal(documentOpenResultFromNativeRead(readFailure, TableDocument), readFailure);
 });
 
 test("large file payloads can parse through a worker before document construction", async () => {
@@ -251,29 +202,6 @@ test("large file payloads can parse through a worker before document constructio
   }
 });
 
-test("native text file reads fall back from bulk command to per-file reads", async () => {
-  const calls = [];
-  const results = await readNativeTextFiles(["a.txt", "bad.txt"], async (command, args) => {
-    calls.push([command, args]);
-    if (command === "read_text_files") throw new Error("bulk unavailable");
-    if (args.path === "bad.txt") throw new Error("single failed");
-    return { path: args.path, name: args.path, text: "id\n1", encoding: "utf-8" };
-  });
-
-  assert.deepEqual(calls, [
-    ["read_text_files", { paths: ["a.txt", "bad.txt"] }],
-    ["read_text_file", { path: "a.txt" }],
-    ["read_text_file", { path: "bad.txt" }]
-  ]);
-  assert.deepEqual(results, [
-    { path: "a.txt", payload: { path: "a.txt", name: "a.txt", text: "id\n1", encoding: "utf-8" }, bulkRead: false },
-    { path: "bad.txt", error: "single failed", bulkRead: false }
-  ]);
-  assert.deepEqual(await readNativeTextFiles([], async () => {
-    throw new Error("should not invoke");
-  }), []);
-});
-
 test("Tauri command boundary preserves JS invoke names and Rust registrations", () => {
   const platformSources = [
     "../src/core/platform/config.js",
@@ -304,7 +232,6 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "open_files_dialog",
     "open_folder_dialog",
     "pick_file_path",
-    "read_text_file",
     "read_text_files",
     "save_config",
     "save_file_dialog",
