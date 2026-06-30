@@ -1,13 +1,13 @@
 import { cubeInputCount, inputColumns, parseCubeItem } from "./lint-cube.js";
 import { CUBE_OUTPUT_MOD_COLUMNS } from "./lint-stat-data.js";
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, normalizeToken } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const CUBE_LINT_RULES = [
-  rule("Cube/ValidInputs", "Valid cube inputs", lintCubeInputs),
-  rule("Cube/ValidOutputs", "Valid cube outputs", lintCubeOutputs),
-  rule("Cube/ValidOp", "Valid cube op", lintCubeOp)
+  rule("Cube/ValidInputs", "Valid cube inputs", lintCubeInputs, true, PROFILE_OPTIONS, "Checks enabled cubemain recipes for valid input item references, input qualifiers, and matching numinputs values."),
+  rule("Cube/ValidOutputs", "Valid cube outputs", lintCubeOutputs, true, PROFILE_OPTIONS, "Checks cubemain output item references, output qualifiers, and output property codes."),
+  rule("Cube/ValidOp", "Valid cube op", lintCubeOp, true, PROFILE_OPTIONS, "Checks cubemain op values and related parameters for supported cube operation rules.")
 ];
 
 export function lintCubeInputs(index, ctx) {

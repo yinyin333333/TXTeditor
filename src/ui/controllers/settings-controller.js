@@ -495,7 +495,7 @@ export function createSettingsController({
           const setting = currentLegacyProfileRules()[entry.id];
           const checked = setting?.enabled ? "checked" : "";
           const disabled = entry.implemented ? "" : "disabled";
-          const note = entry.note ? `<span class="lint-rule-note">${escapeHtml(entry.note)}</span>` : `<span class="lint-rule-note">${escapeHtml(entry.id)}</span>`;
+          const note = `<span class="lint-rule-note">${escapeHtml(entry.note || entry.id)}</span>`;
           return `
             <div class="lint-rule">
               <input id="lint-${escapeHtml(entry.id)}" type="checkbox" data-lint-rule="${escapeHtml(entry.id)}" ${checked} ${disabled} />

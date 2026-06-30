@@ -1,12 +1,12 @@
 import { STAT_PARAMETER_TUPLES } from "./lint-stat-data.js";
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, normalizeToken, rowLabelFor } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const ITEM_LINT_RULES = [
-  rule("Items/ValidSockets", "Valid sockets", lintItemSockets),
-  rule("Items/NoIllegalGambling", "No illegal gambling", lintNoIllegalGambling),
-  rule("Items/ValidStatParameters", "Valid stat parameters", lintValidStatParameters)
+  rule("Items/ValidSockets", "Valid sockets", lintItemSockets, true, PROFILE_OPTIONS, "Checks item socket limits from itemtypes.txt, inventory size, socket thresholds, and gemapplytype values."),
+  rule("Items/NoIllegalGambling", "No illegal gambling", lintNoIllegalGambling, true, PROFILE_OPTIONS, "Checks gamble.txt for items that belong to the character item type tree and cannot be gambled."),
+  rule("Items/ValidStatParameters", "Valid stat parameters", lintValidStatParameters, true, PROFILE_OPTIONS, "Checks property min, max, and parameter values against itemstatcost saved-stat limits and encoded skill parameters.")
 ];
 
 export function lintItemSockets(index, ctx) {

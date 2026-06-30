@@ -1,7 +1,7 @@
 export const PROFILE_OPTIONS = ["RotW", "2.4"];
 export const DEFAULT_PROFILE = "RotW";
 
-export function rule(id, label, runner, defaultEnabled = true, profiles = PROFILE_OPTIONS) {
+export function rule(id, label, runner, defaultEnabled = true, profiles = PROFILE_OPTIONS, note = "") {
   return {
     id,
     label,
@@ -9,7 +9,7 @@ export function rule(id, label, runner, defaultEnabled = true, profiles = PROFIL
     defaultEnabled,
     profiles,
     runner,
-    note: ""
+    note
   };
 }
 

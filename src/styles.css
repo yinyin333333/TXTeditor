@@ -1076,8 +1076,8 @@ button.active {
 
 .lint-rule {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   min-height: 28px;
 }
@@ -1096,6 +1096,10 @@ button.active {
 .lint-rule-note {
   color: var(--muted);
   font-size: 12px;
+  grid-column: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 .problems-panel {
