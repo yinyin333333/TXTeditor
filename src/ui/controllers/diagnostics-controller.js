@@ -39,6 +39,7 @@ export function createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
+  saveSelectionState = () => {},
   storage = localStorage
 }) {
   const collapsedProblemFiles = new Set();
@@ -171,6 +172,7 @@ export function createDiagnosticsController({
       clamp(diagnostic.rowIndex, 0, Math.max(0, activeDoc().rowCount - 1)),
       clamp(diagnostic.columnIndex, 0, Math.max(0, activeDoc().columnCount - 1))
     );
+    saveSelectionState();
     finishDiagnosticNavigation({
       state,
       grid: gridRef,

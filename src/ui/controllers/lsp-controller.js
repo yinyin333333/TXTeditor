@@ -192,6 +192,7 @@ export function createLspController({
   addDocument,
   applyFreezeToDoc,
   updateActiveProblemHighlight,
+  saveSelectionState = () => {},
   lintPathKey,
   lspHoverRequest
 }) {
@@ -634,6 +635,7 @@ export function createLspController({
     const targetRow = clamp(result.line, 0, Math.max(0, targetDoc.rowCount - 1));
     const targetCol = clamp(charOffsetToColumn(targetDoc, targetRow, result.character), 0, Math.max(0, targetDoc.columnCount - 1));
     state.selection.set(targetRow, targetCol);
+    saveSelectionState();
     grid.scrollCellIntoView(targetRow, targetCol);
     grid.draw();
     updateActiveProblemHighlight();

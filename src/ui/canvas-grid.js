@@ -3,7 +3,7 @@ import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction,
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
-import { applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, edgeCellScrollState } from "./grid-viewport-policy.js";
+import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, edgeCellScrollState } from "./grid-viewport-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
 import {
   isGridHoverAllowed,
@@ -112,7 +112,7 @@ export class CanvasGrid {
     this.doc = doc;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
-    this.selection.set(0, 0);
+    typeof this.selection.restore === "function" ? this.selection.restore(doc.selectionState, doc.rowCount, doc.columnCount) : this.selection.set(0, 0);
     this.host.scrollLeft = Math.max(0, doc.scrollLeft ?? 0);
     this.host.scrollTop = Math.max(0, doc.scrollTop ?? 0);
     this.layout();
@@ -149,9 +149,7 @@ export class CanvasGrid {
   }
 
   clearHoverState() { return clearGridHoverState(this); }
-
   clearLspHovers() { return clearGridLspHovers(this); }
-
   hideVectorTooltip() { return hideGridVectorTooltip(this); }
 
   setDiagnostics(diagnosticsByCell) {
@@ -208,8 +206,10 @@ export class CanvasGrid {
     this.layoutCanvas(this.canvas, this.ctx, rect);
     this.layoutCanvas(this.frozenCanvas, this.frozenCtx, rect);
     this.positionCanvases(rect);
-    this.scrollSurface.style.width = `${this.rowHeaderWidth + this.frozenColumnWidth() + this.scrollableColumnWidth()}px`;
-    this.scrollSurface.style.height = `${this.headerHeight + this.frozenRowHeight() + this.scrollableRowsHeight()}px`;
+    const [frozenColumnWidth, frozenRowHeight, scrollableColumnWidth, scrollableRowsHeight] = [this.frozenColumnWidth(), this.frozenRowHeight(), this.scrollableColumnWidth(), this.scrollableRowsHeight()];
+    this.scrollSurface.style.width = `${this.rowHeaderWidth + frozenColumnWidth + scrollableColumnWidth}px`;
+    this.scrollSurface.style.height = `${this.headerHeight + frozenRowHeight + scrollableRowsHeight}px`;
+    applyGridScrollBounds({ host: this.host, doc: this.doc, rowHeaderWidth: this.rowHeaderWidth, headerHeight: this.headerHeight, frozenColumnWidth, frozenRowHeight, scrollableColumnWidth, scrollableRowsHeight });
     this.draw();
   }
 

@@ -85,6 +85,45 @@ export function edgeCellScrollState({
   return state;
 }
 
+export function clampedGridScrollOffsets({
+  scrollLeft,
+  scrollTop,
+  rowHeaderWidth,
+  headerHeight,
+  frozenColumnWidth,
+  frozenRowHeight,
+  scrollableColumnWidth,
+  scrollableRowsHeight,
+  viewportWidth,
+  viewportHeight
+}) {
+  return {
+    scrollLeft: clamp(scrollLeft, 0, Math.max(0, rowHeaderWidth + frozenColumnWidth + scrollableColumnWidth - viewportWidth)),
+    scrollTop: clamp(scrollTop, 0, Math.max(0, headerHeight + frozenRowHeight + scrollableRowsHeight - viewportHeight))
+  };
+}
+
+export function applyGridScrollBounds({ host, doc, rowHeaderWidth, headerHeight, frozenColumnWidth, frozenRowHeight, scrollableColumnWidth, scrollableRowsHeight }) {
+  const next = clampedGridScrollOffsets({
+    scrollLeft: host.scrollLeft,
+    scrollTop: host.scrollTop,
+    rowHeaderWidth,
+    headerHeight,
+    frozenColumnWidth,
+    frozenRowHeight,
+    scrollableColumnWidth,
+    scrollableRowsHeight,
+    viewportWidth: host.clientWidth,
+    viewportHeight: host.clientHeight
+  });
+  if (host.scrollLeft !== next.scrollLeft) host.scrollLeft = next.scrollLeft;
+  if (host.scrollTop !== next.scrollTop) host.scrollTop = next.scrollTop;
+  if (doc) {
+    doc.scrollLeft = next.scrollLeft;
+    doc.scrollTop = next.scrollTop;
+  }
+}
+
 export function resizedTrackValue({ before, pointer, start, zoom, min }) {
   return Math.max(min, before + (pointer - start) / zoom);
 }

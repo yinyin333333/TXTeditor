@@ -20,6 +20,7 @@ export function createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  saveSelectionState = () => {},
   recordUiPerf,
   perfNow,
   showError,
@@ -127,8 +128,8 @@ export function createShellController({
   }
 
   function selectTab(index) {
+    saveSelectionState();
     state.active = index;
-    state.selection.set(0, 0);
     applyFreezeToDoc(activeDoc());
     grid.setDocument(activeDoc());
     updateGridDiagnostics();

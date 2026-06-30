@@ -14,6 +14,7 @@ export function resetTableViewState(doc, meta = {}) {
     freezeFirstColumn: meta.freezeFirstColumn ?? false,
     scrollLeft: meta.scrollLeft,
     scrollTop: meta.scrollTop,
+    selection: meta.selection ?? null,
     initialColumnFitApplied: meta.initialColumnFitApplied ?? false
   };
   tableViewStates.set(doc, state);

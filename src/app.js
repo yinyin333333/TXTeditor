@@ -59,6 +59,13 @@ import {
   normaliseGridFont
 } from "./ui/app-settings-policy.js";
 import {
+  columnsFromRanges,
+  indexRange,
+  keepSelectionVisible as keepSelectionOnVisibleRow,
+  rowOperationTargets,
+  rowsFromRanges
+} from "./ui/row-operation-policy.js";
+import {
   createToastFeedback,
   escapeHtml,
   readJsonStorage
@@ -199,6 +206,7 @@ const commandController = createCommandController({
   hasOpenDocument,
   execute,
   rowsFromSelection,
+  rowsForRowOperation,
   columnsFromSelection,
   showError,
   handlers: {
@@ -253,6 +261,7 @@ const diagnosticsController = createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
+  saveSelectionState,
   storage: localStorage
 });
 
@@ -326,6 +335,7 @@ const grid = new CanvasGrid({
   onHoverInvalidated: () => lspController.clearVisibleHover("grid-hover-cleared"),
   onViewportChanged: (reason) => lspController.scheduleHoverPrewarm(reason),
   onSelectionChanged: () => {
+    saveSelectionState();
     diagnosticsController.handleSelectionChanged();
   }
 });
@@ -350,6 +360,7 @@ lspController = createLspController({
   addDocument,
   applyFreezeToDoc,
   updateActiveProblemHighlight,
+  saveSelectionState,
   lintPathKey
 });
 exposeTxteditorPerf(window, {
@@ -426,7 +437,8 @@ const searchController = createSearchController({
   els,
   grid,
   activeDoc,
-  updateActiveProblemHighlight
+  updateActiveProblemHighlight,
+  saveSelectionState
 });
 shellController = createShellController({
   state,
@@ -448,6 +460,7 @@ shellController = createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  saveSelectionState,
   recordUiPerf,
   perfNow,
   showError,
@@ -470,6 +483,11 @@ function activeDoc() {
 
 function hasOpenDocument() {
   return state.docs.length > 0 && state.active >= 0;
+}
+
+function saveSelectionState(doc = activeDoc()) {
+  if (!hasOpenDocument() || doc === EMPTY_DOC || typeof state.selection.snapshot !== "function") return;
+  doc.selectionState = state.selection.snapshot();
 }
 
 function activeUndo() {
@@ -532,6 +550,8 @@ function execute(command, changedRows = null) {
   command.redo(activeDoc());
   markLegacyLintDocChanged(doc);
   activeUndo().push(command);
+  keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
+  saveSelectionState(doc);
   grid.layout();
   if (documentChangeSyncRoute(state.lint.engine) === "vector-update") {
     lspUpdateDoc(doc, changedRows).catch((error) => handleLspUpdateError(doc, error, "edit"));
@@ -680,6 +700,8 @@ function undo() {
   const doc = activeDoc();
   if (activeUndo().undo(doc)) {
     markLegacyLintDocChanged(doc);
+    keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
+    saveSelectionState(doc);
     grid.layout();
     if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "undo"));
     else scheduleLegacyLintForEdit(doc);
@@ -691,6 +713,8 @@ function redo() {
   const doc = activeDoc();
   if (activeUndo().redo(doc)) {
     markLegacyLintDocChanged(doc);
+    keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
+    saveSelectionState(doc);
     grid.layout();
     if (isVectorLintEngine()) lspUpdateDoc(doc).catch((error) => handleLspUpdateError(doc, error, "redo"));
     else scheduleLegacyLintForEdit(doc);
@@ -738,6 +762,7 @@ async function readClipboardText() {
 
 function selectAll() {
   state.selection.selectAll(activeDoc().rowCount, activeDoc().columnCount);
+  saveSelectionState();
   grid.draw();
 }
 
@@ -1050,7 +1075,7 @@ async function showSettings() {
 
 function resizeFit(useSelection) {
   const doc = activeDoc();
-  const columns = useSelection ? columnsFromSelection() : range(0, doc.columnCount - 1);
+  const columns = useSelection ? columnsFromSelection() : indexRange(0, doc.columnCount - 1);
   return autoFitColumns(columns);
 }
 
@@ -1074,6 +1099,7 @@ function cloneRows() {
   execute(cloneRowsCommand(doc, rows, insertAt));
   const column = clamp(state.selection.focus.column, 0, Math.max(0, doc.columnCount - 1));
   state.selection.setRange(insertAt, 0, insertAt + rows.length - 1, doc.columnCount - 1, { row: insertAt, column });
+  saveSelectionState(doc);
   grid.scrollCellIntoView(insertAt, column);
   grid.draw();
   renderChrome();
@@ -1137,7 +1163,7 @@ async function closeTab(index) {
 }
 
 function rowsFromSelection() {
-  return sortedUnique(state.selection.ranges.flatMap((rect) => range(rect.top, rect.bottom)));
+  return rowsFromRanges(state.selection.ranges);
 }
 
 function rowsForContextOperation() {
@@ -1147,26 +1173,18 @@ function rowsForContextOperation() {
   return rowsFromSelection();
 }
 
+function rowsForRowOperation() {
+  const doc = activeDoc();
+  return rowOperationTargets({
+    selection: state.selection,
+    contextHit: state.contextMenuOpen ? state.contextHit : null,
+    rowCount: doc.rowCount,
+    columnCount: doc.columnCount
+  });
+}
+
 function columnsFromSelection() {
-  return sortedUnique(state.selection.ranges.flatMap((rect) => range(rect.left, rect.right)));
-}
-
-function isFullRowSelection(rect, doc) {
-  return state.selection.ranges.some((range) => range.left === 0 && range.right >= doc.columnCount - 1);
-}
-
-function isFullColumnSelection(rect, doc) {
-  return state.selection.ranges.some((range) => range.top === 0 && range.bottom >= doc.rowCount - 1);
-}
-
-function range(start, end) {
-  const values = [];
-  for (let value = start; value <= end; value++) values.push(value);
-  return values;
-}
-
-function sortedUnique(values) {
-  return [...new Set(values)].sort((a, b) => a - b);
+  return columnsFromRanges(state.selection.ranges);
 }
 
 function lintDocKey(doc) {

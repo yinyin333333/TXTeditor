@@ -117,6 +117,14 @@ export class TableDocument {
     tableViewState(this).initialColumnFitApplied = Boolean(value);
   }
 
+  get selectionState() {
+    return tableViewState(this).selection;
+  }
+
+  set selectionState(value) {
+    tableViewState(this).selection = value;
+  }
+
   static fromText(name, text, meta = {}) {
     const crlf = (text.match(/\r\n/g) ?? []).length;
     const lf = (text.match(/(?<!\r)\n/g) ?? []).length;

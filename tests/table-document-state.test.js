@@ -142,6 +142,41 @@ test("selection supports ranges and select all", () => {
   assert.deepEqual(selection.rect, { top: 0, left: 0, bottom: 9, right: 5 });
 });
 
+test("selection snapshots are copied and restored within document bounds", () => {
+  const selection = new SelectionModel();
+  selection.set(3, 4);
+  selection.extend(1, 2);
+  const snapshot = selection.snapshot();
+  selection.set(0, 0);
+
+  assert.deepEqual(snapshot.focus, { row: 1, column: 2 });
+  assert.deepEqual(snapshot.ranges, [{ top: 1, left: 2, bottom: 3, right: 4 }]);
+  selection.restore({
+    anchor: { row: 99, column: 99 },
+    focus: { row: 40, column: 30 },
+    ranges: [{ top: 5, left: 6, bottom: 50, right: 40 }]
+  }, 10, 8);
+  assert.deepEqual(selection.anchor, { row: 9, column: 7 });
+  assert.deepEqual(selection.focus, { row: 9, column: 7 });
+  assert.deepEqual(selection.ranges, [{ top: 5, left: 6, bottom: 9, right: 7 }]);
+});
+
+test("documents preserve independent selection snapshots", () => {
+  const skills = TableDocument.fromText("skills.txt", "a\tb\n1\t2\n3\t4");
+  const skilldesc = TableDocument.fromText("skilldesc.txt", "x\ty\nm\tn");
+  const selection = new SelectionModel();
+
+  selection.set(2, 1);
+  skills.selectionState = selection.snapshot();
+  selection.set(1, 0);
+  skilldesc.selectionState = selection.snapshot();
+
+  selection.restore(skills.selectionState, skills.rowCount, skills.columnCount);
+  assert.deepEqual(selection.focus, { row: 2, column: 1 });
+  selection.restore(skilldesc.selectionState, skilldesc.rowCount, skilldesc.columnCount);
+  assert.deepEqual(selection.focus, { row: 1, column: 0 });
+});
+
 test("selection supports ctrl-style multi-range toggles", () => {
   const selection = new SelectionModel();
   selection.set(1, 1);
@@ -420,7 +455,9 @@ test("TableDocument view and undo state stay outside serialized content fields",
   assert.equal(tableViewState(doc).columnWidths[1], 240);
   assert.equal(tableViewState(doc).rowHeights[1], 44);
   assert.equal(tableViewState(doc).hiddenColumns.has(1), true);
-  for (const field of ["columnWidths", "rowHeights", "hiddenColumns", "hiddenRows", "scrollLeft", "scrollTop", "zoom", "freezeFirstRow", "initialColumnFitApplied"]) {
+  doc.selectionState = { focus: { row: 1, column: 0 }, anchor: { row: 1, column: 0 }, ranges: [{ top: 1, left: 0, bottom: 1, right: 0 }] };
+  assert.deepEqual(tableViewState(doc).selection.focus, { row: 1, column: 0 });
+  for (const field of ["columnWidths", "rowHeights", "hiddenColumns", "hiddenRows", "scrollLeft", "scrollTop", "zoom", "freezeFirstRow", "initialColumnFitApplied", "selectionState"]) {
     assert.equal(Object.hasOwn(doc, field), false);
   }
 

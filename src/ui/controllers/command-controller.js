@@ -24,6 +24,7 @@ export function createCommandController({
   hasOpenDocument,
   execute,
   rowsFromSelection,
+  rowsForRowOperation = rowsFromSelection,
   columnsFromSelection,
   showError,
   handlers
@@ -56,7 +57,7 @@ export function createCommandController({
     if (name === "insertRow") return execute(insertRowCommand(doc, rect.top));
     if (name === "deleteRow") return execute(deleteRowsCommand(doc, rect.top, rect.bottom - rect.top + 1));
     if (name === "clearRow") return execute(clearRangeCommand(doc, { top: rect.top, bottom: rect.bottom, left: 0, right: doc.columnCount - 1 }, "Clear Row"));
-    if (name === "hideRow") return execute(hiddenRowsCommand(rowsFromSelection(), true));
+    if (name === "hideRow") return execute(hiddenRowsCommand(rowsForRowOperation(), true));
     if (name === "unhideRows") return execute(hiddenRowsCommand([...doc.hiddenRows], false));
     if (name === "insertColumn") return execute(insertColumnCommand(doc, rect.left));
     if (name === "deleteColumn") return execute(deleteColumnsCommand(doc, rect.left, rect.right - rect.left + 1));
