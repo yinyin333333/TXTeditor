@@ -1,10 +1,10 @@
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, rowLabelFor } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const LEVEL_LINT_RULES = [
-  rule("Level/ValidWarp", "Valid warps", lintValidWarp),
-  rule("Level/ValidWPs", "Valid waypoints", lintValidWaypoints)
+  rule("Level/ValidWarp", "Valid warps", lintValidWarp, true, PROFILE_OPTIONS, "Checks levels.txt vis and warp links for valid targets, valid lvlwarp rows, and matching backlink connections."),
+  rule("Level/ValidWPs", "Valid waypoints", lintValidWaypoints, true, PROFILE_OPTIONS, "Checks that waypoint IDs in levels.txt are not reused by multiple levels.")
 ];
 
 export function lintValidWarp(index, ctx) {

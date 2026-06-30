@@ -1,0 +1,45 @@
+export const APP_ELEMENT_IDS = Object.freeze({
+  shell: "app",
+  layoutRoot: "layoutRoot",
+  dockTop: "dockTop",
+  dockLeft: "dockLeft",
+  dockRight: "dockRight",
+  dockBottom: "dockBottom",
+  sidebar: "sidebar",
+  sidebarResizer: "sidebarResizer",
+  problemsPanel: "problemsPanel",
+  problemsResizer: "problemsResizer",
+  problemsList: "problemsList",
+  logList: "logList",
+  host: "gridHost",
+  canvas: "gridCanvas",
+  frozenCanvas: "frozenCanvas",
+  scrollSurface: "scrollSurface",
+  editor: "cellEditor",
+  tabs: "tabs",
+  emptyState: "emptyState",
+  explorerFilter: "explorerFilter",
+  explorerSearchResults: "explorerSearchResults",
+  fileList: "fileList",
+  fileInput: "hiddenFileInput",
+  lintControls: "lintControls",
+  lintRulesPanel: "lintRulesPanel",
+  lintSummary: "lintSummary",
+  searchPanel: "searchPanel",
+  searchInput: "searchInput",
+  searchStatus: "searchStatus",
+  palette: "palette",
+  paletteInput: "paletteInput",
+  paletteResults: "paletteResults",
+  toast: "toast",
+  contextMenu: "contextMenu",
+  closeDialog: "closeDialog",
+  closeDialogText: "closeDialogText",
+  overviewRuler: "overviewRuler"
+});
+
+export function collectAppElements(ownerDocument = document) {
+  return Object.fromEntries(
+    Object.entries(APP_ELEMENT_IDS).map(([key, id]) => [key, ownerDocument.getElementById(id)])
+  );
+}

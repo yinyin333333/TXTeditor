@@ -46,9 +46,12 @@ export function makeCellCommand(label, doc, edits) {
       changes.push({ row: edit.row, column: edit.column, before, after });
     }
   }
+  const rows = [...new Set(changes.map((change) => change.row))];
   return {
     label,
     changes,
+    contentChanged: true,
+    lspChange: { kind: "replaceRows", rows },
     timestamp: Date.now(),
     get isEmpty() {
       return changes.length === 0;
@@ -62,9 +65,10 @@ export function makeCellCommand(label, doc, edits) {
   };
 }
 
-export function makeCustomCommand(label, { redo, undo, empty = false }) {
+export function makeCustomCommand(label, { redo, undo, empty = false, ...metadata }) {
   return {
     label,
+    ...metadata,
     timestamp: Date.now(),
     get isEmpty() {
       return empty;

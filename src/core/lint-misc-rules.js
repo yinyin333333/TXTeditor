@@ -1,17 +1,17 @@
-import { rule } from "./lint-rule-registry.js";
+import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, normalizeHeader, normalizeToken } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const MONSTER_LINT_RULES = [
-  rule("Monsters/ValidChains", "Valid monster chains", lintMonsterChains)
+  rule("Monsters/ValidChains", "Valid monster chains", lintMonsterChains, true, PROFILE_OPTIONS, "Checks monstats.txt baseid and nextinclass chains so non-boss monster variants link in the expected order.")
 ];
 
 export const SKILL_LINT_RULES = [
-  rule("Skills/EqualSkills", "Equal skills", lintEqualSkills)
+  rule("Skills/EqualSkills", "Equal skills", lintEqualSkills, true, PROFILE_OPTIONS, "Checks that each player class has the same number of skills in skills.txt.")
 ];
 
 export const STRING_LINT_RULES = [
-  rule("String/NoUntranslated", "No untranslated strings", lintNoUntranslatedStrings)
+  rule("String/NoUntranslated", "No untranslated strings", lintNoUntranslatedStrings, true, PROFILE_OPTIONS, "Checks string tables for missing language translations on rows with a string key.")
 ];
 
 export function lintMonsterChains(index, ctx) {

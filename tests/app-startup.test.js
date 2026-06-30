@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { baselineCandidates, resolveBaselineDir } from "../scripts/baseline-paths.mjs";
+import { APP_ELEMENT_IDS } from "../src/ui/app-elements.js";
 import { installFakeAppStartupDom } from "./helpers/fake-dom-app-startup.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -23,9 +24,8 @@ test("current app root imports under the app startup harness", async () => {
 });
 
 test("current app startup DOM ids are declared in index.html", () => {
-  const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const appIds = [...appSource.matchAll(/document\.getElementById\("([^"]+)"\)/g)].map((match) => match[1]);
+  const appIds = Object.values(APP_ELEMENT_IDS);
   const indexIds = new Set([...indexHtml.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
 
   assert.deepEqual(appIds.filter((id) => !indexIds.has(id)), []);

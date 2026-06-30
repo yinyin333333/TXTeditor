@@ -34,3 +34,13 @@ export function createToastFeedback(els) {
 
   return { showError, showToast };
 }
+
+export async function writeClipboardText(text) {
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard write is not available in this environment.");
+  await navigator.clipboard.writeText(text);
+}
+
+export async function readClipboardText() {
+  if (!navigator.clipboard?.readText) throw new Error("Clipboard read is not available in this environment.");
+  return navigator.clipboard.readText();
+}

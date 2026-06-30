@@ -1,4 +1,6 @@
 import { TableDocument } from "../../core/table-model.js";
+import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
+import { markTableSaved, tableFileState } from "../../core/table-file-state.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
@@ -49,6 +51,7 @@ export function createDocumentController({
   scrollProblemsToActiveFile
 }) {
   let pendingCloseResolve = null;
+  const pendingSaves = new WeakMap();
 
   function hasOpenDocument() {
     return state.docs.length > 0 && state.active >= 0;
@@ -59,6 +62,7 @@ export function createDocumentController({
     const tauri = window.__TAURI__;
     if (!tauri?.event?.listen) return;
     await tauri.event.listen("app-close-requested", async () => {
+      commitActiveEdit();
       const unsaved = unsavedDocuments(state.docs);
       if (!unsaved.length) {
         closeWindow().catch((error) => reportWindowCloseFailure(error, "app-close-requested"));
@@ -106,13 +110,20 @@ export function createDocumentController({
     state.active = plan.activeIndex;
     applyFreezeToDoc(doc);
     grid.setDocument(doc);
-    if (!doc.initialColumnFitApplied) {
+    if (doc.largeFileMode) {
+      doc.initialColumnFitApplied = true;
+      state.lint.status = `Large file mode: lint paused for ${doc.name}.`;
+    } else {
+      if (isOpenStatus(state.lint.status)) state.lint.status = "";
+    }
+    if (!doc.largeFileMode && !doc.initialColumnFitApplied) {
       grid.autoFitInitialColumns();
       doc.initialColumnFitApplied = true;
       grid.layout();
     }
     renderChrome();
     scrollProblemsToActiveFile();
+    if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
       lspOpenDoc(doc).catch((error) => reportLspOpenFailure(doc, error, "document-open"));
       scheduleHoverPrewarm("document-opened");
@@ -124,6 +135,7 @@ export function createDocumentController({
   async function openFile() {
     try {
       if (isTauriRuntime()) {
+        await showOpeningFeedback("Opening file...");
         const docs = await openFilesNative(TableDocument);
         for (const doc of docs) await addDocument(doc);
       } else if ("showOpenFilePicker" in window) {
@@ -133,6 +145,7 @@ export function createDocumentController({
         });
         for (const handle of handles) {
           const file = await handle.getFile();
+          if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(`Opening large file: ${file.name}...`);
           const doc = await readFileAsDocument(file, TableDocument);
           doc.handle = handle;
           await addDocument(doc);
@@ -147,7 +160,9 @@ export function createDocumentController({
 
   async function openDroppedNativePaths(paths) {
     try {
-      const docs = await openNativePaths(paths.filter(isTextLikePath), TableDocument);
+      const textPaths = paths.filter(isTextLikePath);
+      if (textPaths.length) await showOpeningFeedback(`Opening ${textPaths.length} file(s)...`);
+      const docs = await openNativePaths(textPaths, TableDocument);
       for (const doc of docs) await addDocument(doc);
     } catch (error) {
       showError(error);
@@ -156,7 +171,10 @@ export function createDocumentController({
 
   async function openBrowserFiles(files) {
     const textFiles = Array.from(files ?? []).filter(isTextLikeFile);
-    for (const file of textFiles) await addDocument(await readFileAsDocument(file, TableDocument));
+    for (const file of textFiles) {
+      if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(`Opening large file: ${file.name}...`);
+      await addDocument(await readFileAsDocument(file, TableDocument));
+    }
   }
 
   async function openFolder() {
@@ -182,65 +200,77 @@ export function createDocumentController({
 
   async function saveFile() {
     try {
-      const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
         return false;
       }
-      if (isTauriRuntime()) {
-        const saved = await saveDocumentNative(doc, false);
-        if (!saved) return false;
-        grid.draw();
-        renderChrome();
-        return true;
-      }
-      if (doc.handle?.createWritable) {
-        const writable = await doc.handle.createWritable();
-        await writable.write(doc.toText());
-        await writable.close();
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      }
-      return saveAs();
+      commitActiveEdit();
+      const doc = activeDoc();
+      if (!isTauriRuntime() && !doc.handle?.createWritable) return saveAs();
+      return await queueSave(doc, () => saveFileNow(doc));
     } catch (error) {
       showError(error);
       return false;
     }
   }
 
+  async function saveFileNow(doc) {
+    if (isTauriRuntime()) {
+      const saved = await saveDocumentNative(doc, false);
+      if (!saved) return false;
+      grid.draw();
+      renderChrome();
+      return true;
+    }
+    const revision = tableFileState(doc).revision;
+    const writable = await doc.handle.createWritable();
+    await writeDocumentText(writable, doc);
+    await writable.close();
+    markTableSaved(doc, revision);
+    renderChrome();
+    return true;
+  }
+
   async function saveAs() {
     try {
-      const doc = activeDoc();
       if (!hasOpenDocument()) {
         showError("No file is open.");
         return false;
       }
-      if (isTauriRuntime()) {
-        const saved = await saveDocumentNative(doc, true);
-        if (!saved) return false;
-        grid.draw();
-        renderChrome();
-        return true;
-      } else if ("showSaveFilePicker" in window) {
-        const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
-        const writable = await handle.createWritable();
-        await writable.write(doc.toText());
-        await writable.close();
-        doc.handle = handle;
-        doc.name = handle.name ?? doc.name;
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      } else {
-        downloadText(doc.name, doc.toText());
-        doc.dirty = false;
-        renderChrome();
-        return true;
-      }
+      commitActiveEdit();
+      const doc = activeDoc();
+      return await queueSave(doc, () => saveAsNow(doc));
     } catch (error) {
       showError(error);
       return false;
+    }
+  }
+
+  async function saveAsNow(doc) {
+    if (isTauriRuntime()) {
+      const saved = await saveDocumentNative(doc, true);
+      if (!saved) return false;
+      grid.draw();
+      renderChrome();
+      return true;
+    } else if ("showSaveFilePicker" in window) {
+      const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
+      const revision = tableFileState(doc).revision;
+      const writable = await handle.createWritable();
+      await writeDocumentText(writable, doc);
+      await writable.close();
+      doc.handle = handle;
+      doc.name = handle.name ?? doc.name;
+      markTableSaved(doc, revision);
+      renderChrome();
+      return true;
+    } else {
+      const revision = tableFileState(doc).revision;
+      const text = doc.toText();
+      downloadText(doc.name, text);
+      markTableSaved(doc, revision);
+      renderChrome();
+      return true;
     }
   }
 
@@ -253,6 +283,7 @@ export function createDocumentController({
 
   async function closeTab(index) {
     if (index < 0 || index >= state.docs.length) return;
+    commitActiveEdit();
     const doc = state.docs[index];
     if (doc.dirty) {
       const choice = await askCloseChoice(doc);
@@ -298,6 +329,42 @@ export function createDocumentController({
     });
   }
 
+  function commitActiveEdit() {
+    grid.commitEdit?.();
+  }
+
+  async function showOpeningFeedback(message) {
+    state.lint.status = message;
+    renderChrome();
+    await yieldToUi();
+  }
+
+  function queueSave(doc, save) {
+    const previous = pendingSaves.get(doc) ?? Promise.resolve();
+    const queued = previous.catch(() => {}).then(save);
+    pendingSaves.set(doc, queued);
+    queued.then(
+      () => {
+        if (pendingSaves.get(doc) === queued) pendingSaves.delete(doc);
+      },
+      () => {
+        if (pendingSaves.get(doc) === queued) pendingSaves.delete(doc);
+      }
+    );
+    return queued;
+  }
+
+  async function writeDocumentText(writable, doc) {
+    for (const chunk of doc.toTextChunks()) {
+      if (chunk) await writable.write(chunk);
+    }
+  }
+
+  function isOpenStatus(status) {
+    const text = String(status || "");
+    return text.startsWith("Large file mode:") || text.startsWith("Opening ");
+  }
+
   return {
     addDocument,
     askCloseChoice,
@@ -315,4 +382,11 @@ export function createDocumentController({
     saveFile,
     wireCloseHandler
   };
+}
+
+function yieldToUi() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
 }

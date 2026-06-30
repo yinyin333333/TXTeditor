@@ -9,8 +9,10 @@ import {
   SEARCH_SCOPE_ROW_TITLES,
   findInTable
 } from "../src/core/search.js";
+import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
+import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
   canRunCommandWithoutDocument,
@@ -222,6 +224,8 @@ test("command registry preserves public command labels and availability policy",
   assert.equal(canRunCommandWithoutDocument("go-to-definition"), false);
   assert.deepEqual(commandActionForId("open-file"), { type: "handler", name: "openFile" });
   assert.deepEqual(commandActionForId("load-fixture-20k"), { type: "fixture", size: 20000 });
+  assert.deepEqual(commandActionForId("insert-row"), { type: "handler", name: "insertRows" });
+  assert.deepEqual(commandActionForId("insert-column"), { type: "handler", name: "insertColumns" });
   assert.deepEqual(commandActionForId("math-add"), { type: "math", kind: "add" });
   assert.deepEqual(commandActionForId("toggle-freeze-row"), { type: "freeze", kind: "row" });
   assert.deepEqual(commandActionForId("resize-selected-fit"), { type: "resize", useSelection: true });
@@ -255,10 +259,360 @@ test("document lifecycle policy preserves open, unsaved, and close-tab decisions
   assert.equal(closeDialogMessage(docs[1]), "skills.txt has unsaved changes.");
 });
 
+test("document save commits the active editor value before writing", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write: async (text) => writes.push(text),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc, {
+    commitEdit: () => doc.setCell(1, 0, "new")
+  });
+
+  assert.equal(await controller.saveFile(), true);
+  assert.deepEqual(writes, ["id\nnew"]);
+  assert.equal(doc.dirty, false);
+});
+
+test("document save keeps dirty when content changes during browser write", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write(text) {
+          const gate = deferred();
+          writes.push({ text, gate });
+          return gate.promise;
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  const saving = controller.saveFile();
+  await waitFor(() => writes.length === 1);
+  assert.equal(writes[0].text, "id\nold");
+  doc.setCell(1, 0, "newer");
+  writes[0].gate.resolve();
+
+  assert.equal(await saving, true);
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.toText(), "id\nnewer");
+});
+
+test("document saves for the same file run in order", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: true });
+  const writes = [];
+  doc.handle = {
+    async createWritable() {
+      return {
+        write(text) {
+          const gate = deferred();
+          writes.push({ text, gate });
+          return gate.promise;
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  const first = controller.saveFile();
+  await waitFor(() => writes.length === 1);
+  doc.setCell(1, 0, "newer");
+  const second = controller.saveFile();
+  await Promise.resolve();
+  assert.equal(writes.length, 1);
+
+  writes[0].gate.resolve();
+  await waitFor(() => writes.length === 2);
+  assert.equal(writes[1].text, "id\nnewer");
+  writes[1].gate.resolve();
+
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(doc.dirty, false);
+});
+
+test("browser save writes document chunks without full serialization", async () => {
+  const text = Array.from({ length: 2505 }, (_, index) => index === 0 ? "id" : String(index)).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, { dirty: true });
+  const expected = doc.toText();
+  const writes = [];
+  doc.toText = () => {
+    throw new Error("save should stream chunks instead of calling toText");
+  };
+  doc.handle = {
+    async createWritable() {
+      return {
+        write: async (chunk) => writes.push(chunk),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  assert.equal(await controller.saveFile(), true);
+  assert.ok(writes.length > 1);
+  assert.equal(writes.join(""), expected);
+  assert.equal(doc.dirty, false);
+});
+
+test("document native saves for the same file run in order", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
+  const writes = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke(command, args) {
+          assert.equal(command, "write_text_file_chunk_safe");
+          const gate = deferred();
+          writes.push({ args, gate });
+          return gate.promise.then(() => ({ path: args.path, name: "items.txt" }));
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController(doc);
+    const first = controller.saveFile();
+    await waitFor(() => writes.length === 1);
+    doc.setCell(1, 0, "newer");
+    const second = controller.saveFile();
+    await Promise.resolve();
+    assert.equal(writes.length, 1);
+
+    writes[0].gate.resolve();
+    await waitFor(() => writes.length === 2);
+    assert.deepEqual(writes.map((write) => write.args.text), ["id\nold", "id\nnewer"]);
+    assert.deepEqual(writes.map((write) => [write.args.first, write.args.last]), [[true, true], [true, true]]);
+    writes[1].gate.resolve();
+
+    assert.equal(await first, true);
+    assert.equal(await second, true);
+    assert.equal(doc.dirty, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document native save as cancel keeps committed edit dirty", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke(command) {
+          assert.equal(command, "save_file_dialog");
+          return null;
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => doc.setCell(1, 0, "new")
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(doc.toText(), "id\nnew");
+    assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document browser save as write failure keeps committed edit dirty", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const errors = [];
+  globalThis.window = {
+    showSaveFilePicker: async () => ({
+      name: "picked.txt",
+      async createWritable() {
+        return {
+          write: async () => { throw new Error("write blocked"); },
+          close: async () => {}
+        };
+      }
+    })
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => doc.setCell(1, 0, "new")
+    }, {
+      showError: (error) => errors.push(String(error.message ?? error))
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(doc.name, "items.txt");
+    assert.equal(doc.handle, null);
+    assert.equal(doc.toText(), "id\nnew");
+    assert.equal(doc.dirty, true);
+    assert.deepEqual(errors, ["write blocked"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document download fallback saves committed editor text", async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalBlob = globalThis.Blob;
+  const originalUrl = globalThis.URL;
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  let blobText = null;
+  let clicked = false;
+  let editing = true;
+  globalThis.window = {};
+  globalThis.Blob = class Blob {
+    constructor(parts) {
+      blobText = parts[0];
+    }
+  };
+  globalThis.URL = {
+    createObjectURL: () => "blob:test",
+    revokeObjectURL: () => {}
+  };
+  globalThis.document = {
+    body: { append: () => {} },
+    createElement: () => ({
+      click: () => { clicked = true; },
+      remove: () => {}
+    })
+  };
+
+  try {
+    const { controller } = testDocumentController(doc, {
+      commitEdit: () => {
+        if (!editing) return;
+        editing = false;
+        doc.setCell(1, 0, "downloaded");
+      }
+    });
+
+    assert.equal(await controller.saveFile(), true);
+    assert.equal(blobText, "id\ndownloaded");
+    assert.equal(clicked, true);
+    assert.equal(doc.dirty, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    if (originalBlob === undefined) delete globalThis.Blob;
+    else globalThis.Blob = originalBlob;
+    if (originalUrl === undefined) delete globalThis.URL;
+    else globalThis.URL = originalUrl;
+  }
+});
+
+test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm", async () => {
+  const doc = TableDocument.fromText("huge.txt", "a\tb\n1\t2", {
+    dirty: false,
+    fileSizeBytes: LARGE_FILE_THRESHOLDS.fileSizeBytes
+  });
+  let toTextCalls = 0;
+  doc.toText = () => {
+    toTextCalls += 1;
+    return "serialized";
+  };
+  const calls = [];
+  const { controller, state } = testDocumentController([], {
+    autoFitInitialColumns: () => calls.push("auto-fit"),
+    layout: () => calls.push("layout")
+  }, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspOpenDoc: () => {
+      calls.push("lsp-open");
+      doc.toText();
+    },
+    scheduleHoverPrewarm: () => calls.push("hover-prewarm"),
+    scheduleLegacyLintForOpen: () => calls.push("legacy-open")
+  });
+
+  await controller.addDocument(doc);
+
+  assert.equal(doc.largeFileMode, true);
+  assert.equal(doc.initialColumnFitApplied, true);
+  assert.equal(toTextCalls, 0);
+  assert.deepEqual(calls, []);
+  assert.match(state.lint.status, /Large file mode/);
+});
+
+test("closing the active tab commits editor changes before checking dirty state", async () => {
+  const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
+  const { controller, state } = testDocumentController(doc, {
+    commitEdit: () => doc.setCell(1, 0, "new")
+  });
+
+  const closing = controller.closeTab(0);
+  await waitFor(() => doc.dirty === true);
+  assert.equal(state.docs.length, 1);
+
+  controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+  await closing;
+  assert.equal(state.docs.length, 1);
+});
+
+test("closing another tab commits the active editor before switching documents", async () => {
+  const activeDoc = TableDocument.fromText("active.txt", "id\nactive", { dirty: false });
+  const closingDoc = TableDocument.fromText("closing.txt", "id\nclosing", { dirty: true });
+  const writes = [];
+  let editing = true;
+  closingDoc.handle = {
+    async createWritable() {
+      return {
+        write: async (text) => writes.push(text),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller, state } = testDocumentController([activeDoc, closingDoc], {
+    commitEdit: () => {
+      if (!editing) return;
+      editing = false;
+      activeDoc.setCell(1, 0, "active-edit");
+    }
+  });
+
+  const closing = controller.closeTab(1);
+  await waitFor(() => activeDoc.dirty === true);
+  controller.handleCloseDialogClick(closeChoiceEvent("save"));
+  await closing;
+
+  assert.deepEqual(writes, ["id\nclosing"]);
+  assert.equal(activeDoc.toText(), "id\nactive-edit");
+  assert.deepEqual(state.docs.map((doc) => doc.name), ["active.txt"]);
+});
+
 test("context menu command item registries preserve expected command groups", () => {
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
+  const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
+  assert.match(commandSurfaceController, /label: "Fill"[\s\S]*label: "Math"[\s\S]*id: "go-to-definition"/);
+});
+
+test("Resize To Fit keeps the existing all-column command behavior", () => {
+  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
+  assert.match(gridCommandController, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
 });
 
 test("Open File and Open Folder sidebar buttons are constrained to one line", () => {
@@ -300,13 +654,19 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.equal(panelVisibilityStorageValue(false), "hidden");
 });
 
-test("phase 3 ownership boundaries keep app shell and grid behavior in owners", () => {
+test("app ownership boundaries keep shell wiring and extracted helpers in owners", () => {
   const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const canvasSource = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
   const lspController = readFileSync(new URL("../src/ui/controllers/lsp-controller.js", import.meta.url), "utf8");
   const lspHoverController = readFileSync(new URL("../src/ui/controllers/lsp-hover-controller.js", import.meta.url), "utf8");
   const lspUriPolicy = readFileSync(new URL("../src/core/lsp-uri-policy.js", import.meta.url), "utf8");
   const appRuntimeUtils = readFileSync(new URL("../src/ui/app-runtime-utils.js", import.meta.url), "utf8");
+  const appStartupState = readFileSync(new URL("../src/ui/app-startup-state.js", import.meta.url), "utf8");
+  const appElements = readFileSync(new URL("../src/ui/app-elements.js", import.meta.url), "utf8");
+  const appPerf = readFileSync(new URL("../src/ui/app-perf.js", import.meta.url), "utf8");
+  const appEventController = readFileSync(new URL("../src/ui/controllers/app-event-controller.js", import.meta.url), "utf8");
+  const editCommandController = readFileSync(new URL("../src/ui/controllers/edit-command-controller.js", import.meta.url), "utf8");
+  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
   const settingsController = readFileSync(new URL("../src/ui/controllers/settings-controller.js", import.meta.url), "utf8");
   const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
   const commandController = readFileSync(new URL("../src/ui/controllers/command-controller.js", import.meta.url), "utf8");
@@ -316,7 +676,7 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
-  assert.ok(appSource.split(/\r?\n/).length <= 1200);
+  assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
   assert.ok(lspController.split(/\r?\n/).length <= 850);
   assert.match(appSource, /createCommandController/);
@@ -327,6 +687,10 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(appSource, /createCommandSurfaceController/);
   assert.match(appSource, /createShellController/);
   assert.doesNotMatch(appSource, /function renderWorkspaceFileList/);
+  assert.doesNotMatch(appSource, /Promise\.all\(targets\.map/);
+  assert.doesNotMatch(appSource, /function wireEvents/);
+  assert.doesNotMatch(appSource, /async function copySelection/);
+  assert.doesNotMatch(appSource, /async function autoFitColumns/);
   assert.match(commandController, /function runCommand/);
   assert.match(commandController, /function executeCommandAction/);
   assert.match(diagnosticsController, /function renderProblemsPanelIfNeeded/);
@@ -337,12 +701,20 @@ test("phase 3 ownership boundaries keep app shell and grid behavior in owners", 
   assert.match(workspaceFileListPolicy, /function renderWorkspaceFileList/);
   assert.match(lspController, /async function startWorkspace/);
   assert.match(lspController, /createLspHoverController/);
+  assert.match(lspController, /vector-open-skipped-large-file/);
+  assert.match(lspController, /vector-update-skipped-large-file/);
   assert.doesNotMatch(lspController, /async function requestHover/);
   assert.match(lspHoverController, /async function requestHover/);
   assert.match(lspHoverController, /function scheduleHoverPrewarm/);
   assert.match(lspUriPolicy, /function docToUri/);
   assert.match(lspUriPolicy, /function uriToFileKey/);
   assert.match(appRuntimeUtils, /function createToastFeedback/);
+  assert.match(appStartupState, /function createInitialAppState/);
+  assert.match(appElements, /APP_ELEMENT_IDS/);
+  assert.match(appPerf, /function createAppPerf/);
+  assert.match(appEventController, /function wireEvents/);
+  assert.match(editCommandController, /async function pasteSelection/);
+  assert.match(gridCommandController, /async function autoFitColumns/);
   assert.match(settingsController, /function showSettings/);
   assert.match(settingsController, /function setLintEngine/);
   assert.match(commandSurfaceController, /function showContextMenu/);
@@ -676,3 +1048,68 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+L`: toggle Problems panel/);
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
+
+function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
+  const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: options.lintEngine ?? "legacy" } };
+  const grid = {
+    commitEdit: () => {},
+    draw: () => {},
+    setDocument: () => {},
+    ...gridOverrides
+  };
+  const controller = createDocumentController({
+    state,
+    els: {
+      closeDialog: { classList: { add: () => {}, remove: () => {} } },
+      closeDialogText: { textContent: "" },
+      fileInput: { click: () => {} }
+    },
+    grid,
+    emptyDoc: TableDocument.fromText("empty.txt", ""),
+    activeDoc: () => state.docs[state.active],
+    applyFreezeToDoc: () => {},
+    renderChrome: () => {},
+    showError: options.showError ?? ((error) => { throw error; }),
+    reportWindowCloseFailure: () => {},
+    lspOpenDoc: options.lspOpenDoc ?? (() => {}),
+    reportLspOpenFailure: () => {},
+    lspCloseDoc: () => {},
+    reportLspCloseFailure: () => {},
+    lspStartWorkspace: () => {},
+    scheduleHoverPrewarm: options.scheduleHoverPrewarm ?? (() => {}),
+    resetUndoManagerForDocument: () => {},
+    resetLegacyWorkspaceIndex: () => {},
+    scheduleLegacyLintForOpen: options.scheduleLegacyLintForOpen ?? (() => {}),
+    scheduleLegacyLintFull: () => {},
+    cancelLegacyLintJobs: () => {},
+    isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
+    isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
+    updateGridDiagnostics: () => {},
+    scrollProblemsToActiveFile: () => {}
+  });
+  return { controller, state };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(condition) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(condition(), true);
+}
+
+function closeChoiceEvent(choice) {
+  return {
+    target: {
+      closest: () => ({ dataset: { closeChoice: choice } })
+    }
+  };
+}

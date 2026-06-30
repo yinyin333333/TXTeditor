@@ -24,6 +24,11 @@
               <button data-command="open-file">Open File</button>
               <button data-command="open-folder">Open Folder</button>
             </div>
+            <div class="sidebar-search">
+              <span class="sidebar-search-icon" aria-hidden="true"></span>
+              <input id="explorerFilter" class="sidebar-filter" type="search" placeholder="Search TXT file" aria-label="Search TXT file" autocomplete="off" spellcheck="false" />
+              <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files"></div>
+            </div>
             <div id="fileList" class="file-list"></div>
           </aside>
         </section>
