@@ -1,5 +1,5 @@
 import { isTauriRuntime } from "../../core/io.js";
-import { globalShortcutAction } from "../global-shortcut-policy.js";
+import { globalShortcutAction, gridScrollShortcutAction } from "../global-shortcut-policy.js";
 import { isTextInputTarget } from "../search-policy.js";
 
 export function createAppEventController({
@@ -8,6 +8,7 @@ export function createAppEventController({
   grid,
   commands,
   documentController,
+  hasOpenDocument,
   searchController,
   syncDockLayout,
   wirePaneResizers,
@@ -97,10 +98,31 @@ export function createAppEventController({
       els.host.focus();
       return;
     }
+    if (!editingCell && !isGridScrollShortcutBlocked(event.target)) {
+      const scrollAction = gridScrollShortcutAction(event);
+      if (scrollAction && hasOpenDocument?.()) return runGridScrollShortcutAction(event, scrollAction);
+    }
     const shortcutAction = globalShortcutAction(event, { editingCell });
     if (editingCell && !shortcutAction) return;
     if (!editingCell && isTextInputTarget(event.target)) return;
     if (shortcutAction) return runGlobalShortcutAction(event, shortcutAction);
+  }
+
+  function isGridScrollShortcutBlocked(target) {
+    if (isTextInputTarget(target)) return true;
+    const ElementCtor = globalThis.Element;
+    if (!ElementCtor || !(target instanceof ElementCtor)) return false;
+    return Boolean(target.closest(".modal, .modal-backdrop, .palette"));
+  }
+
+  function runGridScrollShortcutAction(event, action) {
+    if (action === "scroll-top") return prevent(event, () => grid.scrollToTop());
+    if (action === "scroll-bottom") return prevent(event, () => grid.scrollToBottom());
+    if (action === "scroll-left") return prevent(event, () => grid.scrollToLeft());
+    if (action === "scroll-right") return prevent(event, () => grid.scrollToRight());
+    if (action === "scroll-page-up") return prevent(event, () => grid.scrollPageUp());
+    if (action === "scroll-page-down") return prevent(event, () => grid.scrollPageDown());
+    return undefined;
   }
 
   function runGlobalShortcutAction(event, action) {

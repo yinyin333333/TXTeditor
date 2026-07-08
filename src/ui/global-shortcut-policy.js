@@ -4,6 +4,18 @@ export function isEditorShortcutAllowed(key, ctrlKey) {
   return Boolean(ctrlKey && EDITOR_ALLOWED_CTRL_KEYS.has(String(key).toLowerCase()));
 }
 
+export function gridScrollShortcutAction(event) {
+  const key = String(event.key ?? "");
+  const shiftKey = Boolean(event.shiftKey);
+  if (event.ctrlKey || event.metaKey || event.altKey) return null;
+  if (key === "Home") return shiftKey ? "scroll-left" : "scroll-top";
+  if (key === "End") return shiftKey ? "scroll-right" : "scroll-bottom";
+  if (shiftKey) return null;
+  if (key === "PageUp") return "scroll-page-up";
+  if (key === "PageDown") return "scroll-page-down";
+  return null;
+}
+
 export function globalShortcutAction(event, { editingCell = false } = {}) {
   const key = String(event.key ?? "").toLowerCase();
   const ctrlKey = Boolean(event.ctrlKey);

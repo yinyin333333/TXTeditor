@@ -136,6 +136,7 @@ export function createShellController({
     renderChrome();
     scrollProblemsToActiveFile();
     scheduleHoverPrewarm("tab-switch");
+    els.host?.focus?.();
   }
 
   function bindExplorerFilter() {

@@ -388,6 +388,7 @@ const eventController = createAppEventController({
   grid,
   commands,
   documentController,
+  hasOpenDocument,
   searchController,
   syncDockLayout,
   wirePaneResizers,

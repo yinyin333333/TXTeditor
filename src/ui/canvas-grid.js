@@ -4,7 +4,7 @@ import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeH
 import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
-import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, edgeCellScrollState } from "./grid-viewport-policy.js";
+import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, clampedGridScrollOffsets, edgeCellScrollState } from "./grid-viewport-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
 import {
   isGridHoverAllowed,
@@ -810,6 +810,51 @@ export class CanvasGrid {
     });
     if ("scrollLeft" in scrollState) this.host.scrollLeft = scrollState.scrollLeft;
     if ("scrollTop" in scrollState) this.host.scrollTop = scrollState.scrollTop;
+  }
+
+  scrollToTop() {
+    this.scrollToOffsets({ scrollTop: 0 });
+  }
+
+  scrollToBottom() {
+    this.scrollToOffsets({ scrollTop: Number.MAX_SAFE_INTEGER });
+  }
+
+  scrollToLeft() {
+    this.scrollToOffsets({ scrollLeft: 0 });
+  }
+
+  scrollToRight() {
+    this.scrollToOffsets({ scrollLeft: Number.MAX_SAFE_INTEGER });
+  }
+
+  scrollPageUp() {
+    this.scrollToOffsets({ scrollTop: this.host.scrollTop - this.gridPageHeight() });
+  }
+
+  scrollPageDown() {
+    this.scrollToOffsets({ scrollTop: this.host.scrollTop + this.gridPageHeight() });
+  }
+
+  gridPageHeight() {
+    return Math.max(1, this.host.clientHeight - this.headerHeight - this.frozenRowHeight());
+  }
+
+  scrollToOffsets({ scrollLeft = this.host.scrollLeft, scrollTop = this.host.scrollTop }) {
+    const next = clampedGridScrollOffsets({
+      scrollLeft,
+      scrollTop,
+      rowHeaderWidth: this.rowHeaderWidth,
+      headerHeight: this.headerHeight,
+      frozenColumnWidth: this.frozenColumnWidth(),
+      frozenRowHeight: this.frozenRowHeight(),
+      scrollableColumnWidth: this.scrollableColumnWidth(),
+      scrollableRowsHeight: this.scrollableRowsHeight(),
+      viewportWidth: this.host.clientWidth,
+      viewportHeight: this.host.clientHeight
+    });
+    this.host.scrollLeft = next.scrollLeft;
+    this.host.scrollTop = next.scrollTop;
   }
 
   statusText() {

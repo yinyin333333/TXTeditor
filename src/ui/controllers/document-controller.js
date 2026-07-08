@@ -104,6 +104,7 @@ export function createDocumentController({
       state.active = plan.activeIndex;
       grid.setDocument(activeDoc());
       renderChrome();
+      focusGrid();
       return;
     }
     resetUndoManagerForDocument(doc);
@@ -126,6 +127,7 @@ export function createDocumentController({
     }
     renderChrome();
     scrollProblemsToActiveFile();
+    focusGrid();
     if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
       lspOpenDoc(doc).catch((error) => reportLspOpenFailure(doc, error, "document-open"));
@@ -334,6 +336,10 @@ export function createDocumentController({
 
   function commitActiveEdit() {
     grid.commitEdit?.();
+  }
+
+  function focusGrid() {
+    els.host?.focus?.();
   }
 
   async function showOpeningFeedback(message) {

@@ -406,6 +406,57 @@ test("centered scroll offsets clamp for short and bounded content", () => {
   }), {});
 });
 
+test("grid explicit scroll shortcuts clamp to table bounds", () => {
+  const grid = {
+    host: {
+      scrollLeft: 40,
+      scrollTop: 300,
+      clientWidth: 300,
+      clientHeight: 200
+    },
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 10,
+    frozenRowHeight: () => 20,
+    scrollableColumnWidth: () => 900,
+    scrollableRowsHeight: () => 800,
+    scrollToOffsets: CanvasGrid.prototype.scrollToOffsets,
+    gridPageHeight: CanvasGrid.prototype.gridPageHeight,
+    scrollToTop: CanvasGrid.prototype.scrollToTop,
+    scrollToBottom: CanvasGrid.prototype.scrollToBottom,
+    scrollToLeft: CanvasGrid.prototype.scrollToLeft,
+    scrollToRight: CanvasGrid.prototype.scrollToRight,
+    scrollPageUp: CanvasGrid.prototype.scrollPageUp,
+    scrollPageDown: CanvasGrid.prototype.scrollPageDown
+  };
+
+  grid.scrollToTop();
+  assert.equal(grid.host.scrollTop, 0);
+  assert.equal(grid.host.scrollLeft, 40);
+
+  grid.scrollToBottom();
+  assert.equal(grid.host.scrollTop, 644);
+
+  grid.scrollToLeft();
+  assert.equal(grid.host.scrollLeft, 0);
+  assert.equal(grid.host.scrollTop, 644);
+
+  grid.scrollToRight();
+  assert.equal(grid.host.scrollLeft, 650);
+
+  grid.host.scrollTop = 300;
+  grid.scrollPageUp();
+  assert.equal(grid.host.scrollTop, 144);
+
+  grid.scrollPageDown();
+  assert.equal(grid.host.scrollTop, 300);
+
+  grid.scrollPageDown();
+  grid.scrollPageDown();
+  grid.scrollPageDown();
+  assert.equal(grid.host.scrollTop, 644);
+});
+
 test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.deepEqual(frozenVerticalEdgeRects(80, 240), [
