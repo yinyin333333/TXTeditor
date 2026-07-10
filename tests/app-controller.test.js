@@ -1036,7 +1036,7 @@ test("Find Next includes the current header when the search scope changes", () =
   assert.equal(searchShouldIncludeStart("abc", SEARCH_SCOPE_COLUMN_TITLES, "abc", SEARCH_SCOPE_COLUMN_TITLES), false);
 });
 
-test("header search maps matches to the active row or column and preserves the other scroll axis", () => {
+test("search maps header matches to the active axis and centers only the searched axis", () => {
   assert.deepEqual(
     searchTargetForResult(SEARCH_SCOPE_COLUMN_TITLES, { row: 0, column: 7 }, { row: 300, column: 2 }),
     { row: 300, column: 7 }
@@ -1059,6 +1059,7 @@ test("Find scope options submit the current search on Enter", () => {
   const selection = new SelectionModel();
   selection.set(0, 1);
   const listeners = new Map();
+  const panelListeners = new Map();
   const rowScopeInput = {
     value: SEARCH_SCOPE_ROW_TITLES,
     addEventListener: (name, listener) => listeners.set(name, listener)
@@ -1078,7 +1079,7 @@ test("Find scope options submit the current search on Enter", () => {
       classList: { add: () => {}, remove: () => {} },
       querySelector: () => rowScopeInput,
       querySelectorAll: () => [rowScopeInput],
-      addEventListener: () => {}
+      addEventListener: (name, listener) => panelListeners.set(name, listener)
     },
     searchStatus: { textContent: "" }
   };
@@ -1086,7 +1087,8 @@ test("Find scope options submit the current search on Enter", () => {
     state,
     els,
     grid: {
-      scrollCellIntoView: (...args) => scrolls.push(args),
+      scrollCellToCenter: (...args) => scrolls.push(["center", ...args]),
+      scrollByWheel: (event) => scrolls.push(["wheel", event.deltaX, event.deltaY]),
       draw: () => {}
     },
     activeDoc: () => doc,
@@ -1102,8 +1104,19 @@ test("Find scope options submit the current search on Enter", () => {
 
   assert.equal(prevented, true);
   assert.deepEqual(selection.focus, { row: 2, column: 1 });
-  assert.deepEqual(scrolls, [[2, 1, { preserveScrollLeft: true }]]);
+  assert.deepEqual(scrolls, [["center", 2, 1, { preserveScrollLeft: true }]]);
   assert.equal(els.searchStatus.textContent, "Row R3 (title R3:C1)");
+
+  let wheelPrevented = false;
+  const wheelEvent = {
+    ctrlKey: false,
+    deltaX: 3,
+    deltaY: 40,
+    preventDefault: () => { wheelPrevented = true; }
+  };
+  panelListeners.get("wheel")(wheelEvent);
+  assert.equal(wheelPrevented, true);
+  assert.deepEqual(scrolls.at(-1), ["wheel", 3, 40]);
 });
 
 test("settings windows treat Escape as a close key only", () => {

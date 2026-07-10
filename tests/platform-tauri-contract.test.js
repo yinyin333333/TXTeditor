@@ -539,7 +539,7 @@ test("Find UI is a centered modal and text inputs keep native shortcuts", () => 
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(html, /id="searchPanel" class="modal-backdrop search-backdrop hidden"/);
   assert.match(html, /class="modal search-modal"/);
-  assert.match(html, /id="searchInput" class="modal-input"/);
+  assert.match(html, /id="searchInput" class="modal-input" type="search"[^>]*autocomplete="off"[^>]*spellcheck="false"/);
   assert.match(html, /data-search-close/);
   assert.doesNotMatch(html, /id="searchPanel" class="quick-panel/);
   class FakeElement {

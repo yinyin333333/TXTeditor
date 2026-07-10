@@ -457,6 +457,64 @@ test("grid explicit scroll shortcuts clamp to table bounds", () => {
   assert.equal(grid.host.scrollTop, 644);
 });
 
+test("grid wheel scrolling supports pixel, line, and shifted horizontal input", () => {
+  const grid = {
+    host: {
+      scrollLeft: 40,
+      scrollTop: 300,
+      clientWidth: 300,
+      clientHeight: 200
+    },
+    rowHeight: 26,
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 10,
+    frozenRowHeight: () => 20,
+    scrollableColumnWidth: () => 900,
+    scrollableRowsHeight: () => 800,
+    scrollToOffsets: CanvasGrid.prototype.scrollToOffsets,
+    gridPageHeight: CanvasGrid.prototype.gridPageHeight,
+    scrollByWheel: CanvasGrid.prototype.scrollByWheel
+  };
+
+  grid.scrollByWheel({ deltaX: 5, deltaY: 20 });
+  assert.equal(grid.host.scrollLeft, 45);
+  assert.equal(grid.host.scrollTop, 320);
+
+  grid.scrollByWheel({ deltaY: 2, deltaMode: 1 });
+  assert.equal(grid.host.scrollTop, 372);
+
+  grid.scrollByWheel({ deltaY: 10, shiftKey: true });
+  assert.equal(grid.host.scrollLeft, 55);
+  assert.equal(grid.host.scrollTop, 372);
+});
+
+test("centered cell scrolling can preserve the unrelated search axis", () => {
+  const grid = {
+    host: { scrollLeft: 40, scrollTop: 300, clientWidth: 300, clientHeight: 200 },
+    doc: { freezeFirstRow: false, freezeFirstColumn: false },
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 0,
+    frozenRowHeight: () => 0,
+    columnContentLeft: () => 600,
+    rowContentTop: () => 900,
+    scaledColumnWidth: () => 80,
+    scaledRowHeight: () => 26,
+    scrollableColumnWidth: () => 1200,
+    scrollableRowsHeight: () => 1600
+  };
+
+  CanvasGrid.prototype.scrollCellToCenter.call(grid, 20, 8, { preserveScrollTop: true });
+  assert.equal(grid.host.scrollLeft, 510);
+  assert.equal(grid.host.scrollTop, 300);
+
+  grid.host.scrollLeft = 40;
+  CanvasGrid.prototype.scrollCellToCenter.call(grid, 20, 8, { preserveScrollLeft: true });
+  assert.equal(grid.host.scrollLeft, 40);
+  assert.equal(grid.host.scrollTop, 825);
+});
+
 test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.deepEqual(frozenVerticalEdgeRects(80, 240), [
