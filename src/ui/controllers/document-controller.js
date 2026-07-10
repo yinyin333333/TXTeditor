@@ -1,10 +1,12 @@
 import { TableDocument } from "../../core/table-model.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import { markTableSaved, tableFileState } from "../../core/table-file-state.js";
+import { docToUri } from "../../core/lsp-uri-policy.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
   downloadText,
+  encodeText,
   isTauriRuntime,
   openFilesNative,
   openNativePaths,
@@ -39,6 +41,7 @@ export function createDocumentController({
   reportLspOpenFailure,
   lspCloseDoc,
   reportLspCloseFailure,
+  lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -224,9 +227,11 @@ export function createDocumentController({
   }
 
   async function saveFileNow(doc) {
+    const previousUri = docToUri(doc);
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, false);
       if (!saved) return false;
+      await lspRebindSavedDoc(doc, previousUri);
       grid.draw();
       renderChrome();
       return true;
@@ -236,6 +241,7 @@ export function createDocumentController({
     await writeDocumentText(writable, doc);
     await writable.close();
     markTableSaved(doc, revision);
+    await lspRebindSavedDoc(doc, previousUri);
     renderChrome();
     return true;
   }
@@ -256,9 +262,11 @@ export function createDocumentController({
   }
 
   async function saveAsNow(doc) {
+    const previousUri = docToUri(doc);
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, true);
       if (!saved) return false;
+      await lspRebindSavedDoc(doc, previousUri);
       grid.draw();
       renderChrome();
       return true;
@@ -271,12 +279,13 @@ export function createDocumentController({
       doc.handle = handle;
       doc.name = handle.name ?? doc.name;
       markTableSaved(doc, revision);
+      await lspRebindSavedDoc(doc, previousUri);
       renderChrome();
       return true;
     } else {
       const revision = tableFileState(doc).revision;
       const text = doc.toText();
-      downloadText(doc.name, text);
+      downloadText(doc.name, text, doc.encoding);
       markTableSaved(doc, revision);
       renderChrome();
       return true;
@@ -370,8 +379,17 @@ export function createDocumentController({
   }
 
   async function writeDocumentText(writable, doc) {
+    let first = true;
     for (const chunk of doc.toTextChunks()) {
-      if (chunk) await writable.write(chunk);
+      if ((doc.encoding || "utf-8").toLowerCase() === "utf-8") {
+        if (chunk) await writable.write(chunk);
+      } else if (chunk || first) {
+        await writable.write(encodeText(chunk, doc.encoding, { includeBom: first }));
+      }
+      first = false;
+    }
+    if (first && (doc.encoding || "utf-8").toLowerCase() !== "utf-8") {
+      await writable.write(encodeText("", doc.encoding));
     }
   }
 

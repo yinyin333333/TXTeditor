@@ -122,8 +122,7 @@ export function createSettingsController({
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
     } else if (state.workspace?.path) {
-      if (state.lsp.started) syncOpenDocsToVectorLsp().catch(showError);
-      else lspStartWorkspace(state.workspace.path).catch(showError);
+      lspStartWorkspace(state.workspace.path).catch(showError);
     } else if (state.lsp.started) {
       syncOpenDocsToVectorLsp().catch(showError);
     }
@@ -396,6 +395,7 @@ export function createSettingsController({
 
     return new Promise((resolve) => {
       let closed = false;
+      let saving = false;
       let unbindEscape = null;
       const finish = () => {
         if (closed) return;
@@ -409,6 +409,10 @@ export function createSettingsController({
       backdrop.addEventListener("click", async (event) => {
         const choice = event.target.closest("[data-settings-choice]")?.dataset.settingsChoice;
         if (choice === "save") {
+          if (saving) return;
+          saving = true;
+          const saveButton = backdrop.querySelector('[data-settings-choice="save"]');
+          if (saveButton) saveButton.disabled = true;
           const selectedMode = backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? "basic";
           const debugLoggingEl = backdrop.querySelector("#settingsDebugLogging");
           const updated = {
@@ -420,19 +424,26 @@ export function createSettingsController({
             vectorLspPath: lspInput?.value.trim() || undefined,
             debugLogging: debugLoggingEl?.checked ?? false
           };
-          await saveConfig(updated).catch((err) => showError(`Failed to save lint options: ${err}`));
+          try {
+            await saveConfig(updated);
+          } catch (err) {
+            showError(`Failed to save lint options: ${err}`);
+            saving = false;
+            if (saveButton) saveButton.disabled = false;
+            return;
+          }
           state.config = updated;
           finish();
           if (state.workspace) {
             setLintDiagnostics([]);
             updateGridDiagnostics();
-            lspStartWorkspace(state.workspace.path).catch(showError);
+            lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
           }
         }
         if (choice === "cancel") finish();
         if (choice === "restart-lsp") {
           finish();
-          if (state.workspace) lspStartWorkspace(state.workspace.path).catch(showError);
+          if (state.workspace) lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
         }
       });
     });

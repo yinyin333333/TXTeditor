@@ -84,7 +84,12 @@ export function createInitialAppState({ storage = localStorage } = {}) {
       }
     },
     lsp: {
-      started: false
+      started: false,
+      workspacePath: "",
+      workspaceKey: "",
+      generation: 0,
+      readiness: "stopped",
+      openFileCount: 0
     },
     config: {},
     bottomTab: "problems",

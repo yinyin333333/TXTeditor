@@ -25,16 +25,18 @@ export function createEditCommandController({
   showError
 }) {
   async function copySelection() {
-    if (!hasOpenDocument()) return;
+    if (!hasOpenDocument()) return false;
     try {
       await writeClipboardText(copyRanges(activeDoc(), state.selection.ranges));
+      return true;
     } catch (error) {
       showError(`Clipboard copy failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
     }
   }
 
   async function cutSelection() {
-    await copySelection();
+    if (!await copySelection()) return;
     execute(clearRangesCommand(activeDoc(), state.selection.ranges, "Cut"));
   }
 

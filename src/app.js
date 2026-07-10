@@ -7,6 +7,7 @@ import {
 import {
   exposeTxteditorPerf
 } from "./core/perf-instrumentation.js";
+import { normalizePath as lintPathKey } from "./core/lint-paths.js";
 import {
   documentChangeSyncRoute,
   effectiveVectorLspHover,
@@ -200,6 +201,7 @@ lspController = createLspController({
   setLintDiagnostics,
   updateGridDiagnostics,
   renderChrome,
+  renderDiagnosticsChrome,
   addDocument,
   applyFreezeToDoc,
   updateActiveProblemHighlight,
@@ -258,6 +260,7 @@ const documentController = createDocumentController({
   reportLspOpenFailure,
   lspCloseDoc,
   reportLspCloseFailure,
+  lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
   lspStartWorkspace,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -379,6 +382,7 @@ shellController = createShellController({
   docDiagnosticSeverity,
   lintSummaryText,
   problemBadgeForPath,
+  problemBadgeCountForPath,
   lintNotificationCount,
   renderLintControls,
   syncDockLayout,
@@ -559,8 +563,8 @@ function reportWindowCloseFailure(error, context) {
   return lspController.reportWindowCloseFailure(error, context);
 }
 
-async function lspStartWorkspace(workspacePath) {
-  return lspController.startWorkspace(workspacePath);
+async function lspStartWorkspace(workspacePath, options) {
+  return lspController.startWorkspace(workspacePath, options);
 }
 
 async function syncOpenDocsToVectorLsp() {
@@ -583,8 +587,8 @@ function handleLspUpdateError(doc, error, context) {
   return lspController.handleUpdateError(doc, error, context);
 }
 
-async function lspCloseDoc(doc) {
-  return lspController.closeDoc(doc);
+async function lspCloseDoc(doc, options) {
+  return lspController.closeDoc(doc, options);
 }
 
 function reportLspCloseFailure(doc, error, context) {
@@ -656,6 +660,10 @@ function renderChrome() {
   return shellController.renderChrome();
 }
 
+function renderDiagnosticsChrome() {
+  return shellController.renderChrome();
+}
+
 function renderProblemsPanelIfNeeded() {
   return diagnosticsController.renderProblemsPanelIfNeeded();
 }
@@ -670,6 +678,10 @@ function lintSummaryText() {
 
 function problemBadgeForPath(path) {
   return diagnosticsController.problemBadgeForPath(path);
+}
+
+function problemBadgeCountForPath(path) {
+  return diagnosticsController.problemBadgeCountForPath(path);
 }
 
 function lintNotificationCount() {
@@ -705,8 +717,4 @@ function columnsForColumnOperation() { return columnRangesFromRanges(state.selec
 
 function lintDocKey(doc) {
   return lintPathKey(doc?.path || doc?.name || "");
-}
-
-function lintPathKey(path) {
-  return String(path || "").replace(/\\/g, "/").toLowerCase();
 }

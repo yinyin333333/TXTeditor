@@ -96,19 +96,29 @@ export function prepareStaging({ exePath, paths, requireContrib = false }) {
 function writeSmokeWorkspace(workspaceDir) {
   fs.writeFileSync(
     path.join(workspaceDir, "config.json"),
-    `${JSON.stringify({ schema_variant: "3.2" }, null, 2)}\n`,
+    `${JSON.stringify({
+      single_shot: true,
+      io_type: { type: "tcp", host: "127.0.0.1", port: 9 },
+      schema_variant: "workspace-config-must-not-win",
+      encoding: { invalid: true }
+    }, null, 2)}\n`,
     "utf8"
   );
   fs.writeFileSync(
     path.join(workspaceDir, "skilldesc.txt"),
-    "skilldesc\ndesc-smoke\n",
-    "utf8"
+    Buffer.from("skilldesc\ndesc-smoke\ncaf\xE9\n", "latin1")
   );
   fs.writeFileSync(
     path.join(workspaceDir, "skills.txt"),
-    "skill\tskilldesc\tsrvstfunc\nsmoke-skill\tdesc-smoke\tbad-int\n",
+    "skill\tskilldesc\tsrvstfunc\nsmoke-skill\tdesc-smoke\tbad-int\nsmoke-skill-2\tcafé\t0\n",
     "utf8"
   );
+  fs.writeFileSync(path.join(workspaceDir, "upper.TXT"), "id\nupper\n", "utf8");
+  fs.writeFileSync(path.join(workspaceDir, "table.tbl"), "id\ntable\n", "utf8");
+  fs.writeFileSync(path.join(workspaceDir, "data.csv"), "id\ndata\n", "utf8");
+  const deep = path.join(workspaceDir, "d1", "d2", "d3", "d4", "d5", "d6");
+  fs.mkdirSync(deep, { recursive: true });
+  fs.writeFileSync(path.join(deep, "deep.tsv"), "id\ndeep\n", "utf8");
 }
 
 function encodeFileUriPath(filePath) {
@@ -176,12 +186,13 @@ class LspClient {
   }
 
   start() {
-    this.child = spawn(this.exePath, [], {
+    this.child = spawn(this.exePath, ["--editor-mode"], {
       cwd: this.workspaceDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        VLSP_SCHEMA_VARIANT: this.schemaVariant
+        VLSP_SCHEMA_VARIANT: this.schemaVariant,
+        VLSP_ENCODING: "auto"
       },
       windowsHide: true
     });
@@ -268,34 +279,77 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
   const skillsUri = encodeFileUriPath(skillsPath);
   const skilldescUri = encodeFileUriPath(skilldescPath);
   const skillsText = fs.readFileSync(skillsPath, "utf8");
-  const skilldescText = fs.readFileSync(skilldescPath, "utf8");
+  const skilldescText = new TextDecoder("windows-1252", { fatal: true })
+    .decode(fs.readFileSync(skilldescPath));
   try {
     await withTimeout(client.request("initialize", {
       processId: process.pid,
       rootUri: encodeFileUriPath(paths.workspaceDir),
+      initializationOptions: { sessionGeneration: 42 },
       capabilities: { textDocument: { publishDiagnostics: {} } }
     }), timeoutMs, "initialize");
     client.notify("initialized", {});
+    const effectiveConfig = await withTimeout(client.waitFor((message) => (
+      message.method === "window/logMessage"
+      && String(message.params?.message || "").includes("Effective vector-lsp config")
+    )), timeoutMs, "effective editor config");
+    const effectiveConfigMessage = String(effectiveConfig.params?.message || "");
+    if (!effectiveConfigMessage.includes("editorMode=true")
+      || !effectiveConfigMessage.includes("transport=stdio")
+      || !effectiveConfigMessage.includes("singleShot=false")
+      || !effectiveConfigMessage.includes(`variant:${schemaVariant}`)) {
+      throw new Error(`editor mode effective config changed: ${effectiveConfigMessage}`);
+    }
     await withTimeout(client.waitFor((message) => (
       message.method === "window/logMessage"
       && String(message.params?.message || "").includes("Schema loaded successfully")
     )), timeoutMs, "schema load");
-    await withTimeout(client.waitFor((message) => (
+    const indexMessage = await withTimeout(client.waitFor((message) => (
       message.method === "window/logMessage"
       && String(message.params?.message || "").includes("Indexed")
     )), timeoutMs, "workspace index");
+    if (!String(indexMessage.params?.message || "").includes("Indexed 6 workspace files")) {
+      throw new Error(`editor workspace file policy changed: ${indexMessage.params?.message}`);
+    }
+    const readyMessage = await withTimeout(client.waitFor((message) => (
+      message.method === "vectorLsp/ready"
+    )), timeoutMs, "workspace ready");
+    if (readyMessage.params?.sessionGeneration !== 42) {
+      throw new Error(`ready notification lost session generation: ${JSON.stringify(readyMessage.params)}`);
+    }
+    const perfMessage = await withTimeout(client.waitFor((message) => (
+      message.method === "window/logMessage"
+      && String(message.params?.message || "").includes("vlsp perf session=42")
+    )), timeoutMs, "server startup performance log");
+    const serverPerf = String(perfMessage.params?.message || "");
+    for (const phase of ["schemaMs=", "enumerateMs=", "readParseMs=", "indexMs=", "reconcileMs=", "scanMs=", "startupMs="]) {
+      if (!serverPerf.includes(phase)) throw new Error(`server performance phase missing ${phase}: ${serverPerf}`);
+    }
+    const startupDiagnostics = client.messages.filter((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skillsUri
+      && message.params?.version == null
+    )).at(-1);
+    if (startupDiagnostics?.params?.diagnostics?.length !== 1) {
+      throw new Error(`auto-decoded disk diagnostics changed: ${JSON.stringify(startupDiagnostics?.params)}`);
+    }
+    const openStartIndex = client.messages.length;
     client.notify("textDocument/didOpen", {
       textDocument: { uri: skilldescUri, languageId: "plaintext", version: 1, text: skilldescText }
     });
     client.notify("textDocument/didOpen", {
       textDocument: { uri: skillsUri, languageId: "plaintext", version: 1, text: skillsText }
     });
-    const diagnosticsMessage = await withTimeout(client.waitFor((message) => (
+    const diagnosticsMessage = await withTimeout(client.waitForNext((message) => (
       message.method === "textDocument/publishDiagnostics"
       && message.params?.uri === skillsUri
+      && message.params?.version === 1
       && Array.isArray(message.params?.diagnostics)
       && message.params.diagnostics.length > 0
-    )), timeoutMs, "diagnostics");
+    ), openStartIndex), timeoutMs, "diagnostics");
+    if (diagnosticsMessage.params.version !== 1) {
+      throw new Error(`didOpen diagnostics were not version 1: ${JSON.stringify(diagnosticsMessage.params.version)}`);
+    }
     const hover = await withTimeout(client.request("textDocument/hover", {
       textDocument: { uri: skillsUri },
       position: { line: 0, character: "skill\ts".length }
@@ -306,29 +360,123 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       position: { line: 1, character: "smoke-skill\td".length }
     }), timeoutMs, "definition");
     if (!definition) throw new Error("definition returned no location");
-    const editedText = "skill\tskilldesc\tsrvstfunc\nsmoke-skill\tdesc-smoke\t0\n";
+    const staleEditedText = "skill\tskilldesc\tsrvstfunc\nsmoke-skill\tdesc-smoke\tbad-int\nsmoke-skill-2\tcafé\t0\n";
+    const editedText = "skill\tskilldesc\tsrvstfunc\nsmoke-skill\tdesc-smoke\t0\nsmoke-skill-2\tcafé\t0\n";
     const editStartIndex = client.messages.length;
     client.notify("textDocument/didChange", {
       textDocument: { uri: skillsUri, version: 2 },
+      contentChanges: [{ text: staleEditedText }]
+    });
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: skillsUri, version: 3 },
       contentChanges: [{ text: editedText }]
     });
     const editDiagnostics = await withTimeout(client.waitForNext((message) => (
       message.method === "textDocument/publishDiagnostics"
       && message.params?.uri === skillsUri
+      && message.params?.version === 3
       && Array.isArray(message.params?.diagnostics)
     ), editStartIndex), timeoutMs, "edit diagnostics");
     if (editDiagnostics.params.diagnostics.length >= diagnosticsMessage.params.diagnostics.length) {
       throw new Error("edit diagnostics did not clear the staged invalid integer diagnostic");
     }
+    await wait(50);
+    const editPublishes = client.messages.slice(editStartIndex).filter((message) => (
+      message.method === "textDocument/publishDiagnostics" && message.params?.uri === skillsUri
+    ));
+    if (editPublishes.at(-1)?.params?.version !== 3) {
+      throw new Error(`stale diagnostics won after version 3: ${JSON.stringify(editPublishes.map((message) => message.params?.version))}`);
+    }
+    const deletedTargetText = "skilldesc\ndesc-smoke\n";
+    const deleteStartIndex = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: skilldescUri, version: 2 },
+      contentChanges: [{ text: deletedTargetText }]
+    });
+    const dependentError = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skillsUri
+      && message.params?.version === 3
+      && message.params?.diagnostics?.length > 0
+    ), deleteStartIndex), timeoutMs, "dependent diagnostics after target delete");
+
+    const restoreStartIndex = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: skilldescUri, version: 3 },
+      contentChanges: [{ text: skilldescText }]
+    });
+    const dependentClear = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skillsUri
+      && message.params?.version === 3
+      && message.params?.diagnostics?.length === 0
+    ), restoreStartIndex), timeoutMs, "dependent diagnostics after target restore");
+
+    const closeDeleteStartIndex = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: skilldescUri, version: 4 },
+      contentChanges: [{ text: deletedTargetText }]
+    });
+    await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skillsUri
+      && message.params?.version === 3
+      && message.params?.diagnostics?.length > 0
+    ), closeDeleteStartIndex), timeoutMs, "dependent diagnostics before didClose");
+    const closeStartIndex = client.messages.length;
+    client.notify("textDocument/didClose", { textDocument: { uri: skilldescUri } });
+    const closeRestore = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skillsUri
+      && message.params?.version === 3
+      && message.params?.diagnostics?.length === 0
+    ), closeStartIndex), timeoutMs, "dependent diagnostics after didClose disk restore");
     await client.stop();
     return {
       initialize: "pass",
+      editorModeConfig: effectiveConfigMessage,
+      indexedFiles: 6,
+      readyGeneration: readyMessage.params.sessionGeneration,
+      serverPerf,
+      startupDiagnostics: startupDiagnostics.params.diagnostics.length,
       diagnostics: diagnosticsMessage.params.diagnostics.length,
+      diagnosticsVersion: diagnosticsMessage.params.version,
       hover: "pass",
       definition: "pass",
       editDiagnostics: editDiagnostics.params.diagnostics.length,
+      editDiagnosticsVersion: editDiagnostics.params.version,
+      dependentDeleteDiagnostics: dependentError.params.diagnostics.length,
+      dependentRestoreDiagnostics: dependentClear.params.diagnostics.length,
+      didCloseRestoreDiagnostics: closeRestore.params.diagnostics.length,
       stderr: client.stderr.trim()
     };
+  } finally {
+    await client.stop();
+  }
+}
+
+async function runReadinessFailureSession({ exePath, paths, timeoutMs }) {
+  const client = new LspClient({
+    exePath,
+    workspaceDir: paths.workspaceDir,
+    schemaVariant: "missing-readiness-regression-variant"
+  });
+  client.start();
+  try {
+    await withTimeout(client.request("initialize", {
+      processId: process.pid,
+      rootUri: encodeFileUriPath(paths.workspaceDir),
+      initializationOptions: { sessionGeneration: 77 },
+      capabilities: { textDocument: { publishDiagnostics: {} } }
+    }), timeoutMs, "failure initialize");
+    client.notify("initialized", {});
+    const failure = await withTimeout(client.waitFor((message) => (
+      message.method === "vectorLsp/failed"
+    )), timeoutMs, "readiness failure notification");
+    if (failure.params?.sessionGeneration !== 77 || !String(failure.params?.reason || "").includes("Schema load failed")) {
+      throw new Error(`readiness failure contract changed: ${JSON.stringify(failure.params)}`);
+    }
+    return { generation: 77, reason: failure.params.reason, stderr: client.stderr.trim() };
   } finally {
     await client.stop();
   }
@@ -372,7 +520,8 @@ export async function runVectorLspRuntimeSmoke({
   const stagedContribPath = path.join(paths.stagingDir, "contrib");
   const first = await runLspSession({ exePath: stagedExePath, paths, schemaVariant, timeoutMs });
   const second = await runLspSession({ exePath: stagedExePath, paths, schemaVariant, timeoutMs });
-  const stderr = [first.stderr, second.stderr].filter(Boolean);
+  const readinessFailure = await runReadinessFailureSession({ exePath: stagedExePath, paths, timeoutMs });
+  const stderr = [first.stderr, second.stderr, readinessFailure.stderr].filter(Boolean);
   if (requireReal && stderr.length) {
     throw new Error(`Vector-LSP smoke stderr contained unexpected output: ${stderr.join(" | ")}`);
   }
@@ -393,6 +542,7 @@ export async function runVectorLspRuntimeSmoke({
     workspaceDir: paths.workspaceDir,
     resultPath: paths.reportPath,
     restart: "pass",
+    readinessFailure,
     staleEventSuppressionProbe: "direct sessions completed independently; TXTeditor UI suppression still requires owner runtime verification",
     sessions: [first, second]
   };
