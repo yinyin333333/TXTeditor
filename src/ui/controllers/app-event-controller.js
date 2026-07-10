@@ -31,7 +31,8 @@ export function createAppEventController({
   showPalette,
   copySelection,
   cutSelection,
-  pasteSelection
+  pasteSelection,
+  selectAll
 }) {
   function wireEvents() {
     document.addEventListener("click", (event) => {
@@ -99,10 +100,10 @@ export function createAppEventController({
       return;
     }
     if (!editingCell && !isGridScrollShortcutBlocked(event.target)) {
-      const scrollAction = gridScrollShortcutAction(event);
+      const scrollAction = gridScrollShortcutAction(event, { shortcuts: state.shortcuts });
       if (scrollAction && hasOpenDocument?.()) return runGridScrollShortcutAction(event, scrollAction);
     }
-    const shortcutAction = globalShortcutAction(event, { editingCell });
+    const shortcutAction = globalShortcutAction(event, { editingCell, shortcuts: state.shortcuts });
     if (editingCell && !shortcutAction) return;
     if (!editingCell && isTextInputTarget(event.target)) return;
     if (shortcutAction) return runGlobalShortcutAction(event, shortcutAction);
@@ -143,6 +144,7 @@ export function createAppEventController({
     if (action === "copy") return prevent(event, copySelection);
     if (action === "cut") return prevent(event, cutSelection);
     if (action === "paste") return prevent(event, pasteSelection);
+    if (action === "select-all") return prevent(event, selectAll);
     if (action === "clear-selection") return prevent(event, () => runCommand("clear-selection"));
     return undefined;
   }

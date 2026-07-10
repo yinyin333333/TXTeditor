@@ -26,7 +26,6 @@ export function createGridCommandController({
     if (!hasOpenDocument()) return;
     if (kind === "row") state.freezeRow = !state.freezeRow;
     if (kind === "column") state.freezeColumn = !state.freezeColumn;
-    localStorage.setItem("txteditor.freeze", JSON.stringify({ row: state.freezeRow, column: state.freezeColumn }));
     applyFreezeToDoc(activeDoc());
     grid.layout();
     renderChrome();

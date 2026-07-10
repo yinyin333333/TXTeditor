@@ -107,6 +107,10 @@ export function createDocumentController({
       focusGrid();
       return;
     }
+    if (!state.docs.length) {
+      state.freezeRow = false;
+      state.freezeColumn = false;
+    }
     resetUndoManagerForDocument(doc);
     doc.zoom = 1;
     state.docs.push(doc);
@@ -312,6 +316,8 @@ export function createDocumentController({
     state.docs.splice(index, 1);
     if (!state.docs.length) {
       state.active = -1;
+      state.freezeRow = false;
+      state.freezeColumn = false;
       grid.setDocument(emptyDoc);
     } else {
       state.active = activeIndexAfterTabClose({

@@ -580,16 +580,6 @@ export class CanvasGrid {
   onKeyDown(event) {
     if (event.target === this.editor || this.editing) return;
     const key = event.key;
-    if (event.ctrlKey && key === "=") return this.zoomByKey(event, 0.1);
-    if (event.ctrlKey && (key === "+" || key === "Add")) return this.zoomByKey(event, 0.1);
-    if (event.ctrlKey && (key === "-" || key === "Subtract")) return this.zoomByKey(event, -0.1);
-    if (event.ctrlKey && key === "0") return this.zoomReset(event);
-    if (event.ctrlKey && key.toLowerCase() === "a") {
-      this.selection.selectAll(this.doc.rowCount, this.doc.columnCount);
-      event.preventDefault();
-      this.draw();
-      return;
-    }
     const editStart = keyboardEditStartAction(event);
     if (editStart.action === "start-edit") {
       event.preventDefault();
@@ -637,16 +627,6 @@ export class CanvasGrid {
       if (filled !== startFilled) return next;
     }
     return next;
-  }
-
-  zoomByKey(event, delta) {
-    event.preventDefault();
-    this.setZoom(this.doc.zoom + delta);
-  }
-
-  zoomReset(event) {
-    event.preventDefault();
-    this.setZoom(1);
   }
 
   setZoom(value) {

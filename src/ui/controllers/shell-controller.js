@@ -33,6 +33,7 @@ export function createShellController({
 
   function renderChrome() {
     const started = perfNow();
+    const documentOpen = hasOpenDocument();
     bindExplorerFilter();
     syncDockLayout();
     els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
@@ -44,7 +45,7 @@ export function createShellController({
     }
     if (els.problemsList) els.problemsList.classList.toggle("hidden", state.bottomTab !== "problems");
     if (els.logList) els.logList.classList.toggle("hidden", state.bottomTab !== "log");
-    els.emptyState.classList.toggle("hidden", hasOpenDocument());
+    els.emptyState.classList.toggle("hidden", documentOpen);
     updateGridDiagnostics();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
       button.classList.toggle("active", state.sidebarVisible);
@@ -63,10 +64,12 @@ export function createShellController({
       button.title = state.lint.diagnostics.length ? `Problems (${state.lint.diagnostics.length})` : "Problems";
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
-      button.classList.toggle("active", state.freezeRow);
+      button.disabled = !documentOpen;
+      button.classList.toggle("active", documentOpen && state.freezeRow);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-column']")) {
-      button.classList.toggle("active", state.freezeColumn);
+      button.disabled = !documentOpen;
+      button.classList.toggle("active", documentOpen && state.freezeColumn);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-colorize']")) {
       button.classList.toggle("active", state.colorizeColumns);
