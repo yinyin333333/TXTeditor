@@ -45,6 +45,7 @@
             <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
             <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
             <button data-command="open-app-settings">Settings</button>
+            <button data-command="open-shortcut-settings">Shortcuts</button>
           </section>
           <section id="gridHost" class="grid-host" tabindex="0" aria-label="Virtual table editor">
             <canvas id="gridCanvas"></canvas>
@@ -79,7 +80,7 @@
     <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
       <div class="modal search-modal">
         <h2 id="searchTitle">Find</h2>
-        <input id="searchInput" class="modal-input" placeholder="Search in current table" />
+        <input id="searchInput" class="modal-input" type="search" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
         <fieldset class="search-scope" aria-label="Search scope">
           <label><input type="radio" name="searchScope" value="all" checked /> All cells</label>
           <label><input type="radio" name="searchScope" value="column-titles" /> Column only</label>

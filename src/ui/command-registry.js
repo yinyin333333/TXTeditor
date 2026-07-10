@@ -47,6 +47,7 @@ export const COMMAND_LABELS_BASE = [
   ["toggle-sidebar", "Toggle Explorer"],
   ["toggle-theme", "Toggle Light/Dark Mode"],
   ["open-app-settings", "Settings"],
+  ["open-shortcut-settings", "Keyboard Shortcuts"],
   ["open-settings", "Lint Options"]
 ];
 
@@ -60,6 +61,7 @@ export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
   "open-folder",
   "open-settings",
   "open-app-settings",
+  "open-shortcut-settings",
   "toggle-sidebar",
   "toggle-theme",
   "toggle-colorize",
@@ -124,6 +126,7 @@ const COMMAND_ACTIONS = new Map([
   ["toggle-sidebar", { type: "handler", name: "toggleSidebar" }],
   ["toggle-theme", { type: "handler", name: "toggleTheme" }],
   ["open-app-settings", { type: "handler", name: "showAppSettings" }],
+  ["open-shortcut-settings", { type: "handler", name: "showShortcutSettings" }],
   ["open-settings", { type: "handler", name: "showSettings" }],
   ["go-to-definition", { type: "handler", name: "goToDefinition" }]
 ]);

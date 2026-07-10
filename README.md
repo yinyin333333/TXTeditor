@@ -69,6 +69,8 @@ npm test
 
 ## Shortcuts
 
+The toolbar **Shortcuts** button lets you replace command and grid-scrolling shortcuts or restore each shortcut to its default. Assigning an occupied key moves it to the new command and removes it from the previous command. Changes are applied only after choosing **Save** in the shortcut window; **Cancel** discards them.
+
 - `Ctrl+O`: open file
 - `Ctrl+S`: save
 - `Ctrl+Shift+S`: save as
@@ -87,6 +89,9 @@ npm test
 - `Ctrl+Plus`: zoom in
 - `Ctrl+Minus`: zoom out
 - `Ctrl+0`: reset zoom
+- `PageUp` / `PageDown`: scroll one grid page vertically
+- `Home` / `End`: scroll to the top or bottom of the grid
+- `Shift+Home` / `Shift+End`: scroll to the left or right edge of the grid
 - `Enter` / `F2`: edit cell
 - `Escape`: cancel edit
 - `Tab` / `Shift+Tab`: move horizontally after edit

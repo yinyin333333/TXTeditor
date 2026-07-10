@@ -104,7 +104,12 @@ export function createDocumentController({
       state.active = plan.activeIndex;
       grid.setDocument(activeDoc());
       renderChrome();
+      focusGrid();
       return;
+    }
+    if (!state.docs.length) {
+      state.freezeRow = false;
+      state.freezeColumn = false;
     }
     resetUndoManagerForDocument(doc);
     doc.zoom = 1;
@@ -126,6 +131,7 @@ export function createDocumentController({
     }
     renderChrome();
     scrollProblemsToActiveFile();
+    focusGrid();
     if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
       lspOpenDoc(doc).catch((error) => reportLspOpenFailure(doc, error, "document-open"));
@@ -310,6 +316,8 @@ export function createDocumentController({
     state.docs.splice(index, 1);
     if (!state.docs.length) {
       state.active = -1;
+      state.freezeRow = false;
+      state.freezeColumn = false;
       grid.setDocument(emptyDoc);
     } else {
       state.active = activeIndexAfterTabClose({
@@ -334,6 +342,10 @@ export function createDocumentController({
 
   function commitActiveEdit() {
     grid.commitEdit?.();
+  }
+
+  function focusGrid() {
+    els.host?.focus?.();
   }
 
   async function showOpeningFeedback(message) {

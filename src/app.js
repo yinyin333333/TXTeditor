@@ -45,6 +45,7 @@ import { createLegacyLintController } from "./ui/controllers/legacy-lint-control
 import { createLspController } from "./ui/controllers/lsp-controller.js";
 import { createSearchController } from "./ui/controllers/search-controller.js";
 import { createSettingsController } from "./ui/controllers/settings-controller.js";
+import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
@@ -235,6 +236,13 @@ const settingsController = createSettingsController({
   showError,
   escapeHtml
 });
+const shortcutSettingsController = createShortcutSettingsController({
+  state,
+  els,
+  storage: localStorage,
+  showToast,
+  escapeHtml
+});
 const documentController = createDocumentController({
   state,
   els,
@@ -331,6 +339,7 @@ const commandController = createCommandController({
     toggleSidebar,
     toggleTheme: settingsController.toggleTheme,
     showAppSettings: settingsController.showAppSettings,
+    showShortcutSettings: shortcutSettingsController.showShortcutSettings,
     showSettings: settingsController.showSettings,
     goToDefinition: lspController.goToDefinition,
     loadFixture: documentController.loadFixture,
@@ -388,6 +397,7 @@ const eventController = createAppEventController({
   grid,
   commands,
   documentController,
+  hasOpenDocument,
   searchController,
   syncDockLayout,
   wirePaneResizers,
@@ -410,7 +420,8 @@ const eventController = createAppEventController({
   showPalette,
   copySelection,
   cutSelection,
-  pasteSelection
+  pasteSelection,
+  selectAll
 });
 renderChrome();
 eventController.wireEvents();

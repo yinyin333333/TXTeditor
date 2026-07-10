@@ -443,6 +443,7 @@ test("Explorer search preserves open document tab indexes", () => {
   ];
   const els = {
     shell: document.getElementById("app"),
+    host: document.getElementById("gridHost"),
     ...Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]))
   };
   const controller = createShellController({
@@ -480,6 +481,7 @@ test("Explorer search preserves open document tab indexes", () => {
 
     assert.equal(state.active, 1);
     assert.equal(els.explorerFilter.value, "");
+    assert.equal(document.activeElement, els.host);
   } finally {
     if (originalDocument === undefined) delete globalThis.document;
     else globalThis.document = originalDocument;

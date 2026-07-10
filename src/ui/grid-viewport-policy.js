@@ -103,6 +103,24 @@ export function clampedGridScrollOffsets({
   };
 }
 
+export function wheelScrollOffsets(
+  { deltaX = 0, deltaY = 0, deltaMode = 0, shiftKey = false } = {},
+  { scrollLeft = 0, scrollTop = 0, lineSize = 1, pageWidth = 1, pageHeight = 1 } = {}
+) {
+  const horizontalScale = deltaMode === 1 ? lineSize : deltaMode === 2 ? pageWidth : 1;
+  const verticalScale = deltaMode === 1 ? lineSize : deltaMode === 2 ? pageHeight : 1;
+  let left = (Number(deltaX) || 0) * horizontalScale;
+  let top = (Number(deltaY) || 0) * verticalScale;
+  if (shiftKey && left === 0) {
+    left = top;
+    top = 0;
+  }
+  return {
+    scrollLeft: scrollLeft + left,
+    scrollTop: scrollTop + top
+  };
+}
+
 export function applyGridScrollBounds({ host, doc, rowHeaderWidth, headerHeight, frozenColumnWidth, frozenRowHeight, scrollableColumnWidth, scrollableRowsHeight }) {
   const next = clampedGridScrollOffsets({
     scrollLeft: host.scrollLeft,
