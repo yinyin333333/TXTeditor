@@ -1248,7 +1248,7 @@ test("diagnostic navigation centers the grid cell and active problem item", () =
     "layout",
     ["center", 12, 4],
     "draw",
-    ["active-problem", { scroll: true }],
+    ["active-problem", undefined],
     "focus"
   ]);
 });

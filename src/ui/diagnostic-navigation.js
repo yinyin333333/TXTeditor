@@ -17,7 +17,7 @@ export function finishDiagnosticNavigation({
   const { row, column } = state.selection.focus;
   grid.scrollCellToCenter(row, column);
   grid.draw();
-  updateActiveProblemHighlight({ scroll: true });
+  updateActiveProblemHighlight();
   host?.focus?.();
   return { row, column };
 }

@@ -337,6 +337,13 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     client.notify("textDocument/didOpen", {
       textDocument: { uri: skilldescUri, languageId: "plaintext", version: 1, text: skilldescText }
     });
+    await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === skilldescUri
+      && message.params?.version === 1
+      && Array.isArray(message.params?.diagnostics)
+    ), openStartIndex), timeoutMs, "equivalent didOpen diagnostics");
+    const skillsOpenStartIndex = client.messages.length;
     client.notify("textDocument/didOpen", {
       textDocument: { uri: skillsUri, languageId: "plaintext", version: 1, text: skillsText }
     });
@@ -346,9 +353,17 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       && message.params?.version === 1
       && Array.isArray(message.params?.diagnostics)
       && message.params.diagnostics.length > 0
-    ), openStartIndex), timeoutMs, "diagnostics");
+    ), skillsOpenStartIndex), timeoutMs, "diagnostics");
     if (diagnosticsMessage.params.version !== 1) {
       throw new Error(`didOpen diagnostics were not version 1: ${JSON.stringify(diagnosticsMessage.params.version)}`);
+    }
+    await wait(50);
+    const unrelatedOpenPublishes = client.messages.slice(skillsOpenStartIndex).filter((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri !== skillsUri
+    ));
+    if (unrelatedOpenPublishes.length) {
+      throw new Error(`equivalent didOpen republished unrelated diagnostics: ${JSON.stringify(unrelatedOpenPublishes.map((message) => message.params))}`);
     }
     const hover = await withTimeout(client.request("textDocument/hover", {
       textDocument: { uri: skillsUri },
@@ -441,6 +456,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       startupDiagnostics: startupDiagnostics.params.diagnostics.length,
       diagnostics: diagnosticsMessage.params.diagnostics.length,
       diagnosticsVersion: diagnosticsMessage.params.version,
+      equivalentOpenUnrelatedPublishes: unrelatedOpenPublishes.length,
       hover: "pass",
       definition: "pass",
       editDiagnostics: editDiagnostics.params.diagnostics.length,

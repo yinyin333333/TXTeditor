@@ -232,6 +232,7 @@ export function createLspController({
     recordLspReadiness,
     appendLspLog,
     setLintDiagnostics,
+    updateGridDiagnostics,
     renderChrome,
     renderDiagnosticsChrome,
     markDocHoverReady,
@@ -405,13 +406,9 @@ export function createLspController({
     if (["skip-not-started", "skip-no-uri", "already-open"].includes(policy.action)) return;
     if (policy.action === "reuse-open-promise") return policy.promise;
     clearHoverReadyFallback(doc);
-    const fileKey = uriToFileKey(uri);
-    const nextDiagnostics = state.lint.diagnostics.filter((item) => item.fileKey !== fileKey);
-    if (nextDiagnostics.length !== state.lint.diagnostics.length) {
-      setLintDiagnostics(nextDiagnostics);
-      if (!deferRender) renderDiagnosticsChrome();
-    }
-    Object.assign(docState, { ready: false, opened: false, diagnosticsReady: false, hoverReady: false });
+    const hasExistingDiagnostics = diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
+    Object.assign(docState, { ready: false, opened: false,
+      diagnosticsReady: hasExistingDiagnostics, hoverReady: hasExistingDiagnostics });
     docState.openingUri = uri;
     docState.openingGeneration = generation;
     let trackedPromise;

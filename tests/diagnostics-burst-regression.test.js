@@ -106,10 +106,11 @@ function createBurstHarness({ generation = 7, getter, initialDiagnostics = [] } 
     recordLspTraffic: () => {},
     recordLspReadiness: () => {},
     appendLspLog: () => {},
-    setLintDiagnostics: (diagnostics) => {
-      const next = lintDiagnosticsStateAfterUpdate(state.lint, diagnostics);
-      state.lint.diagnostics = next.diagnostics;
-      state.lint.version = next.version;
+    setLintDiagnostics: (diagnostics, { preserveVersion = false } = {}) => {
+      state.lint.diagnostics = diagnostics;
+      if (!preserveVersion) {
+        state.lint.version = lintDiagnosticsStateAfterUpdate(state.lint, diagnostics).version;
+      }
       counters.commits += 1;
     },
     updateGridDiagnostics,
@@ -130,6 +131,28 @@ function createBurstHarness({ generation = 7, getter, initialDiagnostics = [] } 
     state
   };
 }
+
+test("unchanged versioned diagnostics update metadata without rebuilding Problems", async (context) => {
+  const uri = diagnosticUri(0);
+  const raw = rawDiagnostics(0, 3);
+  const initialDiagnostics = raw.map((diagnostic, index) => mapLspDiagnosticToDisplay(diagnostic, {
+    uri,
+    fileKey: uri,
+    fileName: "file-000.txt",
+    filePath: "/workspace/file-000.txt",
+    index
+  }));
+  const harness = createBurstHarness({ getter: async () => raw, initialDiagnostics });
+  context.after(() => harness.restore());
+
+  await harness.controller.handleDiagnosticsChanged({ uri, generation: 7, version: 1, sequence: 1 });
+
+  assert.equal(harness.state.lint.version, 0);
+  assert.equal(harness.counters.commits, 1);
+  assert.equal(harness.counters.renders, 0);
+  assert.equal(harness.counters.problemsRebuilds, 0);
+  assert.equal(harness.counters.gridUpdates, 1);
+});
 
 function canonicalRaw(uri, diagnostic) {
   return {

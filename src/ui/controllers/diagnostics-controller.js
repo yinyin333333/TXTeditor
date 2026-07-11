@@ -102,7 +102,12 @@ export function createDiagnosticsController({
     });
   }
 
-  function setLintDiagnostics(diagnostics) {
+  function setLintDiagnostics(diagnostics, { preserveVersion = false } = {}) {
+    if (preserveVersion) {
+      state.lint.diagnostics = diagnostics;
+      rebuildDiagnosticIndex();
+      return;
+    }
     const next = lintDiagnosticsStateAfterUpdate(state.lint, diagnostics);
     state.lint.diagnostics = next.diagnostics;
     state.lint.version = next.version;
@@ -175,14 +180,14 @@ export function createDiagnosticsController({
     if (index < 0 && state.lint.engine === LINT_ENGINE_LEGACY) {
       const workspaceDoc = state.lint.legacy.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);
       if (workspaceDoc) {
-        await addDocument(workspaceDoc);
+          await addDocument(workspaceDoc, { scrollProblems: false });
         index = state.active;
       }
     }
     if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
       const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
       if (doc) {
-        await addDocument(doc);
+          await addDocument(doc, { scrollProblems: false });
         index = state.active;
       }
     }

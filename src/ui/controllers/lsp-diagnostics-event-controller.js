@@ -15,6 +15,17 @@ function scheduleUiFlush(callback) {
   queueMicrotask(callback);
 }
 
+export function sameProblemsPresentation(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  const fields = [
+    "id", "fileKey", "fileName", "rowIndex", "columnIndex",
+    "severity", "message", "ruleId", "profile"
+  ];
+  return left.every((diagnostic, index) => fields.every(
+    (field) => (diagnostic?.[field] ?? null) === (right[index]?.[field] ?? null)
+  ));
+}
+
 export function createLspDiagnosticsEventController({
   state,
   activeDoc,
@@ -26,6 +37,7 @@ export function createLspDiagnosticsEventController({
   recordLspReadiness,
   appendLspLog,
   setLintDiagnostics,
+  updateGridDiagnostics = () => {},
   renderChrome,
   renderDiagnosticsChrome = renderChrome,
   markDocHoverReady,
@@ -202,16 +214,29 @@ export function createLspDiagnosticsEventController({
 
     if (replacements.size > 0 && acceptsCurrentSession(generation)) {
       const replacedKeys = new Set(replacements.keys());
+      let presentationChanged = false;
+      for (const [fileKey, { displayDiagnostics }] of replacements) {
+        const currentDiagnostics = state.lint.diagnostics.filter(
+          (diagnostic) => diagnostic.fileKey === fileKey
+        );
+        if (!sameProblemsPresentation(currentDiagnostics, displayDiagnostics)) {
+          presentationChanged = true;
+        }
+      }
       const nextDiagnostics = state.lint.diagnostics.filter(
         (diagnostic) => !replacedKeys.has(diagnostic.fileKey)
       );
       for (const { displayDiagnostics } of replacements.values()) {
         nextDiagnostics.push(...displayDiagnostics);
       }
-      setLintDiagnostics(nextDiagnostics);
+      setLintDiagnostics(nextDiagnostics, { preserveVersion: !presentationChanged });
       performance.commits += 1;
-      renderDiagnosticsChrome();
-      performance.renders += 1;
+      if (presentationChanged) {
+        renderDiagnosticsChrome();
+        performance.renders += 1;
+      } else {
+        updateGridDiagnostics();
+      }
       let prewarmActive = false;
       for (const { doc, uri } of replacements.values()) {
         if (!doc) continue;

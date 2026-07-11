@@ -100,7 +100,7 @@ export function createDocumentController({
     }
   }
 
-  async function addDocument(doc) {
+  async function addDocument(doc, { scrollProblems = true } = {}) {
     const plan = documentOpenPlan(state.docs, doc);
     if (plan.action === "activate-existing") {
       saveSelectionState();
@@ -133,7 +133,7 @@ export function createDocumentController({
       grid.layout();
     }
     renderChrome();
-    scrollProblemsToActiveFile();
+    if (scrollProblems) scrollProblemsToActiveFile();
     focusGrid();
     if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {

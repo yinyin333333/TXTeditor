@@ -596,6 +596,21 @@ test("opening another document saves the outgoing selection and scroll state", a
   assert.equal(document.activeElement, host);
 });
 
+test("diagnostic-driven document open does not reposition the Problems list", async () => {
+  const doc = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
+  let problemsScrolls = 0;
+  const { controller } = testDocumentController([], {
+    autoFitInitialColumns: () => {},
+    layout: () => {}
+  }, {
+    scrollProblemsToActiveFile: () => { problemsScrolls += 1; }
+  });
+
+  await controller.addDocument(doc, { scrollProblems: false });
+
+  assert.equal(problemsScrolls, 0);
+});
+
 test("activating an already-open document saves the outgoing selection and scroll state", async () => {
   const active = TableDocument.fromText("active.txt", "id\nactive", { path: "Data/active.txt" });
   const existing = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
@@ -1379,7 +1394,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
     isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
     updateGridDiagnostics: () => {},
-    scrollProblemsToActiveFile: () => {}
+    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
   });
   return { controller, state, document: hostDocument, host };
 }

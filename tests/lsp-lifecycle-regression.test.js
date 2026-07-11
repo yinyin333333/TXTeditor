@@ -525,7 +525,7 @@ test("didChange diagnostics for the reserved version survive publish-before-invo
   }
 });
 
-test("didOpen immediately shadows cached diagnostics and rejects a stale versionless publish", async () => {
+test("didOpen preserves cached diagnostics while rejecting stale versionless publishes", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nOPEN", { path: "E:\\Data\\items.txt" });
   const uri = docToUri(doc);
@@ -560,12 +560,13 @@ test("didOpen immediately shadows cached diagnostics and rejects a stale version
     }];
 
     openPromise = controller.openDoc(doc);
-    assert.deepEqual(state.lint.diagnostics, []);
+    assert.deepEqual(state.lint.diagnostics.map((diagnostic) => diagnostic.message), ["cached disk"]);
     assert.equal(lspDocumentState(doc).opened, false);
+    assert.equal(lspDocumentState(doc).diagnosticsReady, true);
 
     await controller.handleDiagnosticsChanged({ uri, generation: 8, version: null, sequence: 1 });
     assert.equal(getterCalls, 0);
-    assert.deepEqual(state.lint.diagnostics, []);
+    assert.deepEqual(state.lint.diagnostics.map((diagnostic) => diagnostic.message), ["cached disk"]);
 
     openGate.resolve();
     await openPromise;
@@ -573,7 +574,7 @@ test("didOpen immediately shadows cached diagnostics and rejects a stale version
 
     assert.equal(lspDocumentState(doc).opened, true);
     assert.equal(getterCalls, 0);
-    assert.deepEqual(state.lint.diagnostics, []);
+    assert.deepEqual(state.lint.diagnostics.map((diagnostic) => diagnostic.message), ["cached disk"]);
   } finally {
     openGate.resolve();
     await openPromise?.catch(() => {});
