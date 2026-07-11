@@ -237,8 +237,10 @@ export function createDocumentController({
       return true;
     }
     const revision = tableFileState(doc).revision;
+    const chunks = doc.snapshotTextChunks();
+    const encoding = doc.encoding || "utf-8";
     const writable = await doc.handle.createWritable();
-    await writeDocumentText(writable, doc);
+    await writeDocumentText(writable, chunks, encoding);
     await writable.close();
     markTableSaved(doc, revision);
     await lspRebindSavedDoc(doc, previousUri);
@@ -273,8 +275,10 @@ export function createDocumentController({
     } else if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
       const revision = tableFileState(doc).revision;
+      const chunks = doc.snapshotTextChunks();
+      const encoding = doc.encoding || "utf-8";
       const writable = await handle.createWritable();
-      await writeDocumentText(writable, doc);
+      await writeDocumentText(writable, chunks, encoding);
       await writable.close();
       doc.handle = handle;
       doc.name = handle.name ?? doc.name;
@@ -378,18 +382,19 @@ export function createDocumentController({
     return queued;
   }
 
-  async function writeDocumentText(writable, doc) {
+  async function writeDocumentText(writable, chunks, encoding) {
+    const normalizedEncoding = String(encoding || "utf-8").toLowerCase();
     let first = true;
-    for (const chunk of doc.toTextChunks()) {
-      if ((doc.encoding || "utf-8").toLowerCase() === "utf-8") {
+    for (const chunk of chunks) {
+      if (normalizedEncoding === "utf-8") {
         if (chunk) await writable.write(chunk);
       } else if (chunk || first) {
-        await writable.write(encodeText(chunk, doc.encoding, { includeBom: first }));
+        await writable.write(encodeText(chunk, encoding, { includeBom: first }));
       }
       first = false;
     }
-    if (first && (doc.encoding || "utf-8").toLowerCase() !== "utf-8") {
-      await writable.write(encodeText("", doc.encoding));
+    if (first && normalizedEncoding !== "utf-8") {
+      await writable.write(encodeText("", encoding));
     }
   }
 

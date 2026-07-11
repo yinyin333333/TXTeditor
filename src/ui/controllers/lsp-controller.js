@@ -411,17 +411,19 @@ export function createLspController({
       diagnosticsReady: hasExistingDiagnostics, hoverReady: hasExistingDiagnostics });
     docState.openingUri = uri;
     docState.openingGeneration = generation;
+    const revision = tableFileState(doc).revision;
+    const text = doc.toText();
     let trackedPromise;
     const operation = (async () => {
       recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
       recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
-      await lspOpenFile(uri, version, doc.toText(), generation);
+      await lspOpenFile(uri, version, text, generation);
       if (docState.openPromise !== trackedPromise || state.lsp.generation !== generation
         || !state.lsp.started || docToUri(doc) !== uri) return;
       docState.opened = true;
       docState.openedUri = uri;
       docState.openedVersion = version;
-      docState.syncedRevision = tableFileState(doc).revision;
+      docState.syncedRevision = revision;
       docState.sessionGeneration = generation;
       docState.openingUri = null;
       docState.openingGeneration = 0;
@@ -490,7 +492,6 @@ export function createLspController({
     const version = nextLspDocumentVersion(doc);
     const revision = tableFileState(doc).revision;
     const generation = state.lsp.generation ?? 0;
-    const fullText = doc.toText();
     const incrementalChanges = policy.action === "update-incremental"
       ? lspChangedRowsToIncrementalChanges(doc, policy.change)
       : null;
@@ -507,7 +508,14 @@ export function createLspController({
       if (!docState.opened || docState.openedUri !== uri || docState.sessionGeneration !== generation) {
         await openDoc(doc);
       }
-      if (state.lsp.generation !== generation || !docState.opened || docState.openedUri !== uri) return;
+      if (docState.updatePromise !== trackedPromise || state.lsp.generation !== generation
+        || !state.lsp.started || !docState.opened || docState.openedUri !== uri
+        || docState.sessionGeneration !== generation) return;
+      if (docState.openedVersion >= version && docState.syncedRevision >= revision) {
+        docState.requiresFullSync = false;
+        clearLspUpdateFailureStatus(state, renderChrome);
+        return;
+      }
       const needsFullSync = policy.action !== "update-incremental"
         || docState.requiresFullSync
         || docState.syncedRevision !== revision - 1;
@@ -516,6 +524,7 @@ export function createLspController({
         await lspUpdateFileIncremental(uri, version, incrementalChanges, generation);
       } else {
         recordLspTraffic(uri, "lsp_update_file", { fileName: doc.name, documentVersion: version });
+        const fullText = doc.toText();
         await lspUpdateFile(uri, version, fullText, generation);
       }
       if (docState.updatePromise !== trackedPromise || state.lsp.generation !== generation

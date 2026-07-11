@@ -220,6 +220,55 @@ test("V-TXT-04 native chunk save sends document encoding on every write", async 
   }
 });
 
+test("V-TXT-10 native chunk save serializes one immutable document revision", async () => {
+  const originalWindow = globalThis.window;
+  const text = Array.from({ length: 2505 }, (_, index) => `row-${index}\tvalue-${index}`).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, {
+    path: "E:\\items.txt",
+    dirty: true,
+    encoding: "utf-8"
+  });
+  const expected = doc.toText();
+  const writtenChunks = [];
+  let editedDuringSave = false;
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "write_text_file_chunk_safe");
+          writtenChunks.push(args.text);
+          if (args.first && !editedDuringSave) {
+            editedDuringSave = true;
+            doc.setCell(2200, 0, "EDITED-DURING-SAVE");
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          return args.last ? {
+            path: args.path,
+            name: "items.txt",
+            encoding: args.encoding
+          } : null;
+        }
+      }
+    }
+  };
+
+  try {
+    assert.equal(await saveDocumentNative(doc, false), true);
+    assert.equal(editedDuringSave, true);
+    assert.equal(
+      writtenChunks.join(""),
+      expected,
+      "one save transaction must not mix rows from different document revisions"
+    );
+    assert.equal(doc.getCell(2200, 0), "EDITED-DURING-SAVE");
+    assert.notEqual(doc.toText(), expected);
+    assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("V-TXT-10 native saves to one target serialize whole chunk transactions", async () => {
   const originalWindow = globalThis.window;
   const targetPath = "E:\\shared.txt";

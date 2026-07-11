@@ -165,6 +165,125 @@ test("V-TXT-05 Legacy edits receive one full Vector resync without duplicate did
   }
 });
 
+test("V-TXT-05 first edit on an unopened document is carried by didOpen without an equal-version didChange", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nOLD", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const state = createState(doc);
+  state.lsp = { started: true, generation: 41, openFileCount: 0 };
+  const protocolCalls = [];
+  let serverVersion = null;
+  let serverText = null;
+  resetLspDocumentState(doc);
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          protocolCalls.push([command, args]);
+          if (command === "lsp_open_file") {
+            serverVersion = args.version;
+            serverText = args.text;
+            return;
+          }
+          if (command === "lsp_update_file" || command === "lsp_update_file_incremental") {
+            assert.ok(
+              args.version > serverVersion,
+              `didChange version ${args.version} must be newer than didOpen version ${serverVersion}`
+            );
+            serverVersion = args.version;
+            if (command === "lsp_update_file") serverText = args.text;
+            return;
+          }
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    doc.setCell(1, 0, "NEW");
+
+    await controller.updateDoc(doc, { kind: "replaceRows", rows: [1] });
+
+    const docState = lspDocumentState(doc);
+    assert.deepEqual(
+      protocolCalls.map(([command]) => command),
+      ["lsp_open_file"]
+    );
+    assert.equal(serverText, doc.toText());
+    assert.equal(serverVersion, docState.openedVersion);
+    assert.equal(docState.openedVersion, docState.version);
+    assert.equal(docState.syncedRevision, tableFileState(doc).revision);
+    assert.equal(docState.requiresFullSync, false);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("V-TXT-05 incremental row updates do not serialize the full document", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("items.txt", "id\nOLD", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const uri = docToUri(doc);
+  const state = createState(doc);
+  state.lsp = { started: true, generation: 42, openFileCount: 1 };
+  const initialRevision = tableFileState(doc).revision;
+  const protocolCalls = [];
+  resetLspDocumentState(doc, { version: 1 });
+  Object.assign(lspDocumentState(doc), {
+    opened: true,
+    openedUri: uri,
+    openedVersion: 1,
+    syncedRevision: initialRevision,
+    sessionGeneration: 42
+  });
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          protocolCalls.push([command, args]);
+          assert.equal(command, "lsp_update_file_incremental");
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    doc.setCell(1, 0, "NEW");
+    doc.largeFileMode = true;
+    doc.toText = () => {
+      throw new Error("incremental row update must not serialize the full document");
+    };
+
+    await controller.updateDoc(doc, { kind: "replaceRows", rows: [1] });
+
+    assert.equal(protocolCalls.length, 1);
+    assert.equal(protocolCalls[0][1].version, 2);
+    assert.deepEqual(protocolCalls[0][1].changes, [{
+      range: {
+        start: { line: 1, character: 0 },
+        end: { line: 1, character: 0xFFFFFF }
+      },
+      text: "NEW"
+    }]);
+    assert.equal(lspDocumentState(doc).syncedRevision, tableFileState(doc).revision);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 async function runSaveAsScenario({ initialPath, selectedPath }) {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText(initialPath ? "old.txt" : "Untitled.txt", "id\nNEW", {

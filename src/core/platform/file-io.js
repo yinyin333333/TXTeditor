@@ -69,7 +69,9 @@ export async function saveDocumentNative(doc, saveAs = false) {
     if (!target) return false;
   }
   const revision = tableFileState(doc).revision;
-  const payload = await queueNativeTargetSave(target, () => writeDocumentNative(api.invoke, target, doc));
+  const chunks = doc.snapshotTextChunks();
+  const encoding = doc.encoding;
+  const payload = await queueNativeTargetSave(target, () => writeDocumentNative(api.invoke, target, chunks, encoding));
   applySavedTextPayload(doc, payload, revision);
   return true;
 }
@@ -101,12 +103,12 @@ function perfNow() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
-async function writeDocumentNative(invoke, path, doc) {
+async function writeDocumentNative(invoke, path, chunks, encoding) {
   const transactionId = nextNativeSaveTransactionId();
-  const iterator = doc.toTextChunks()[Symbol.iterator]();
+  const iterator = chunks[Symbol.iterator]();
   let current = iterator.next();
   if (current.done) {
-    return invoke("write_text_file_chunk_safe", { path, text: "", encoding: doc.encoding, transactionId, first: true, last: true });
+    return invoke("write_text_file_chunk_safe", { path, text: "", encoding, transactionId, first: true, last: true });
   }
   let first = true;
   while (!current.done) {
@@ -114,7 +116,7 @@ async function writeDocumentNative(invoke, path, doc) {
     const payload = await invoke("write_text_file_chunk_safe", {
       path,
       text: current.value ?? "",
-      encoding: doc.encoding,
+      encoding,
       transactionId,
       first,
       last: next.done
