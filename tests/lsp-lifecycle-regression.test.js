@@ -1174,3 +1174,94 @@ test("syncOpenDocs coalesces unchanged documents into one diagnostics batch and 
     else globalThis.window = originalWindow;
   }
 });
+
+test("reopening the same URI waits for the in-flight didClose", async () => {
+  const originalWindow = globalThis.window;
+  const closingDoc = TableDocument.fromText("items.txt", "id\nOLD", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const reopenedDoc = TableDocument.fromText("items.txt", "id\nDISK", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const uri = docToUri(closingDoc);
+  const state = createState(reopenedDoc);
+  state.docs = [reopenedDoc];
+  state.lsp = { started: true, generation: 12, openFileCount: 1 };
+  const closeGate = deferred();
+  const closeStarted = deferred();
+  const calls = [];
+  let closePromise;
+  let openPromise;
+
+  resetLspDocumentState(closingDoc, { version: 1 });
+  Object.assign(lspDocumentState(closingDoc), {
+    opened: true,
+    openedUri: uri,
+    openedVersion: 1,
+    syncedRevision: tableFileState(closingDoc).revision,
+    sessionGeneration: 12,
+    ready: true,
+    diagnosticsReady: true,
+    hoverReady: true
+  });
+  resetLspDocumentState(reopenedDoc, { version: 1 });
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_close_file") {
+            closeStarted.resolve();
+            return closeGate.promise;
+          }
+          if (command === "lsp_get_diagnostics_batch") {
+            return args.requests.map(() => null);
+          }
+          if (command === "lsp_open_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, reopenedDoc);
+    closePromise = controller.closeDoc(closingDoc);
+    await closeStarted.promise;
+
+    openPromise = controller.openDoc(reopenedDoc);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls.some(([command]) => command === "lsp_open_file"), false);
+
+    closeGate.resolve();
+    await Promise.all([closePromise, openPromise]);
+
+    const closeIndex = calls.findIndex(([command]) => command === "lsp_close_file");
+    const openIndex = calls.findIndex(([command]) => command === "lsp_open_file");
+    assert.ok(closeIndex >= 0);
+    assert.ok(openIndex > closeIndex);
+    assert.deepEqual({
+      opened: lspDocumentState(reopenedDoc).opened,
+      openedUri: lspDocumentState(reopenedDoc).openedUri,
+      sessionGeneration: lspDocumentState(reopenedDoc).sessionGeneration,
+      openFileCount: state.lsp.openFileCount
+    }, {
+      opened: true,
+      openedUri: uri,
+      sessionGeneration: 12,
+      openFileCount: 1
+    });
+  } finally {
+    closeGate.resolve();
+    await Promise.allSettled([closePromise, openPromise].filter(Boolean));
+    resetLspDocumentState(closingDoc);
+    resetLspDocumentState(reopenedDoc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});

@@ -808,7 +808,7 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
 
   assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 860);
+  assert.ok(lspController.split(/\r?\n/).length <= 900);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);

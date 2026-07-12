@@ -201,6 +201,8 @@ export function createLspController({
   let nextSessionGeneration = Number(state.lsp.generation) || 0;
   const readyGenerations = new Set();
   const stoppedGenerations = new Set();
+  // Prevent didOpen for a URI from overtaking its in-flight didClose.
+  const pendingCloses = new Map();
   const hoverController = createLspHoverController({
     state,
     grid,
@@ -243,6 +245,9 @@ export function createLspController({
   const { handleDiagnosticsChanged } = diagnosticsEventController;
   function uriToFileKey(uri) {
     return uriToFileKeyWithPolicy(uri, lintPathKey);
+  }
+  function pendingCloseKey(uri, generation) {
+    return `${generation}\u001f${uri}`;
   }
   function clearHoverReadyFallback(doc) {
     if (!doc) return;
@@ -415,6 +420,13 @@ export function createLspController({
     const text = doc.toText();
     let trackedPromise;
     const operation = (async () => {
+      if (!state.docs.includes(doc)) return;
+      const pendingClose = pendingCloses.get(pendingCloseKey(uri, generation));
+      if (pendingClose) {
+        await pendingClose;
+        if (docState.openPromise !== trackedPromise || state.lsp.generation !== generation
+          || !state.lsp.started || !state.docs.includes(doc) || docToUri(doc) !== uri) return;
+      }
       recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
       recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
       await lspOpenFile(uri, version, text, generation);
@@ -576,21 +588,32 @@ export function createLspController({
     const uri = uriOverride ?? lspDocumentState(doc).openedUri ?? docToUri(doc);
     if (!uri) return;
     const generation = state.lsp.generation ?? 0;
+    const closeKey = pendingCloseKey(uri, generation);
+    const existingClose = pendingCloses.get(closeKey);
+    if (existingClose) return existingClose;
     const docState = lspDocumentState(doc);
-    await Promise.resolve(docState.openPromise).catch(() => {});
-    await Promise.resolve(docState.updatePromise).catch(() => {});
-    if (state.lsp.generation !== generation || !state.lsp.started) return;
-    recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
-    await lspCloseFile(uri, generation);
-    if (state.lsp.generation !== generation) return;
-    resetLspDocumentState(doc);
-    state.lsp.openFileCount = Math.max(0, (state.lsp.openFileCount ?? 1) - 1);
-    hoverController.clearHoverCacheForUri(uri);
-    hoverController.invalidateHover(false, "file-closed");
-    const fileKey = uriToFileKey(uri);
-    setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
-    updateGridDiagnostics();
-    await handleDiagnosticsChanged(uri);
+    let trackedPromise;
+    const operation = (async () => {
+      await Promise.resolve(docState.openPromise).catch(() => {});
+      await Promise.resolve(docState.updatePromise).catch(() => {});
+      if (state.lsp.generation !== generation || !state.lsp.started) return;
+      recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
+      await lspCloseFile(uri, generation);
+      if (state.lsp.generation !== generation) return;
+      resetLspDocumentState(doc);
+      state.lsp.openFileCount = Math.max(0, (state.lsp.openFileCount ?? 1) - 1);
+      hoverController.clearHoverCacheForUri(uri);
+      hoverController.invalidateHover(false, "file-closed");
+      const fileKey = uriToFileKey(uri);
+      setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
+      updateGridDiagnostics();
+      await handleDiagnosticsChanged(uri);
+    })();
+    trackedPromise = operation.finally(() => {
+      if (pendingCloses.get(closeKey) === trackedPromise) pendingCloses.delete(closeKey);
+    });
+    pendingCloses.set(closeKey, trackedPromise);
+    return trackedPromise;
   }
 
   async function rebindSavedDoc(doc, previousUri, { deferRender = false, expectedGeneration = null } = {}) {
