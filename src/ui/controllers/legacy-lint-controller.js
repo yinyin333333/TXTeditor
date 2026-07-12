@@ -211,16 +211,21 @@ export function createLegacyLintController({
     const docs = [];
     const fileStates = [];
     const readStarted = perfNow();
-    const results = await openNativePathsBulk(explorerFiles.map((file) => file.path), TableDocument);
+    const results = await openNativePathsBulk(
+      explorerFiles.map((file) => file.path),
+      TableDocument,
+      null,
+      { shouldContinue: () => legacyLintDisplayActive() && version === state.lint.legacy.version }
+    );
     const readAndParseMs = elapsedMs(readStarted);
-    const workspaceParseMs = results.reduce((total, result) => total + (result.parseMs ?? 0), 0);
+    const workspaceParseMs = results.reduce((total, result) => total + (result?.parseMs ?? 0), 0);
     for (let index = 0; index < explorerFiles.length; index += 1) {
       if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) {
         return {
           workspaceFileCount: explorerFiles.length,
           workspaceReadMs: Math.max(0, readAndParseMs - workspaceParseMs),
           workspaceParseMs,
-          bulkRead: results.some((result) => result.bulkRead),
+          bulkRead: results.some((result) => result?.bulkRead),
           usedWorkspaceCache: false,
           workspaceRenderMs
         };
@@ -243,7 +248,7 @@ export function createLegacyLintController({
         workspaceFileCount: explorerFiles.length,
         workspaceReadMs: Math.max(0, readAndParseMs - workspaceParseMs),
         workspaceParseMs,
-        bulkRead: results.some((result) => result.bulkRead),
+        bulkRead: results.some((result) => result?.bulkRead),
         usedWorkspaceCache: false,
         workspaceRenderMs
       };
@@ -255,7 +260,7 @@ export function createLegacyLintController({
       workspaceFileCount: explorerFiles.length,
       workspaceReadMs: Math.max(0, readAndParseMs - workspaceParseMs),
       workspaceParseMs,
-      bulkRead: results.some((result) => result.bulkRead),
+      bulkRead: results.some((result) => result?.bulkRead),
       usedWorkspaceCache: false,
       workspaceRenderMs
     };

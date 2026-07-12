@@ -7,9 +7,15 @@ function createLspDocumentState() {
     opened: false,
     diagnosticsReady: false,
     hoverReady: false,
+    openingUri: null,
+    openingGeneration: 0,
     openedUri: null,
     openedVersion: null,
+    syncedRevision: null,
+    sessionGeneration: 0,
     openPromise: null,
+    updatePromise: null,
+    requiresFullSync: false,
     hoverReadyTimer: null,
     fullUpdateTimer: null
   };

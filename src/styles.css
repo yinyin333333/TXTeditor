@@ -1609,6 +1609,119 @@ details:not([open]) .problem-file-header::before {
   width: min(520px, calc(100vw - 32px));
 }
 
+.shortcut-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcut-settings-hint {
+  margin: 4px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-settings-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-1);
+}
+
+.shortcut-group h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-3);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(190px, 1.2fr) 64px;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.shortcut-group:last-child .shortcut-row:last-child {
+  border-bottom: 0;
+}
+
+.shortcut-command-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-capture,
+.shortcut-default {
+  height: 30px;
+  border: 1px solid var(--button-border);
+  border-radius: 5px;
+  background: var(--button-bg);
+  color: var(--text);
+}
+
+.shortcut-capture {
+  padding: 0 10px;
+  overflow: hidden;
+  font-family: var(--grid-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-capture.recording {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  color: var(--text-strong);
+}
+
+.shortcut-row-message {
+  grid-column: 1 / -1;
+  margin: -1px 0 3px;
+  color: var(--warningText, #d7a56d);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.toolbar button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.shortcut-modal-actions {
+  align-items: center;
+  flex: 0 0 auto;
+  padding-top: 10px;
+}
+
+.shortcut-actions-spacer {
+  flex: 1;
+}
+
+@media (max-width: 620px) {
+  .shortcut-row {
+    grid-template-columns: 1fr 64px;
+  }
+
+  .shortcut-command-label {
+    grid-column: 1 / -1;
+  }
+}
+
 .settings-stack {
   display: grid;
   gap: 12px;

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::ChildStdin;
@@ -196,33 +197,57 @@ fn utf16_offset_to_byte_index(line: &str, utf16_offset: u32) -> usize {
     line.len()
 }
 
-fn cell_bounds_for_utf16_offset(line: &str, utf16_offset: u32) -> (u32, u32, u32) {
-    let mut col = 0u32;
-    let mut cell_start = 0u32;
-    let mut offset = 0u32;
-    for ch in line.chars() {
-        if ch == '\t' {
-            if utf16_offset <= offset {
-                return (col, cell_start, offset);
+struct LineCellBoundaries {
+    tabs: Vec<u32>,
+    line_end: u32,
+}
+
+impl LineCellBoundaries {
+    fn new(line: &str) -> Self {
+        let mut tabs = Vec::new();
+        let mut offset = 0u32;
+        for ch in line.chars() {
+            if ch == '\t' {
+                tabs.push(offset);
             }
-            col = col.saturating_add(1);
-            cell_start = offset.saturating_add(1);
+            offset = offset.saturating_add(ch.len_utf16() as u32);
         }
-        offset = offset.saturating_add(ch.len_utf16() as u32);
+        Self {
+            tabs,
+            line_end: offset,
+        }
     }
-    (col, cell_start.min(offset), offset)
+
+    fn cell_bounds(&self, utf16_offset: u32) -> (u32, u32, u32) {
+        let col = self.tabs.partition_point(|tab| *tab < utf16_offset);
+        if let Some(cell_end) = self.tabs.get(col).copied() {
+            let cell_start = col
+                .checked_sub(1)
+                .and_then(|previous| self.tabs.get(previous))
+                .map_or(0, |tab| tab.saturating_add(1));
+            return (col as u32, cell_start.min(cell_end), cell_end);
+        }
+        let cell_start = self.tabs.last().map_or(0, |tab| tab.saturating_add(1));
+        (col as u32, cell_start.min(self.line_end), self.line_end)
+    }
 }
 
 pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> Vec<LspDiagnostic> {
+    let mut boundaries_by_line = HashMap::<u32, Option<LineCellBoundaries>>::new();
     raw.iter()
         .filter_map(|d| {
             let line = json_u32(&d["range"]["start"]["line"])?;
             let start_character = json_u32(&d["range"]["start"]["character"])?;
             let end_character =
                 json_u32(&d["range"]["end"]["character"]).unwrap_or(start_character);
-            let (col, cell_start_character, cell_end_character) = lines
-                .get(line as usize)
-                .map(|l| cell_bounds_for_utf16_offset(l, start_character))
+            let boundaries = boundaries_by_line.entry(line).or_insert_with(|| {
+                lines
+                    .get(line as usize)
+                    .map(|line| LineCellBoundaries::new(line))
+            });
+            let (col, cell_start_character, cell_end_character) = boundaries
+                .as_ref()
+                .map(|boundaries| boundaries.cell_bounds(start_character))
                 .unwrap_or((0, 0, 0));
             let severity = match d["severity"].as_u64().unwrap_or(2) {
                 1 => "error",
@@ -520,6 +545,72 @@ mod tests {
                     code: Some("hint".to_string()),
                     data: None,
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn repeated_same_row_ranges_match_individual_conversion() {
+        let line = "한글\tcalc\t🙂alpha\tomega".to_string();
+        let raw = vec![
+            serde_json::json!({
+                "range": {
+                    "start": { "line": 0, "character": utf16_len("한") },
+                    "end": { "line": 0, "character": utf16_len("한글") }
+                },
+                "message": "first cell"
+            }),
+            serde_json::json!({
+                "range": {
+                    "start": { "line": 0, "character": utf16_len("한글") },
+                    "end": { "line": 0, "character": utf16_len("한글") }
+                },
+                "message": "zero width at tab boundary"
+            }),
+            serde_json::json!({
+                "range": {
+                    "start": { "line": 0, "character": utf16_len("한글\tcalc\t🙂") },
+                    "end": { "line": 0, "character": utf16_len("한글\tcalc\t🙂a") }
+                },
+                "message": "after surrogate pair"
+            }),
+            serde_json::json!({
+                "range": {
+                    "start": { "line": 0, "character": utf16_len("한글\tcalc\t🙂alpha\t") },
+                    "end": { "line": 0, "character": utf16_len("한글\tcalc\t🙂alpha\to") }
+                },
+                "message": "last cell"
+            }),
+        ];
+        let lines = [line.clone()];
+
+        let converted_together = diagnostics_from_lsp_publish(&raw, &lines);
+        let converted_individually = raw
+            .iter()
+            .flat_map(|diagnostic| {
+                diagnostics_from_lsp_publish(std::slice::from_ref(diagnostic), &lines)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(converted_together, converted_individually);
+        assert_eq!(
+            converted_together
+                .iter()
+                .map(|diagnostic| (
+                    diagnostic.col,
+                    diagnostic.cell_start_character,
+                    diagnostic.cell_end_character,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, 0, utf16_len("한글")),
+                (0, 0, utf16_len("한글")),
+                (
+                    2,
+                    utf16_len("한글\tcalc\t"),
+                    utf16_len("한글\tcalc\t🙂alpha"),
+                ),
+                (3, utf16_len("한글\tcalc\t🙂alpha\t"), utf16_len(&line),),
             ]
         );
     }

@@ -9,6 +9,30 @@ export function lspOpenDocumentPolicy({ vectorEngine, lspStarted, uri, docState,
   return { action: "open" };
 }
 
+export function lspWorkspaceSessionPolicy({
+  started,
+  activeWorkspacePath,
+  requestedWorkspacePath,
+  forceRestart = false
+}) {
+  const activeKey = lspWorkspaceKey(activeWorkspacePath);
+  const requestedKey = lspWorkspaceKey(requestedWorkspacePath);
+  if (!started) return { action: "start", activeKey, requestedKey };
+  if (forceRestart || activeKey !== requestedKey) return { action: "restart", activeKey, requestedKey };
+  return { action: "sync", activeKey, requestedKey };
+}
+
+export function lspWorkspaceKey(pathValue) {
+  let normalized = String(pathValue || "").trim().replace(/\\/g, "/");
+  const unc = normalized.startsWith("//");
+  if (unc) normalized = normalized.slice(2);
+  normalized = normalized.replace(/\/{2,}/g, "/");
+  if (normalized.endsWith("/") && !/^[a-zA-Z]:\/$/.test(normalized) && normalized !== "/") {
+    normalized = normalized.slice(0, -1);
+  }
+  return `${unc ? "//" : ""}${normalized}`.toLowerCase();
+}
+
 export function lspUpdateDocumentPolicy({ vectorEngine, lspStarted, uri, changedRows }) {
   if (!vectorEngine) return { action: "skip-legacy", event: "vector-update-skipped-legacy" };
   if (!lspStarted) return { action: "skip-not-started" };
@@ -51,6 +75,8 @@ export function lspChangedRowsToIncrementalChanges(doc, changedRows) {
   const rows = normalizeLspDocumentChange(changedRows).rows ?? [];
   return rows.map((row) => ({
     range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
-    text: doc.rows[row]?.join("\t") ?? ""
+    text: typeof doc.toRowText === "function"
+      ? doc.toRowText(row)
+      : doc.rows[row]?.join("\t") ?? ""
   }));
 }

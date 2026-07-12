@@ -42,7 +42,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     Object.assign(state.search, searchStateAfterFind(query, scope));
     state.selection.set(target.row, target.column);
     saveSelectionState();
-    grid.scrollCellIntoView(target.row, target.column, searchScrollOptionsForScope(scope));
+    grid.scrollCellToCenter(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();
     els.searchStatus.textContent = searchStatusText(scope, found, target);
@@ -75,6 +75,11 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     els.searchPanel.addEventListener("click", (event) => {
       if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();
     });
+    els.searchPanel.addEventListener("wheel", (event) => {
+      if (event.ctrlKey) return;
+      event.preventDefault();
+      grid.scrollByWheel(event);
+    }, { passive: false });
   }
 
   return {

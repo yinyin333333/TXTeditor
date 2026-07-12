@@ -30,6 +30,7 @@ pub fn run() {
             lsp_service::lsp_update_file_incremental,
             lsp_service::lsp_close_file,
             lsp_service::lsp_get_diagnostics,
+            lsp_service::lsp_get_diagnostics_batch,
             lsp_service::lsp_hover,
             lsp_service::lsp_definition,
             app_bootstrap::close_window,

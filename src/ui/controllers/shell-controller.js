@@ -15,6 +15,7 @@ export function createShellController({
   docDiagnosticSeverity,
   lintSummaryText,
   problemBadgeForPath,
+  problemBadgeCountForPath,
   lintNotificationCount,
   renderLintControls,
   syncDockLayout,
@@ -31,8 +32,55 @@ export function createShellController({
   const collapsedFileGroups = new Set();
   let explorerSearchActiveIndex = 0;
 
+  function updateDiagnosticIndicators({ fileBadges = false } = {}) {
+    updateGridDiagnostics();
+    for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
+      const count = lintNotificationCount();
+      if (count) {
+        button.dataset.badge = String(count);
+        button.title = `Explorer (${count} problems)`;
+      } else {
+        delete button.dataset.badge;
+        button.title = "Explorer";
+      }
+    }
+    for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
+      button.textContent = "P";
+      button.title = state.lint.diagnostics.length ? `Problems (${state.lint.diagnostics.length})` : "Problems";
+    }
+    if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
+    if (fileBadges) updateFileProblemBadges();
+  }
+
+  function updateFileProblemBadges() {
+    if (!els.fileList) return;
+    for (const button of els.fileList.querySelectorAll("[data-problem-path], [data-open-path]")) {
+      const path = button.dataset.problemPath ?? button.dataset.openPath;
+      const count = problemBadgeCountForPath(path);
+      let badge = button.querySelector(".file-problem-badge");
+      if (!count) {
+        badge?.remove();
+        continue;
+      }
+      if (!badge) {
+        badge = documentRef.createElement("span");
+        badge.className = "file-problem-badge";
+        button.append(" ", badge);
+      }
+      badge.textContent = String(count);
+    }
+  }
+
+  function renderDiagnosticsChrome() {
+    const started = perfNow();
+    updateDiagnosticIndicators({ fileBadges: true });
+    renderProblemsPanelIfNeeded();
+    recordUiPerf("render-chrome", started, { docs: state.docs.length, diagnosticsOnly: true });
+  }
+
   function renderChrome() {
     const started = perfNow();
+    const documentOpen = hasOpenDocument();
     bindExplorerFilter();
     syncDockLayout();
     els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
@@ -44,29 +92,21 @@ export function createShellController({
     }
     if (els.problemsList) els.problemsList.classList.toggle("hidden", state.bottomTab !== "problems");
     if (els.logList) els.logList.classList.toggle("hidden", state.bottomTab !== "log");
-    els.emptyState.classList.toggle("hidden", hasOpenDocument());
-    updateGridDiagnostics();
+    els.emptyState.classList.toggle("hidden", documentOpen);
+    updateDiagnosticIndicators();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
       button.classList.toggle("active", state.sidebarVisible);
-      const count = lintNotificationCount();
-      if (count) {
-        button.dataset.badge = String(count);
-        button.title = `Explorer (${count} problems)`;
-      } else {
-        delete button.dataset.badge;
-        button.title = "Explorer";
-      }
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
-      button.textContent = "P";
-      button.title = state.lint.diagnostics.length ? `Problems (${state.lint.diagnostics.length})` : "Problems";
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
-      button.classList.toggle("active", state.freezeRow);
+      button.disabled = !documentOpen;
+      button.classList.toggle("active", documentOpen && state.freezeRow);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-column']")) {
-      button.classList.toggle("active", state.freezeColumn);
+      button.disabled = !documentOpen;
+      button.classList.toggle("active", documentOpen && state.freezeColumn);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-colorize']")) {
       button.classList.toggle("active", state.colorizeColumns);
@@ -80,7 +120,6 @@ export function createShellController({
       button.textContent = state.theme === "dark" ? "Light Mode" : "Dark Mode";
       button.classList.remove("active");
     }
-    if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
     syncProblemsHeaderLayout();
     els.tabs.innerHTML = state.docs
       .map((doc, index) => {
@@ -98,7 +137,7 @@ export function createShellController({
       problemBadgeForPath
     });
     els.fileList.innerHTML = state.docs
-      .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
+      .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
       .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
     renderProblemsPanelIfNeeded();
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
@@ -136,6 +175,7 @@ export function createShellController({
     renderChrome();
     scrollProblemsToActiveFile();
     scheduleHoverPrewarm("tab-switch");
+    els.host?.focus?.();
   }
 
   function bindExplorerFilter() {
@@ -218,6 +258,7 @@ export function createShellController({
 
   return {
     collapsedFileGroups,
+    renderDiagnosticsChrome,
     renderChrome
   };
 }

@@ -483,6 +483,8 @@ test("lint diagnostic and path helpers are split behind stable facade exports", 
     { fileKey: "excel/skills.txt", rowIndex: 1, columnIndex: 3 }
   ];
   assert.equal(lintNormalizePath("Excel\\Armor.TXT"), "excel/armor.txt");
+  assert.equal(lintNormalizePath("\\\\?\\E:\\Data\\Armor.TXT"), "e:/data/armor.txt");
+  assert.equal(lintNormalizePath("\\\\?\\UNC\\Server\\Share\\Armor.TXT"), "//server/share/armor.txt");
   assert.equal(lintBaseName("Excel\\Armor.TXT"), "Armor.TXT");
   assert.equal(lintDocumentKey(doc), "excel/armor.txt");
   assert.deepEqual([...groupDiagnosticsByCellDirect(diagnostics).keys()], ["2:0", "1:3"]);
@@ -1246,7 +1248,7 @@ test("diagnostic navigation centers the grid cell and active problem item", () =
     "layout",
     ["center", 12, 4],
     "draw",
-    ["active-problem", { scroll: true }],
+    ["active-problem", undefined],
     "focus"
   ]);
 });

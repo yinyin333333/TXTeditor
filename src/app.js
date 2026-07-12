@@ -7,6 +7,7 @@ import {
 import {
   exposeTxteditorPerf
 } from "./core/perf-instrumentation.js";
+import { normalizePath as lintPathKey } from "./core/lint-paths.js";
 import {
   documentChangeSyncRoute,
   effectiveVectorLspHover,
@@ -45,6 +46,7 @@ import { createLegacyLintController } from "./ui/controllers/legacy-lint-control
 import { createLspController } from "./ui/controllers/lsp-controller.js";
 import { createSearchController } from "./ui/controllers/search-controller.js";
 import { createSettingsController } from "./ui/controllers/settings-controller.js";
+import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
@@ -199,6 +201,7 @@ lspController = createLspController({
   setLintDiagnostics,
   updateGridDiagnostics,
   renderChrome,
+  renderDiagnosticsChrome,
   addDocument,
   applyFreezeToDoc,
   updateActiveProblemHighlight,
@@ -235,6 +238,13 @@ const settingsController = createSettingsController({
   showError,
   escapeHtml
 });
+const shortcutSettingsController = createShortcutSettingsController({
+  state,
+  els,
+  storage: localStorage,
+  showToast,
+  escapeHtml
+});
 const documentController = createDocumentController({
   state,
   els,
@@ -250,6 +260,7 @@ const documentController = createDocumentController({
   reportLspOpenFailure,
   lspCloseDoc,
   reportLspCloseFailure,
+  lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
   lspStartWorkspace,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -331,6 +342,7 @@ const commandController = createCommandController({
     toggleSidebar,
     toggleTheme: settingsController.toggleTheme,
     showAppSettings: settingsController.showAppSettings,
+    showShortcutSettings: shortcutSettingsController.showShortcutSettings,
     showSettings: settingsController.showSettings,
     goToDefinition: lspController.goToDefinition,
     loadFixture: documentController.loadFixture,
@@ -370,6 +382,7 @@ shellController = createShellController({
   docDiagnosticSeverity,
   lintSummaryText,
   problemBadgeForPath,
+  problemBadgeCountForPath,
   lintNotificationCount,
   renderLintControls,
   syncDockLayout,
@@ -388,6 +401,7 @@ const eventController = createAppEventController({
   grid,
   commands,
   documentController,
+  hasOpenDocument,
   searchController,
   syncDockLayout,
   wirePaneResizers,
@@ -410,7 +424,8 @@ const eventController = createAppEventController({
   showPalette,
   copySelection,
   cutSelection,
-  pasteSelection
+  pasteSelection,
+  selectAll
 });
 renderChrome();
 eventController.wireEvents();
@@ -548,8 +563,8 @@ function reportWindowCloseFailure(error, context) {
   return lspController.reportWindowCloseFailure(error, context);
 }
 
-async function lspStartWorkspace(workspacePath) {
-  return lspController.startWorkspace(workspacePath);
+async function lspStartWorkspace(workspacePath, options) {
+  return lspController.startWorkspace(workspacePath, options);
 }
 
 async function syncOpenDocsToVectorLsp() {
@@ -572,8 +587,8 @@ function handleLspUpdateError(doc, error, context) {
   return lspController.handleUpdateError(doc, error, context);
 }
 
-async function lspCloseDoc(doc) {
-  return lspController.closeDoc(doc);
+async function lspCloseDoc(doc, options) {
+  return lspController.closeDoc(doc, options);
 }
 
 function reportLspCloseFailure(doc, error, context) {
@@ -645,6 +660,10 @@ function renderChrome() {
   return shellController.renderChrome();
 }
 
+function renderDiagnosticsChrome() {
+  return shellController.renderChrome();
+}
+
 function renderProblemsPanelIfNeeded() {
   return diagnosticsController.renderProblemsPanelIfNeeded();
 }
@@ -659,6 +678,10 @@ function lintSummaryText() {
 
 function problemBadgeForPath(path) {
   return diagnosticsController.problemBadgeForPath(path);
+}
+
+function problemBadgeCountForPath(path) {
+  return diagnosticsController.problemBadgeCountForPath(path);
 }
 
 function lintNotificationCount() {
@@ -694,8 +717,4 @@ function columnsForColumnOperation() { return columnRangesFromRanges(state.selec
 
 function lintDocKey(doc) {
   return lintPathKey(doc?.path || doc?.name || "");
-}
-
-function lintPathKey(path) {
-  return String(path || "").replace(/\\/g, "/").toLowerCase();
 }

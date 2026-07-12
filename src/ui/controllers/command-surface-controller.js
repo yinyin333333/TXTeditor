@@ -10,6 +10,7 @@ import {
   contextMenuHiddenState,
   contextMenuOpenTransition
 } from "../context-menu-policy.js";
+import { shortcutDisplayForAction } from "../shortcut-policy.js";
 
 export function createCommandSurfaceController({
   state,
@@ -60,9 +61,9 @@ export function createCommandSurfaceController({
       { type: "submenu", label: "Fill", items: fillCommandItems() },
       { type: "submenu", label: "Math", items: mathCommandItems() },
       { id: "go-to-definition", label: "Go To Definition", disabled: !cellHasReference(focusRow, focusCol) },
-      { id: "cut", label: "Cut", shortcut: "Ctrl+X" },
-      { id: "copy", label: "Copy", shortcut: "Ctrl+C" },
-      { id: "paste", label: "Paste", shortcut: "Ctrl+V" }
+      { id: "cut", label: "Cut", shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
+      { id: "copy", label: "Copy", shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
+      { id: "paste", label: "Paste", shortcut: shortcutDisplayForAction("paste", state.shortcuts) }
     ];
     els.contextMenu.innerHTML = entries.map(menuEntry).join("");
     for (const button of els.contextMenu.querySelectorAll("button[data-run]")) {

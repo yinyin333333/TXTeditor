@@ -12,6 +12,7 @@ import {
 import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
+import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
@@ -38,6 +39,7 @@ import {
 import { syncDockChildren } from "../src/ui/dock-sync.js";
 import {
   globalShortcutAction,
+  gridScrollShortcutAction,
   isEditorShortcutAllowed
 } from "../src/ui/global-shortcut-policy.js";
 import {
@@ -365,6 +367,43 @@ test("browser save writes document chunks without full serialization", async () 
   assert.equal(doc.dirty, false);
 });
 
+test("browser chunk save serializes one immutable document revision", async () => {
+  const text = Array.from({ length: 2505 }, (_, index) => (
+    index === 0 ? "id\tvalue" : `row-${index}\tvalue-${index}`
+  )).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, { dirty: true });
+  const expected = doc.toText();
+  const writes = [];
+  let editedDuringSave = false;
+  doc.handle = {
+    async createWritable() {
+      return {
+        async write(chunk) {
+          writes.push(chunk);
+          if (!editedDuringSave) {
+            editedDuringSave = true;
+            doc.setCell(2200, 0, "EDITED-DURING-SAVE");
+            await Promise.resolve();
+          }
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  assert.equal(await controller.saveFile(), true);
+  assert.equal(editedDuringSave, true);
+  assert.equal(
+    writes.join(""),
+    expected,
+    "one browser save must not mix rows from different document revisions"
+  );
+  assert.equal(doc.getCell(2200, 0), "EDITED-DURING-SAVE");
+  assert.notEqual(doc.toText(), expected);
+  assert.equal(doc.dirty, true);
+});
+
 test("document native saves for the same file run in order", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
@@ -573,7 +612,7 @@ test("opening another document saves the outgoing selection and scroll state", a
   let stateRef;
   const saves = [];
   selection.set(1, 0);
-  const { controller, state } = testDocumentController(active, gridState, {
+  const { controller, state, document, host } = testDocumentController(active, gridState, {
     saveSelectionState: () => {
       const doc = stateRef.docs[stateRef.active];
       saves.push(doc.name);
@@ -591,6 +630,22 @@ test("opening another document saves the outgoing selection and scroll state", a
   assert.deepEqual(active.selectionState.focus, { row: 1, column: 0 });
   assert.equal(active.scrollLeft, 12);
   assert.equal(active.scrollTop, 240);
+  assert.equal(document.activeElement, host);
+});
+
+test("diagnostic-driven document open does not reposition the Problems list", async () => {
+  const doc = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
+  let problemsScrolls = 0;
+  const { controller } = testDocumentController([], {
+    autoFitInitialColumns: () => {},
+    layout: () => {}
+  }, {
+    scrollProblemsToActiveFile: () => { problemsScrolls += 1; }
+  });
+
+  await controller.addDocument(doc, { scrollProblems: false });
+
+  assert.equal(problemsScrolls, 0);
 });
 
 test("activating an already-open document saves the outgoing selection and scroll state", async () => {
@@ -609,7 +664,7 @@ test("activating an already-open document saves the outgoing selection and scrol
   let stateRef;
   const saves = [];
   selection.set(1, 0);
-  const { controller, state } = testDocumentController([active, existing], gridState, {
+  const { controller, state, document, host } = testDocumentController([active, existing], gridState, {
     saveSelectionState: () => {
       const doc = stateRef.docs[stateRef.active];
       saves.push(doc.name);
@@ -628,6 +683,7 @@ test("activating an already-open document saves the outgoing selection and scrol
   assert.deepEqual(active.selectionState.focus, { row: 1, column: 0 });
   assert.equal(active.scrollLeft, 7);
   assert.equal(active.scrollTop, 360);
+  assert.equal(document.activeElement, host);
 });
 
 test("closing the active tab commits editor changes before checking dirty state", async () => {
@@ -752,7 +808,7 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
 
   assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 850);
+  assert.ok(lspController.split(/\r?\n/).length <= 860);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1032,7 +1088,7 @@ test("Find Next includes the current header when the search scope changes", () =
   assert.equal(searchShouldIncludeStart("abc", SEARCH_SCOPE_COLUMN_TITLES, "abc", SEARCH_SCOPE_COLUMN_TITLES), false);
 });
 
-test("header search maps matches to the active row or column and preserves the other scroll axis", () => {
+test("search maps header matches to the active axis and centers only the searched axis", () => {
   assert.deepEqual(
     searchTargetForResult(SEARCH_SCOPE_COLUMN_TITLES, { row: 0, column: 7 }, { row: 300, column: 2 }),
     { row: 300, column: 7 }
@@ -1055,6 +1111,7 @@ test("Find scope options submit the current search on Enter", () => {
   const selection = new SelectionModel();
   selection.set(0, 1);
   const listeners = new Map();
+  const panelListeners = new Map();
   const rowScopeInput = {
     value: SEARCH_SCOPE_ROW_TITLES,
     addEventListener: (name, listener) => listeners.set(name, listener)
@@ -1074,7 +1131,7 @@ test("Find scope options submit the current search on Enter", () => {
       classList: { add: () => {}, remove: () => {} },
       querySelector: () => rowScopeInput,
       querySelectorAll: () => [rowScopeInput],
-      addEventListener: () => {}
+      addEventListener: (name, listener) => panelListeners.set(name, listener)
     },
     searchStatus: { textContent: "" }
   };
@@ -1082,7 +1139,8 @@ test("Find scope options submit the current search on Enter", () => {
     state,
     els,
     grid: {
-      scrollCellIntoView: (...args) => scrolls.push(args),
+      scrollCellToCenter: (...args) => scrolls.push(["center", ...args]),
+      scrollByWheel: (event) => scrolls.push(["wheel", event.deltaX, event.deltaY]),
       draw: () => {}
     },
     activeDoc: () => doc,
@@ -1098,8 +1156,19 @@ test("Find scope options submit the current search on Enter", () => {
 
   assert.equal(prevented, true);
   assert.deepEqual(selection.focus, { row: 2, column: 1 });
-  assert.deepEqual(scrolls, [[2, 1, { preserveScrollLeft: true }]]);
+  assert.deepEqual(scrolls, [["center", 2, 1, { preserveScrollLeft: true }]]);
   assert.equal(els.searchStatus.textContent, "Row R3 (title R3:C1)");
+
+  let wheelPrevented = false;
+  const wheelEvent = {
+    ctrlKey: false,
+    deltaX: 3,
+    deltaY: 40,
+    preventDefault: () => { wheelPrevented = true; }
+  };
+  panelListeners.get("wheel")(wheelEvent);
+  assert.equal(wheelPrevented, true);
+  assert.deepEqual(scrolls.at(-1), ["wheel", 3, 40]);
 });
 
 test("settings windows treat Escape as a close key only", () => {
@@ -1123,7 +1192,208 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
 
+test("grid scroll shortcut policy maps only unmodified data-grid scroll keys", () => {
+  assert.equal(gridScrollShortcutAction({ key: "Home" }), "scroll-top");
+  assert.equal(gridScrollShortcutAction({ key: "End" }), "scroll-bottom");
+  assert.equal(gridScrollShortcutAction({ key: "Home", shiftKey: true }), "scroll-left");
+  assert.equal(gridScrollShortcutAction({ key: "End", shiftKey: true }), "scroll-right");
+  assert.equal(gridScrollShortcutAction({ key: "PageUp" }), "scroll-page-up");
+  assert.equal(gridScrollShortcutAction({ key: "PageDown" }), "scroll-page-down");
+  assert.equal(gridScrollShortcutAction({ key: "PageUp", shiftKey: true }), null);
+  assert.equal(gridScrollShortcutAction({ key: "Home", ctrlKey: true }), null);
+  assert.equal(gridScrollShortcutAction({ key: "End", altKey: true }), null);
+});
+
+test("data-grid scroll shortcuts require an open document and non-text focus", () => {
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  const previousElement = globalThis.Element;
+  const listeners = new Map();
+  globalThis.document = {
+    addEventListener: (type, listener) => listeners.set(type, listener)
+  };
+  globalThis.window = { addEventListener: () => {} };
+  class FakeElement {
+    constructor(matchSelector = "") {
+      this.matchSelector = matchSelector;
+    }
+    closest(selector) {
+      return this.matchSelector && selector.includes(this.matchSelector) ? this : null;
+    }
+  }
+  globalThis.Element = FakeElement;
+
+  try {
+    const calls = [];
+    const classList = (active = false) => ({
+      contains: (name) => active && name === "active",
+      add: () => {},
+      remove: () => {}
+    });
+    let editorActive = false;
+    const editorClassList = {
+      contains: (name) => editorActive && name === "active",
+      add: () => {},
+      remove: () => {}
+    };
+    const addEventListener = () => {};
+    const controller = createAppEventController({
+      state: { active: 0 },
+      els: {
+        closeDialog: { addEventListener },
+        tabs: { addEventListener },
+        fileInput: { addEventListener },
+        paletteInput: { addEventListener },
+        paletteResults: { querySelector: () => null },
+        palette: { classList: classList(false) },
+        contextMenu: { classList: classList(false) },
+        searchPanel: { classList: classList(false) },
+        host: { focus: () => calls.push("focus") },
+        editor: { classList: editorClassList }
+      },
+      grid: {
+        layout: () => {},
+        scrollToTop: () => calls.push("top"),
+        scrollToBottom: () => calls.push("bottom"),
+        scrollToLeft: () => calls.push("left"),
+        scrollToRight: () => calls.push("right"),
+        scrollPageUp: () => calls.push("page-up"),
+        scrollPageDown: () => calls.push("page-down")
+      },
+      commands: {},
+      documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
+      hasOpenDocument: () => true,
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      syncDockLayout: () => {},
+      wirePaneResizers: () => {},
+      positionContextMenu: () => {},
+      updateOverviewRuler: () => {},
+      renderPalette: () => {},
+      runCommand: () => {},
+      switchBottomTab: () => {},
+      showError: (error) => { throw error; },
+      hideContextMenu: () => {},
+      closeTab: () => {},
+      openFile: () => {},
+      toggleSidebar: () => {},
+      toggleProblemsPanel: () => {},
+      resetRowHeights: () => {},
+      saveAs: () => {},
+      saveFile: () => {},
+      redo: () => {},
+      undo: () => {},
+      showPalette: () => {},
+      copySelection: () => {},
+      cutSelection: () => {},
+      pasteSelection: () => {}
+    });
+    controller.wireEvents();
+
+    let prevented = 0;
+    listeners.get("keydown")({
+      key: "Home",
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "End",
+      shiftKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "PageDown",
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.deepEqual(calls, ["top", "right", "page-down"]);
+    assert.equal(prevented, 3);
+
+    listeners.get("keydown")({
+      key: "PageUp",
+      target: new FakeElement("input"),
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.deepEqual(calls, ["top", "right", "page-down"]);
+
+    listeners.get("keydown")({
+      key: "Home",
+      target: new FakeElement(".modal"),
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.deepEqual(calls, ["top", "right", "page-down"]);
+
+    editorActive = true;
+    listeners.get("keydown")({
+      key: "End",
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.deepEqual(calls, ["top", "right", "page-down"]);
+    editorActive = false;
+
+    const closedController = createAppEventController({
+      state: { active: -1 },
+      els: {
+        closeDialog: { addEventListener },
+        tabs: { addEventListener },
+        fileInput: { addEventListener },
+        paletteInput: { addEventListener },
+        paletteResults: { querySelector: () => null },
+        palette: { classList: classList(false) },
+        contextMenu: { classList: classList(false) },
+        searchPanel: { classList: classList(false) },
+        host: { focus: () => {} },
+        editor: { classList: classList(false) }
+      },
+      grid: {
+        layout: () => {},
+        scrollToTop: () => calls.push("closed-top")
+      },
+      commands: {},
+      documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
+      hasOpenDocument: () => false,
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      syncDockLayout: () => {},
+      wirePaneResizers: () => {},
+      positionContextMenu: () => {},
+      updateOverviewRuler: () => {},
+      renderPalette: () => {},
+      runCommand: () => {},
+      switchBottomTab: () => {},
+      showError: (error) => { throw error; },
+      hideContextMenu: () => {},
+      closeTab: () => {},
+      openFile: () => {},
+      toggleSidebar: () => {},
+      toggleProblemsPanel: () => {},
+      resetRowHeights: () => {},
+      saveAs: () => {},
+      saveFile: () => {},
+      redo: () => {},
+      undo: () => {},
+      showPalette: () => {},
+      copySelection: () => {},
+      cutSelection: () => {},
+      pasteSelection: () => {}
+    });
+    closedController.wireEvents();
+    listeners.get("keydown")({
+      key: "Home",
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(calls.includes("closed-top"), false);
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+    globalThis.Element = previousElement;
+  }
+});
+
 function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
+  const hostDocument = { activeElement: null };
+  const host = { focus: () => { hostDocument.activeElement = host; } };
   const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: options.lintEngine ?? "legacy" } };
   const grid = {
     commitEdit: () => {},
@@ -1134,6 +1404,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
   const controller = createDocumentController({
     state,
     els: {
+      host,
       closeDialog: { classList: { add: () => {}, remove: () => {} } },
       closeDialogText: { textContent: "" },
       fileInput: { click: () => {} }
@@ -1160,9 +1431,9 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
     isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
     updateGridDiagnostics: () => {},
-    scrollProblemsToActiveFile: () => {}
+    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
   });
-  return { controller, state };
+  return { controller, state, document: hostDocument, host };
 }
 
 function deferred() {

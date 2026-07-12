@@ -38,6 +38,7 @@ export class UndoManager {
 }
 
 export function makeCellCommand(label, doc, edits) {
+  const beforeShape = captureCellShape(doc);
   const changes = [];
   for (const edit of edits) {
     const before = doc.getCell(edit.row, edit.column);
@@ -47,22 +48,48 @@ export function makeCellCommand(label, doc, edits) {
     }
   }
   const rows = [...new Set(changes.map((change) => change.row))];
+  const afterSerializedColumnCount = beforeShape.serializedColumnCount == null
+    ? null
+    : Math.max(beforeShape.serializedColumnCount, ...changes.map((change) => change.column + 1));
+  const undoLspChange = changes.some((change) => change.row >= beforeShape.rowCount)
+    ? { kind: "full", reason: "undo-restores-row-count" }
+    : { kind: "replaceRows", rows };
   return {
     label,
     changes,
     contentChanged: true,
     lspChange: { kind: "replaceRows", rows },
+    undoLspChange,
     timestamp: Date.now(),
     get isEmpty() {
       return changes.length === 0;
     },
     undo(target) {
       target.applyCells(changes, "before");
+      restoreCellShape(target, beforeShape);
     },
     redo(target) {
+      target.serializedColumnCount = afterSerializedColumnCount;
       target.applyCells(changes, "after");
     }
   };
+}
+
+function captureCellShape(doc) {
+  return {
+    rowCount: doc.rows.length,
+    rowLengths: doc.rows.map((row) => row.length),
+    serializedColumnCount: doc.serializedColumnCount
+  };
+}
+
+function restoreCellShape(doc, shape) {
+  doc.rows.length = shape.rowCount;
+  for (let row = 0; row < shape.rowLengths.length; row++) {
+    doc.rows[row].length = shape.rowLengths[row];
+  }
+  doc.serializedColumnCount = shape.serializedColumnCount;
+  doc.refreshShape();
 }
 
 export function makeCustomCommand(label, { redo, undo, empty = false, ...metadata }) {

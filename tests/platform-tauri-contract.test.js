@@ -14,11 +14,14 @@ import {
   lspCloseFile,
   lspDefinition,
   lspGetDiagnostics,
+  lspGetDiagnosticsBatch,
   lspHover,
   lspListen,
   lspLogListen,
   lspOpenFile,
+  lspReadyListen,
   lspStart,
+  lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental,
   openNativePathsBulk,
@@ -224,6 +227,7 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "lsp_close_file",
     "lsp_definition",
     "lsp_get_diagnostics",
+    "lsp_get_diagnostics_batch",
     "lsp_hover",
     "lsp_open_file",
     "lsp_start",
@@ -247,6 +251,8 @@ test("Vector-LSP packaging contract keeps adjacent executable and contrib resour
 
   assert.match(rustLspService, /std::env::current_exe\(\)/);
   assert.match(rustLspService, /candidates\.push\(dir\.join\(exe\)\)/);
+  assert.match(releaseWorkflow, /repository:\s+yinyin333333\/vector-lsp/);
+  assert.doesNotMatch(releaseWorkflow, /repository:\s+eezstreet\/vector-lsp/);
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/target\/x86_64-pc-windows-msvc\/release\/vector-lsp\.exe": "vector-lsp\.exe"/);
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/contrib": "contrib"/);
   assert.match(releaseWorkflow, /Copy-Item \$vlspExe \$portableDir/);
@@ -298,6 +304,12 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     ["list_workspace_files", [{ path: "E:\\Workspace", files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }] }]],
     ["save_file_dialog", ["E:\\SavedAs.txt", "E:\\Export.txt"]],
     ["lsp_get_diagnostics", [[{ row: 1, column: 2, message: "warn" }]]],
+    ["lsp_get_diagnostics_batch", [[{
+      generation: 7,
+      uri: "file:///items.txt",
+      sequence: 9,
+      diagnostics: [{ row: 1, column: 2, message: "warn" }]
+    }]]],
     ["lsp_hover", [{ contents: "hover" }]],
     ["lsp_definition", [{ uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } }]]
   ]);
@@ -347,23 +359,43 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(saveAsDoc.dirty, false);
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
-    await lspStart("E:\\Workspace");
-    await lspOpenFile("file:///items.txt", "id\n1");
-    await lspUpdateFile("file:///items.txt", 2, "id\n2");
-    await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }]);
-    await lspCloseFile("file:///items.txt");
-    assert.deepEqual(await lspGetDiagnostics("file:///items.txt"), [{ row: 1, column: 2, message: "warn" }]);
-    assert.deepEqual(await lspHover("file:///items.txt", 4, 5), { contents: "hover" });
-    assert.deepEqual(await lspDefinition("file:///items.txt", 6, 7), { uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } });
+    await lspStart("E:\\Workspace", 7);
+    await lspOpenFile("file:///items.txt", 1, "id\n1", 7);
+    await lspUpdateFile("file:///items.txt", 2, "id\n2", 7);
+    await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }], 7);
+    await lspCloseFile("file:///items.txt", 7);
+    assert.deepEqual(await lspGetDiagnostics("file:///items.txt", 7, 9), [{ row: 1, column: 2, message: "warn" }]);
+    assert.deepEqual(await lspGetDiagnosticsBatch([{ uri: "file:///items.txt", sequence: 9 }], 7), [{
+      generation: 7,
+      uri: "file:///items.txt",
+      sequence: 9,
+      diagnostics: [{ row: 1, column: 2, message: "warn" }]
+    }]);
+    assert.deepEqual(await lspHover("file:///items.txt", 4, 5, 7), { contents: "hover" });
+    assert.deepEqual(await lspDefinition("file:///items.txt", 6, 7, 7), { uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } });
     const diagnosticsEvents = [];
     const logEvents = [];
+    const readyEvents = [];
+    const stoppedEvents = [];
     const unlistenDiagnostics = await lspListen((payload) => diagnosticsEvents.push(payload));
     const unlistenLog = await lspLogListen((payload) => logEvents.push(payload));
+    const unlistenReady = await lspReadyListen((payload) => readyEvents.push(payload));
+    const unlistenStopped = await lspStoppedListen((payload) => stoppedEvents.push(payload));
     unlistenDiagnostics();
     unlistenLog();
+    unlistenReady();
+    unlistenStopped();
 
     assert.deepEqual(diagnosticsEvents, [{ event: "lsp-diagnostics-changed" }]);
     assert.deepEqual(logEvents, [{ event: "lsp-log" }]);
+    assert.deepEqual(readyEvents, [{ event: "lsp-ready" }]);
+    assert.deepEqual(stoppedEvents, [{ event: "lsp-stopped" }]);
+    const chunkTransactionIds = calls
+      .filter((call) => call[0] === "invoke" && call[1] === "write_text_file_chunk_safe")
+      .map((call) => call[2].transactionId);
+    assert.equal(chunkTransactionIds.length, 2);
+    assert.equal(chunkTransactionIds.every((value) => typeof value === "string" && value.length > 0), true);
+    assert.notEqual(chunkTransactionIds[0], chunkTransactionIds[1]);
     assert.deepEqual(calls, [
       ["invoke", "get_config", undefined],
       ["invoke", "save_config", { config: { lintMode: "basic" } }],
@@ -372,23 +404,28 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "close_window", undefined],
       ["invoke", "open_folder_dialog", undefined],
       ["invoke", "list_workspace_files", { path: "E:\\Workspace" }],
-      ["invoke", "write_text_file_chunk_safe", { path: "E:\\items.txt", text: "id\n1", first: true, last: true }],
+      ["invoke", "write_text_file_chunk_safe", { path: "E:\\items.txt", text: "id\n1", encoding: "utf-8", transactionId: chunkTransactionIds[0], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "items.txt" }],
-      ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", first: true, last: true }],
+      ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", encoding: "utf-8", transactionId: chunkTransactionIds[1], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
-      ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3" }],
-      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace" }],
-      ["invoke", "lsp_open_file", { uri: "file:///items.txt", text: "id\n1" }],
-      ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2" }],
-      ["invoke", "lsp_update_file_incremental", { uri: "file:///items.txt", version: 3, changes: [{ range: { start: { line: 0, character: 0 } }, text: "id" }] }],
-      ["invoke", "lsp_close_file", { uri: "file:///items.txt" }],
-      ["invoke", "lsp_get_diagnostics", { uri: "file:///items.txt" }],
-      ["invoke", "lsp_hover", { uri: "file:///items.txt", line: 4, character: 5 }],
-      ["invoke", "lsp_definition", { uri: "file:///items.txt", line: 6, character: 7 }],
+      ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
+      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7 }],
+      ["invoke", "lsp_open_file", { uri: "file:///items.txt", version: 1, text: "id\n1", generation: 7 }],
+      ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2", generation: 7 }],
+      ["invoke", "lsp_update_file_incremental", { uri: "file:///items.txt", version: 3, changes: [{ range: { start: { line: 0, character: 0 } }, text: "id" }], generation: 7 }],
+      ["invoke", "lsp_close_file", { uri: "file:///items.txt", generation: 7 }],
+      ["invoke", "lsp_get_diagnostics", { uri: "file:///items.txt", generation: 7, sequence: 9 }],
+      ["invoke", "lsp_get_diagnostics_batch", { requests: [{ uri: "file:///items.txt", sequence: 9 }], generation: 7 }],
+      ["invoke", "lsp_hover", { uri: "file:///items.txt", line: 4, character: 5, generation: 7 }],
+      ["invoke", "lsp_definition", { uri: "file:///items.txt", line: 6, character: 7, generation: 7 }],
       ["listen", "lsp-diagnostics-changed"],
       ["listen", "lsp-log"],
+      ["listen", "lsp-ready"],
+      ["listen", "lsp-stopped"],
       ["unlisten", "lsp-diagnostics-changed"],
-      ["unlisten", "lsp-log"]
+      ["unlisten", "lsp-log"],
+      ["unlisten", "lsp-ready"],
+      ["unlisten", "lsp-stopped"]
     ]);
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
@@ -517,7 +554,9 @@ test("native write failure leaves dirty set", async () => {
       core: {
         invoke: async (command, args) => {
           assert.equal(command, "write_text_file_chunk_safe");
-          assert.deepEqual(args, { path: "E:\\items.txt", text: "id\nold", first: true, last: true });
+          assert.equal(typeof args.transactionId, "string");
+          const { transactionId: _transactionId, ...payload } = args;
+          assert.deepEqual(payload, { path: "E:\\items.txt", text: "id\nold", encoding: "utf-8", first: true, last: true });
           throw new Error("disk blocked");
         }
       }
@@ -539,7 +578,7 @@ test("Find UI is a centered modal and text inputs keep native shortcuts", () => 
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(html, /id="searchPanel" class="modal-backdrop search-backdrop hidden"/);
   assert.match(html, /class="modal search-modal"/);
-  assert.match(html, /id="searchInput" class="modal-input"/);
+  assert.match(html, /id="searchInput" class="modal-input" type="search"[^>]*autocomplete="off"[^>]*spellcheck="false"/);
   assert.match(html, /data-search-close/);
   assert.doesNotMatch(html, /id="searchPanel" class="quick-panel/);
   class FakeElement {

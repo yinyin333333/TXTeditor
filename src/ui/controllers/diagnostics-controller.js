@@ -1,6 +1,6 @@
 import { TableDocument, clamp } from "../../core/table-model.js";
 import { isTauriRuntime, openNativePaths } from "../../core/io.js";
-import { diagnosticsForDocument, groupDiagnosticsByCell } from "../../core/lint-engine.js";
+import { groupDiagnosticsByCell } from "../../core/lint-engine.js";
 import {
   LINT_ENGINE_LEGACY,
   LINT_ENGINE_VECTOR
@@ -8,8 +8,6 @@ import {
 import { finishDiagnosticNavigation } from "../diagnostic-navigation.js";
 import {
   activeDiagnosticIdsForCell,
-  activeDocumentDiagnostics,
-  activeDocumentDiagnosticsByCell,
   activeProblemItemState,
   lintSummaryText as buildLintSummaryText,
   lintEnginePanelActive,
@@ -17,7 +15,6 @@ import {
   lintNotificationCount as countLintNotifications,
   lintNotificationsVisible as areLintNotificationsVisible,
   lintPanelActive,
-  problemBadgeHtml,
   problemsPanelHtml,
   problemsPanelRenderDecision,
   problemsPanelRenderEffect,
@@ -43,6 +40,38 @@ export function createDiagnosticsController({
   storage = localStorage
 }) {
   const collapsedProblemFiles = new Set();
+  let indexedSource = null;
+  let diagnosticIndex = null;
+
+  function rebuildDiagnosticIndex() {
+    const byFile = new Map();
+    const countByFile = new Map();
+    const highestSeverityByFile = new Map();
+    const counts = { error: 0, warning: 0, info: 0 };
+    for (const diagnostic of state.lint.diagnostics) {
+      if (!byFile.has(diagnostic.fileKey)) byFile.set(diagnostic.fileKey, []);
+      byFile.get(diagnostic.fileKey).push(diagnostic);
+      countByFile.set(diagnostic.fileKey, (countByFile.get(diagnostic.fileKey) ?? 0) + 1);
+      counts[diagnostic.severity] = (counts[diagnostic.severity] ?? 0) + 1;
+      const current = highestSeverityByFile.get(diagnostic.fileKey);
+      if (!current || severityOrder(diagnostic.severity) > severityOrder(current)) {
+        highestSeverityByFile.set(diagnostic.fileKey, diagnostic.severity);
+      }
+    }
+    indexedSource = state.lint.diagnostics;
+    diagnosticIndex = { byFile, countByFile, highestSeverityByFile, counts };
+    return diagnosticIndex;
+  }
+
+  function currentDiagnosticIndex() {
+    return indexedSource === state.lint.diagnostics && diagnosticIndex
+      ? diagnosticIndex
+      : rebuildDiagnosticIndex();
+  }
+
+  function diagnosticsForDoc(doc) {
+    return currentDiagnosticIndex().byFile.get(lintDocKey(doc)) ?? [];
+  }
 
   function currentGrid() {
     return typeof grid === "function" ? grid() : grid;
@@ -73,21 +102,23 @@ export function createDiagnosticsController({
     });
   }
 
-  function setLintDiagnostics(diagnostics) {
+  function setLintDiagnostics(diagnostics, { preserveVersion = false } = {}) {
+    if (preserveVersion) {
+      state.lint.diagnostics = diagnostics;
+      rebuildDiagnosticIndex();
+      return;
+    }
     const next = lintDiagnosticsStateAfterUpdate(state.lint, diagnostics);
     state.lint.diagnostics = next.diagnostics;
     state.lint.version = next.version;
+    rebuildDiagnosticIndex();
   }
 
   function updateGridDiagnostics() {
     const started = perfNow();
-    const diagnosticsByCell = activeDocumentDiagnosticsByCell({
-      lintActive: lintActive(),
-      diagnostics: state.lint.diagnostics,
-      doc: activeDoc(),
-      diagnosticsForDocument,
-      groupDiagnosticsByCell
-    });
+    const diagnosticsByCell = lintActive()
+      ? groupDiagnosticsByCell(diagnosticsForDoc(activeDoc()))
+      : new Map();
     currentGrid().setDiagnostics(diagnosticsByCell);
     updateOverviewRuler();
     recordUiPerf("update-grid-diagnostics", started, { cellMarkers: diagnosticsByCell.size });
@@ -105,12 +136,7 @@ export function createDiagnosticsController({
     ruler.style.height = `${hostRect.height}px`;
     ruler.style.right = "0px";
     const doc = activeDoc();
-    const diags = activeDocumentDiagnostics({
-      lintActive: lintActive(),
-      diagnostics: state.lint.diagnostics,
-      doc,
-      diagnosticsForDocument
-    });
+    const diags = lintActive() ? diagnosticsForDoc(doc) : [];
     const rowCount = doc.rowCount;
     if (!diags.length || !rowCount) {
       ruler.innerHTML = "";
@@ -144,7 +170,7 @@ export function createDiagnosticsController({
   }
 
   function docHasDiagnostics(doc) {
-    return diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
+    return diagnosticsForDoc(doc).length > 0;
   }
 
   async function goToDiagnostic(id) {
@@ -154,14 +180,14 @@ export function createDiagnosticsController({
     if (index < 0 && state.lint.engine === LINT_ENGINE_LEGACY) {
       const workspaceDoc = state.lint.legacy.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);
       if (workspaceDoc) {
-        await addDocument(workspaceDoc);
+          await addDocument(workspaceDoc, { scrollProblems: false });
         index = state.active;
       }
     }
     if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
       const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
       if (doc) {
-        await addDocument(doc);
+          await addDocument(doc, { scrollProblems: false });
         index = state.active;
       }
     }
@@ -244,18 +270,20 @@ export function createDiagnosticsController({
       legacyWorkspaceLoadStatus: state.lint.legacy.workspaceLoad.status,
       legacyProfile: state.lint.legacy.settings.profile,
       diagnostics: state.lint.diagnostics,
+      counts: currentDiagnosticIndex().counts,
       openFileCount: state.lsp.openFileCount ?? 0
     });
   }
 
   function problemBadgeForPath(path) {
     if (!path) return "";
-    return problemBadgeHtml({
-      diagnostics: state.lint.diagnostics,
-      fileKey: lintPathKey(path),
-      notificationsVisible: lintNotificationsVisible(),
-      escapeHtml
-    });
+    const count = problemBadgeCountForPath(path);
+    return count ? ` <span class="file-problem-badge">${escapeHtml(count)}</span>` : "";
+  }
+
+  function problemBadgeCountForPath(path) {
+    if (!path || !lintNotificationsVisible()) return 0;
+    return currentDiagnosticIndex().countByFile.get(lintPathKey(path)) ?? 0;
   }
 
   function lintNotificationsVisible() {
@@ -281,7 +309,7 @@ export function createDiagnosticsController({
   function activeProblemDiagnosticIds() {
     const activeCell = currentGrid().editingCell?.() ?? state.selection.focus;
     return activeDiagnosticIdsForCell({
-      diagnostics: state.lint.diagnostics,
+      diagnostics: diagnosticsForDoc(activeDoc()),
       fileKey: lintDocKey(activeDoc()),
       activeCell,
       lintActive: lintActive(),
@@ -333,6 +361,7 @@ export function createDiagnosticsController({
     lintNotificationsVisible,
     lintSummaryText,
     problemBadgeForPath,
+    problemBadgeCountForPath,
     renderProblemsPanelIfNeeded,
     scrollProblemsToActiveFile,
     setLintDiagnostics,

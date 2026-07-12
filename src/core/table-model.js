@@ -361,20 +361,31 @@ export class TableDocument {
     return this.finalNewline ? body + this.lineEnding : body;
   }
 
+  toRowText(rowIndex) {
+    const row = this.rows[rowIndex];
+    if (!row) return "";
+    const columnCount = this.serializedColumnCount && this.serializedColumnCount > 0
+      ? this.serializedColumnCount
+      : null;
+    return serializeRow(row, columnCount);
+  }
+
   *toTextChunks({ chunkRows = 1000 } = {}) {
-    const safeChunkRows = Math.max(1, Math.floor(Number(chunkRows) || 1000));
-    const columnCount = this.serializedColumnCount && this.serializedColumnCount > 0 ? this.serializedColumnCount : null;
-    let chunk = "";
-    for (let rowIndex = 0; rowIndex < this.rows.length; rowIndex++) {
-      if (rowIndex > 0) chunk += this.lineEnding;
-      chunk += serializeRow(this.rows[rowIndex], columnCount);
-      if ((rowIndex + 1) % safeChunkRows === 0) {
-        yield chunk;
-        chunk = "";
-      }
-    }
-    if (this.finalNewline) chunk += this.lineEnding;
-    if (chunk || !this.rows.length) yield chunk;
+    yield* serializeTextChunks(this.rows, {
+      chunkRows,
+      lineEnding: this.lineEnding,
+      finalNewline: this.finalNewline,
+      serializedColumnCount: this.serializedColumnCount
+    });
+  }
+
+  snapshotTextChunks({ chunkRows = 1000 } = {}) {
+    return serializeTextChunks(this.rows.map((row) => [...row]), {
+      chunkRows,
+      lineEnding: this.lineEnding,
+      finalNewline: this.finalNewline,
+      serializedColumnCount: this.serializedColumnCount
+    });
   }
 
   autoFitColumn(column, sampleLimit = 300) {
@@ -394,6 +405,29 @@ export class TableDocument {
     }
     markTableViewDirty(this);
   }
+}
+
+function* serializeTextChunks(rows, {
+  chunkRows = 1000,
+  lineEnding = "\n",
+  finalNewline = false,
+  serializedColumnCount = null
+} = {}) {
+  const safeChunkRows = Math.max(1, Math.floor(Number(chunkRows) || 1000));
+  const columnCount = serializedColumnCount && serializedColumnCount > 0
+    ? serializedColumnCount
+    : null;
+  let chunk = "";
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    if (rowIndex > 0) chunk += lineEnding;
+    chunk += serializeRow(rows[rowIndex], columnCount);
+    if ((rowIndex + 1) % safeChunkRows === 0) {
+      yield chunk;
+      chunk = "";
+    }
+  }
+  if (finalNewline) chunk += lineEnding;
+  if (chunk || !rows.length) yield chunk;
 }
 
 export function clamp(value, min, max) {
