@@ -3,7 +3,13 @@ export function documentKey(doc) {
 }
 
 export function normalizePath(value) {
-  return String(value).replace(/\\/g, "/").toLowerCase();
+  let normalized = String(value).replace(/\\/g, "/");
+  if (normalized.toLowerCase().startsWith("//?/unc/")) {
+    normalized = `//${normalized.slice(8)}`;
+  } else if (normalized.startsWith("//?/")) {
+    normalized = normalized.slice(4);
+  }
+  return normalized.toLowerCase();
 }
 
 export function baseName(path) {

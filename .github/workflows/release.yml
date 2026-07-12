@@ -28,7 +28,7 @@ jobs:
       - name: Checkout vector-lsp
         uses: actions/checkout@v4
         with:
-          repository: eezstreet/vector-lsp
+          repository: yinyin333333/vector-lsp
           path: vector-lsp
 
       - name: Resolve version

@@ -154,6 +154,22 @@ test("JS LSP URI policy encodes and decodes path edge cases", () => {
   assert.equal(docToUri({ path: "" }), null);
 });
 
+test("incremental LSP row text preserves sparse appended columns", () => {
+  const doc = TableDocument.fromText("items.txt", "a\tb\n1\t2", { dirty: false });
+  doc.insertColumns(doc.columnCount, 2);
+  doc.setCell(1, 0, "updated");
+
+  assert.equal(doc.rows[1].length, 2);
+  assert.equal(doc.toRowText(1), "updated\t2\t\t");
+  assert.deepEqual(
+    lspChangedRowsToIncrementalChanges(doc, { kind: "replaceRows", rows: [1] }),
+    [{
+      range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0xFFFFFF } },
+      text: "updated\t2\t\t"
+    }]
+  );
+});
+
 test("LSP hover controller queues not-ready hover targets and clears visible hover state", async () => {
   const doc = TableDocument.fromText("skills.txt", "code\tname\nabc\tAlpha", { path: "E:\\Data\\skills.txt" });
   const traffic = [];
@@ -314,8 +330,8 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
     assert.equal(hoverCalls.length, 2);
     assert.equal(gridCalls.filter((call) => call[0] === "hover").at(-1)[3], "SECOND");
     assert.deepEqual(tauriCalls, [
-      ["lsp_start", { workspacePath: "E:\\Data" }],
-      ["lsp_open_file", { uri, text: doc.toText() }]
+      ["lsp_start", { workspacePath: "E:\\Data", generation: 1 }],
+      ["lsp_open_file", { uri, version: 1, text: doc.toText(), generation: 1 }]
     ]);
   } finally {
     resetLspDocumentState(doc);
@@ -351,8 +367,8 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
       core: {
         invoke: async (command, args) => {
           calls.push([command, args]);
-          if (command === "lsp_get_diagnostics") {
-            return diagnosticResponses.shift() ?? [];
+          if (command === "lsp_get_diagnostics_batch") {
+            return args.requests.map(() => diagnosticResponses.shift() ?? []);
           }
           if (command === "lsp_hover") return "BOUNDARY-HOVER";
           if (command === "lsp_definition") return { uri, line: 1, character: 0 };
@@ -436,15 +452,16 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
     await controller.goToDefinition();
     await controller.closeDoc(doc);
 
-    assert.deepEqual(calls.filter((call) => call[0] === "lsp_start" || call[0] === "lsp_open_file" || call[0] === "lsp_get_diagnostics" || call[0] === "lsp_update_file_incremental" || call[0] === "lsp_hover" || call[0] === "lsp_definition" || call[0] === "lsp_close_file").map((call) => call[0]), [
+    assert.deepEqual(calls.filter((call) => call[0] === "lsp_start" || call[0] === "lsp_open_file" || call[0] === "lsp_get_diagnostics_batch" || call[0] === "lsp_update_file_incremental" || call[0] === "lsp_hover" || call[0] === "lsp_definition" || call[0] === "lsp_close_file").map((call) => call[0]), [
       "lsp_start",
       "lsp_open_file",
-      "lsp_get_diagnostics",
+      "lsp_get_diagnostics_batch",
       "lsp_update_file_incremental",
-      "lsp_get_diagnostics",
+      "lsp_get_diagnostics_batch",
       "lsp_hover",
       "lsp_definition",
-      "lsp_close_file"
+      "lsp_close_file",
+      "lsp_get_diagnostics_batch"
     ]);
     assert.equal(gridCalls.some((call) => call[0] === "hover" && call[3] === "BOUNDARY-HOVER"), true);
     assert.deepEqual(state.selection.focus, { row: 1, column: 0 });
@@ -1762,7 +1779,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
     });
 
     await assert.rejects(() => controller.startWorkspace("E:\\Workspace"), /spawn failed/);
-    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace" }]]);
+    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace", generation: 1 }]]);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
     assert.equal(state.lint.status, "Vector-LSP startup failed");

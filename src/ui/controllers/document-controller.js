@@ -1,10 +1,12 @@
 import { TableDocument } from "../../core/table-model.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import { markTableSaved, tableFileState } from "../../core/table-file-state.js";
+import { docToUri } from "../../core/lsp-uri-policy.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
   downloadText,
+  encodeText,
   isTauriRuntime,
   openFilesNative,
   openNativePaths,
@@ -39,6 +41,7 @@ export function createDocumentController({
   reportLspOpenFailure,
   lspCloseDoc,
   reportLspCloseFailure,
+  lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -97,7 +100,7 @@ export function createDocumentController({
     }
   }
 
-  async function addDocument(doc) {
+  async function addDocument(doc, { scrollProblems = true } = {}) {
     const plan = documentOpenPlan(state.docs, doc);
     if (plan.action === "activate-existing") {
       saveSelectionState();
@@ -130,7 +133,7 @@ export function createDocumentController({
       grid.layout();
     }
     renderChrome();
-    scrollProblemsToActiveFile();
+    if (scrollProblems) scrollProblemsToActiveFile();
     focusGrid();
     if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
@@ -224,18 +227,23 @@ export function createDocumentController({
   }
 
   async function saveFileNow(doc) {
+    const previousUri = docToUri(doc);
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, false);
       if (!saved) return false;
+      await lspRebindSavedDoc(doc, previousUri);
       grid.draw();
       renderChrome();
       return true;
     }
     const revision = tableFileState(doc).revision;
+    const chunks = doc.snapshotTextChunks();
+    const encoding = doc.encoding || "utf-8";
     const writable = await doc.handle.createWritable();
-    await writeDocumentText(writable, doc);
+    await writeDocumentText(writable, chunks, encoding);
     await writable.close();
     markTableSaved(doc, revision);
+    await lspRebindSavedDoc(doc, previousUri);
     renderChrome();
     return true;
   }
@@ -256,27 +264,32 @@ export function createDocumentController({
   }
 
   async function saveAsNow(doc) {
+    const previousUri = docToUri(doc);
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, true);
       if (!saved) return false;
+      await lspRebindSavedDoc(doc, previousUri);
       grid.draw();
       renderChrome();
       return true;
     } else if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({ suggestedName: doc.name });
       const revision = tableFileState(doc).revision;
+      const chunks = doc.snapshotTextChunks();
+      const encoding = doc.encoding || "utf-8";
       const writable = await handle.createWritable();
-      await writeDocumentText(writable, doc);
+      await writeDocumentText(writable, chunks, encoding);
       await writable.close();
       doc.handle = handle;
       doc.name = handle.name ?? doc.name;
       markTableSaved(doc, revision);
+      await lspRebindSavedDoc(doc, previousUri);
       renderChrome();
       return true;
     } else {
       const revision = tableFileState(doc).revision;
       const text = doc.toText();
-      downloadText(doc.name, text);
+      downloadText(doc.name, text, doc.encoding);
       markTableSaved(doc, revision);
       renderChrome();
       return true;
@@ -369,9 +382,19 @@ export function createDocumentController({
     return queued;
   }
 
-  async function writeDocumentText(writable, doc) {
-    for (const chunk of doc.toTextChunks()) {
-      if (chunk) await writable.write(chunk);
+  async function writeDocumentText(writable, chunks, encoding) {
+    const normalizedEncoding = String(encoding || "utf-8").toLowerCase();
+    let first = true;
+    for (const chunk of chunks) {
+      if (normalizedEncoding === "utf-8") {
+        if (chunk) await writable.write(chunk);
+      } else if (chunk || first) {
+        await writable.write(encodeText(chunk, encoding, { includeBom: first }));
+      }
+      first = false;
+    }
+    if (first && normalizedEncoding !== "utf-8") {
+      await writable.write(encodeText("", encoding));
     }
   }
 

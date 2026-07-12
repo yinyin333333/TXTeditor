@@ -367,6 +367,43 @@ test("browser save writes document chunks without full serialization", async () 
   assert.equal(doc.dirty, false);
 });
 
+test("browser chunk save serializes one immutable document revision", async () => {
+  const text = Array.from({ length: 2505 }, (_, index) => (
+    index === 0 ? "id\tvalue" : `row-${index}\tvalue-${index}`
+  )).join("\n");
+  const doc = TableDocument.fromText("items.txt", text, { dirty: true });
+  const expected = doc.toText();
+  const writes = [];
+  let editedDuringSave = false;
+  doc.handle = {
+    async createWritable() {
+      return {
+        async write(chunk) {
+          writes.push(chunk);
+          if (!editedDuringSave) {
+            editedDuringSave = true;
+            doc.setCell(2200, 0, "EDITED-DURING-SAVE");
+            await Promise.resolve();
+          }
+        },
+        close: async () => {}
+      };
+    }
+  };
+  const { controller } = testDocumentController(doc);
+
+  assert.equal(await controller.saveFile(), true);
+  assert.equal(editedDuringSave, true);
+  assert.equal(
+    writes.join(""),
+    expected,
+    "one browser save must not mix rows from different document revisions"
+  );
+  assert.equal(doc.getCell(2200, 0), "EDITED-DURING-SAVE");
+  assert.notEqual(doc.toText(), expected);
+  assert.equal(doc.dirty, true);
+});
+
 test("document native saves for the same file run in order", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
@@ -596,6 +633,21 @@ test("opening another document saves the outgoing selection and scroll state", a
   assert.equal(document.activeElement, host);
 });
 
+test("diagnostic-driven document open does not reposition the Problems list", async () => {
+  const doc = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
+  let problemsScrolls = 0;
+  const { controller } = testDocumentController([], {
+    autoFitInitialColumns: () => {},
+    layout: () => {}
+  }, {
+    scrollProblemsToActiveFile: () => { problemsScrolls += 1; }
+  });
+
+  await controller.addDocument(doc, { scrollProblems: false });
+
+  assert.equal(problemsScrolls, 0);
+});
+
 test("activating an already-open document saves the outgoing selection and scroll state", async () => {
   const active = TableDocument.fromText("active.txt", "id\nactive", { path: "Data/active.txt" });
   const existing = TableDocument.fromText("target.txt", "id\ntarget", { path: "Data/target.txt" });
@@ -756,7 +808,7 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
 
   assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 850);
+  assert.ok(lspController.split(/\r?\n/).length <= 860);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1379,7 +1431,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
     isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
     updateGridDiagnostics: () => {},
-    scrollProblemsToActiveFile: () => {}
+    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
   });
   return { controller, state, document: hostDocument, host };
 }

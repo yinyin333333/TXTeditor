@@ -3,19 +3,21 @@ import {
   isTauriRuntime,
   lspCloseFile,
   lspDefinition,
-  lspGetDiagnostics,
+  lspHover,
   lspListen,
   lspLogListen,
   lspOpenFile,
+  lspReadyListen,
   lspStart,
+  lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental,
   openNativePaths
 } from "../../core/io.js";
 import { diagnosticsForDocument } from "../../core/lint-engine.js";
+import { tableFileState } from "../../core/table-file-state.js";
 import {
   docToUri,
-  fileNameFromUri,
   pathFromUri,
   uriToFileKey as uriToFileKeyWithPolicy
 } from "../../core/lsp-uri-policy.js";
@@ -29,7 +31,8 @@ import {
   lspChangedRowsToIncrementalChanges,
   lspHoverReady,
   lspOpenDocumentPolicy,
-  lspUpdateDocumentPolicy
+  lspUpdateDocumentPolicy,
+  lspWorkspaceSessionPolicy
 } from "../../core/lsp-session-policy.js";
 import {
   createLspReadinessState,
@@ -45,11 +48,10 @@ import {
 } from "../../core/lsp-update-status.js";
 import { reportBackgroundTaskFailure } from "../../core/background-task-status.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
-
+import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
 const HOVER_READY_FALLBACK_MS = 1200;
 const DEFERRED_FULL_UPDATE_DELAY_MS = 250;
 const MAX_LOG_ENTRIES = 500;
-
 export function mapLspDiagnosticToDisplay(diagnostic, {
   uri = "",
   fileKey = "",
@@ -80,7 +82,6 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
     ...range
   };
 }
-
 function knownCellValue(doc, rowIndex, columnIndex) {
   if (!doc || typeof doc.getCell !== "function") return null;
   if (!Number.isInteger(rowIndex) || !Number.isInteger(columnIndex)) return null;
@@ -88,7 +89,6 @@ function knownCellValue(doc, rowIndex, columnIndex) {
   if (rowIndex >= Number(doc.rowCount) || columnIndex >= Number(doc.columnCount)) return null;
   return doc.getCell(rowIndex, columnIndex);
 }
-
 function displayDiagnosticRange(diagnostic, cellValue, data = null) {
   const startCharacter = optionalNumber(diagnostic?.startCharacter);
   const endCharacter = optionalNumber(diagnostic?.endCharacter);
@@ -146,21 +146,17 @@ function displayDiagnosticRange(diagnostic, cellValue, data = null) {
     hasPreciseRange: isInsertionPoint || (localRangeWithinKnownCell && !fullCellRange)
   };
 }
-
 function optionalNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
-
 function numberOr(value, fallback) {
   const number = optionalNumber(value);
   return number == null ? fallback : number;
 }
-
 function isStructuredInsertionPointData(data) {
   return data?.kind === "missing-token" || data?.kind === "unexpected-eof";
 }
-
 function localInsertionPointFromData(insertionPoint, {
   cellStartCharacter,
   cellLength
@@ -175,7 +171,6 @@ function localInsertionPointFromData(insertionPoint, {
   }
   return null;
 }
-
 export function createLspController({
   state,
   els,
@@ -190,15 +185,22 @@ export function createLspController({
   setLintDiagnostics,
   updateGridDiagnostics,
   renderChrome,
+  renderDiagnosticsChrome = renderChrome,
   addDocument,
   applyFreezeToDoc,
   updateActiveProblemHighlight,
   saveSelectionState = () => {},
   lintPathKey,
-  lspHoverRequest
+  lspHoverRequest = lspHover
 }) {
+  state.lsp.generation = Number(state.lsp.generation) || 0;
+  state.lsp.readiness ??= state.lsp.started ? "ready" : "stopped";
+  state.lsp.openFileCount ??= 0;
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
+  let nextSessionGeneration = Number(state.lsp.generation) || 0;
+  const readyGenerations = new Set();
+  const stoppedGenerations = new Set();
   const hoverController = createLspHoverController({
     state,
     grid,
@@ -211,14 +213,37 @@ export function createLspController({
     recordLspReadiness,
     reportHoverFailure,
     computeCharOffset,
-    lspHoverRequest,
+    lspHoverRequest: (uri, line, character) => lspHoverRequest(
+      uri,
+      line,
+      character,
+      state.lsp.generation
+    ),
     perfNow
   });
-
+  const diagnosticsEventController = createLspDiagnosticsEventController({
+    state,
+    activeDoc,
+    isVectorLintEngine,
+    uriToFileKey,
+    mapDiagnosticToDisplay: mapLspDiagnosticToDisplay,
+    recordLintEngineEvent,
+    recordLspTraffic,
+    recordLspReadiness,
+    appendLspLog,
+    setLintDiagnostics,
+    updateGridDiagnostics,
+    renderChrome,
+    renderDiagnosticsChrome,
+    markDocHoverReady,
+    scheduleHoverPrewarm: hoverController.scheduleHoverPrewarm,
+    sessionAcceptsEvents: (generation) => generation === state.lsp.generation
+      && (state.lsp.started || ["starting", "indexing"].includes(state.lsp.readiness))
+  });
+  const { handleDiagnosticsChanged } = diagnosticsEventController;
   function uriToFileKey(uri) {
     return uriToFileKeyWithPolicy(uri, lintPathKey);
   }
-
   function clearHoverReadyFallback(doc) {
     if (!doc) return;
     const docState = lspDocumentState(doc);
@@ -227,7 +252,6 @@ export function createLspController({
       docState.hoverReadyTimer = null;
     }
   }
-
   function scheduleDeferredFullUpdate(doc, reason) {
     const docState = lspDocumentState(doc);
     if (docState.fullUpdateTimer != null) clearTimeout(docState.fullUpdateTimer);
@@ -237,7 +261,6 @@ export function createLspController({
     }, DEFERRED_FULL_UPDATE_DELAY_MS);
     recordLintEngineEvent("vector-update-deferred", { fileName: doc?.name, reason, delayMs: DEFERRED_FULL_UPDATE_DELAY_MS });
   }
-
   function scheduleHoverReadyFallback(doc, uri, reason) {
     clearHoverReadyFallback(doc);
     const docState = lspDocumentState(doc);
@@ -247,7 +270,6 @@ export function createLspController({
       markDocHoverReady(doc, uri, reason);
     }, HOVER_READY_FALLBACK_MS);
   }
-
   function markDocHoverReady(doc, uri, reason) {
     clearHoverReadyFallback(doc);
     const docState = lspDocumentState(doc);
@@ -261,58 +283,115 @@ export function createLspController({
     hoverController.retryQueuedHover(`hover-ready:${reason}`);
     if (doc === activeDoc()) hoverController.scheduleHoverPrewarm(`hover-ready:${reason}`);
   }
-
-  async function startWorkspace(workspacePath) {
+  async function startWorkspace(workspacePath, { forceRestart = false } = {}) {
     if (!isVectorLintEngine()) {
       recordLintEngineEvent("vector-start-skipped", { workspacePath });
       return;
     }
+    const sessionPolicy = lspWorkspaceSessionPolicy({
+      started: state.lsp.started,
+      activeWorkspacePath: state.lsp.workspacePath,
+      requestedWorkspacePath: workspacePath,
+      forceRestart
+    });
+    if (sessionPolicy.action === "sync") {
+      return syncOpenDocs();
+    }
+    const generation = Math.max(nextSessionGeneration, Number(state.lsp.generation) || 0) + 1;
+    nextSessionGeneration = generation;
+    readyGenerations.clear();
+    stoppedGenerations.delete(generation);
     hoverController.invalidateHover(true, "workspace-start");
+    diagnosticsEventController.clearPending();
     state.lspLogs = [];
     if (els.logList) els.logList.innerHTML = "";
     state.lint.status = "Connecting to linter...";
-    renderChrome();
     state.lsp.started = false;
+    state.lsp.generation = generation;
+    state.lsp.readiness = "starting";
+    state.lsp.openFileCount = 0;
+    for (const doc of state.docs) resetLspDocumentState(doc, { version: 1 });
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+    renderChrome();
     try {
-      await lspStart(workspacePath);
+      const result = await lspStart(workspacePath, generation);
+      if (state.lsp.generation !== generation) return;
+      if (stoppedGenerations.has(generation)) return;
+      if (result && result.installed === false) return;
       state.lsp.started = true;
+      state.lsp.workspacePath = workspacePath;
+      state.lsp.workspaceKey = sessionPolicy.requestedKey;
+      state.lsp.readiness = readyGenerations.has(generation) ? "ready" : "indexing";
       state.lsp.openFileCount = 0;
       const docsWithPaths = state.docs.filter((d) => docToUri(d));
       for (const doc of docsWithPaths) {
-        resetLspDocumentState(doc, { version: 1 });
-        await openDoc(doc).catch((error) => reportOpenFailure(doc, error, "workspace-start"));
+        if (state.lsp.generation !== generation || !state.lsp.started) return;
+        await openDoc(doc, { deferRender: true }).catch((error) => reportOpenFailure(doc, error, "workspace-start"));
       }
+      if (state.lsp.generation !== generation || !state.lsp.started) return;
       state.lint.status = "";
       renderChrome();
-      hoverController.retryQueuedHover("workspace-ready");
-      hoverController.scheduleHoverPrewarm("workspace-ready");
+      if (state.lsp.readiness === "ready") {
+        hoverController.retryQueuedHover("workspace-ready");
+        hoverController.scheduleHoverPrewarm("workspace-ready");
+      }
     } catch (error) {
+      if (state.lsp.generation !== generation) return;
       state.lsp.started = false;
+      state.lsp.workspacePath = "";
+      state.lsp.workspaceKey = "";
+      state.lsp.readiness = "stopped";
       state.lsp.openFileCount = 0;
       reportStartupFailure("Vector-LSP startup", error);
       throw error;
     }
   }
-
   async function syncOpenDocs() {
     if (!vectorSessionAvailable({ engine: state.lint.engine, lspStarted: state.lsp.started })) return;
-    state.lsp.openFileCount = 0;
+    const generation = state.lsp.generation;
+    const diagnosticsRefreshes = [];
+    let openFileCount = 0;
     for (const doc of state.docs.filter((d) => docToUri(d))) {
+      if (state.lsp.generation !== generation || !isVectorLintEngine() || !state.lsp.started) return;
       ensureLspDocumentVersion(doc);
-      await openDoc(doc).catch((error) => reportOpenFailure(doc, error, "sync-open-docs"));
+      const uri = docToUri(doc);
+      const docState = lspDocumentState(doc);
+      if (docState.opened && docState.openedUri === uri) {
+        openFileCount += 1;
+        if (docState.syncedRevision !== tableFileState(doc).revision) {
+          await updateDoc(doc, { kind: "full", reason: "engine-resync" })
+            .catch((error) => handleUpdateError(doc, error, "sync-open-docs"));
+        } else {
+          diagnosticsRefreshes.push(handleDiagnosticsChanged(uri));
+        }
+        continue;
+      }
+      if (docState.opened && docState.openedUri && docState.openedUri !== uri) {
+          await rebindSavedDoc(doc, docState.openedUri, { deferRender: true, expectedGeneration: generation });
+      } else {
+        await openDoc(doc, { deferRender: true }).catch((error) => reportOpenFailure(doc, error, "sync-open-docs"));
+      }
+      if (state.lsp.generation !== generation || !isVectorLintEngine() || !state.lsp.started) return;
+      if (lspDocumentState(doc).opened) openFileCount += 1;
     }
+    await Promise.all(diagnosticsRefreshes);
+    if (state.lsp.generation !== generation || !isVectorLintEngine() || !state.lsp.started) return;
+    state.lsp.openFileCount = openFileCount;
     recordLintEngineEvent("vector-sync-open-docs", { docs: state.docs.length });
     renderChrome();
-  }
-
-  async function openDoc(doc) {
+    }
+  async function openDoc(doc, { deferRender = false } = {}) {
     if (doc?.largeFileMode) {
-      recordLintEngineEvent("vector-open-skipped-large-file", { fileName: doc?.name, reasons: doc?.largeFileReasons ?? [] });
+      recordLintEngineEvent("vector-open-skipped-large-file", {
+        fileName: doc?.name, reasons: doc?.largeFileReasons ?? []
+      });
       return;
     }
     const uri = docToUri(doc);
     const docState = lspDocumentState(doc);
     const version = ensureLspDocumentVersion(doc);
+    const generation = state.lsp.generation ?? 0;
     const policy = lspOpenDocumentPolicy({
       vectorEngine: isVectorLintEngine(),
       lspStarted: state.lsp.started,
@@ -324,46 +403,54 @@ export function createLspController({
       recordLintEngineEvent("vector-open-skipped-legacy", { fileName: doc?.name });
       return;
     }
-    if (policy.action === "skip-not-started" || policy.action === "skip-no-uri" || policy.action === "already-open") return;
+    if (["skip-not-started", "skip-no-uri", "already-open"].includes(policy.action)) return;
     if (policy.action === "reuse-open-promise") return policy.promise;
     clearHoverReadyFallback(doc);
-    docState.ready = false;
-    docState.opened = false;
-    docState.diagnosticsReady = diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
-    docState.hoverReady = docState.diagnosticsReady;
-    docState.openPromise = (async () => {
+    const hasExistingDiagnostics = diagnosticsForDocument(state.lint.diagnostics, doc).length > 0;
+    Object.assign(docState, { ready: false, opened: false,
+      diagnosticsReady: hasExistingDiagnostics, hoverReady: hasExistingDiagnostics });
+    docState.openingUri = uri;
+    docState.openingGeneration = generation;
+    const revision = tableFileState(doc).revision;
+    const text = doc.toText();
+    let trackedPromise;
+    const operation = (async () => {
       recordLspTraffic(uri, "lsp_open_file", { fileName: doc.name, documentVersion: version });
       recordLspReadiness(uri, "didOpenSent", { fileName: doc.name, documentVersion: version });
-      await lspOpenFile(uri, doc.toText());
+      await lspOpenFile(uri, version, text, generation);
+      if (docState.openPromise !== trackedPromise || state.lsp.generation !== generation
+        || !state.lsp.started || docToUri(doc) !== uri) return;
       docState.opened = true;
       docState.openedUri = uri;
       docState.openedVersion = version;
-      if (docState.diagnosticsReady) {
-        markDocHoverReady(doc, uri, "existing-diagnostics");
-      } else {
-        scheduleHoverReadyFallback(doc, uri, "diagnostics-fallback");
-      }
+      docState.syncedRevision = revision;
+      docState.sessionGeneration = generation;
+      docState.openingUri = null;
+      docState.openingGeneration = 0;
+      if (docState.diagnosticsReady) markDocHoverReady(doc, uri, "existing-diagnostics");
+      else scheduleHoverReadyFallback(doc, uri, "diagnostics-fallback");
       state.lsp.openFileCount = (state.lsp.openFileCount ?? 0) + 1;
-      renderChrome();
+      if (!deferRender) renderChrome();
       hoverController.retryQueuedHover("file-opened");
       if (doc === activeDoc()) hoverController.scheduleHoverPrewarm("file-opened");
     })().catch((error) => {
+      if (docState.openPromise !== trackedPromise) return;
       docState.ready = false;
       docState.opened = false;
+      if (docState.openingUri === uri && docState.openingGeneration === generation) {
+        docState.openingUri = null;
+        docState.openingGeneration = 0;
+      }
       throw error;
-    }).finally(() => {
-      docState.openPromise = null;
     });
-    return docState.openPromise;
+    trackedPromise = operation.finally(() => {
+      if (docState.openPromise === trackedPromise) docState.openPromise = null;
+    });
+    docState.openPromise = trackedPromise;
+    return trackedPromise;
   }
-
   function reportOpenFailure(doc, error, context) {
     const uri = docToUri(doc);
-    const docState = lspDocumentState(doc);
-    clearHoverReadyFallback(doc);
-    docState.ready = false;
-    docState.opened = false;
-    docState.hoverReady = false;
     reportLspRequestFailure({
       uri,
       operation: "open",
@@ -375,7 +462,6 @@ export function createLspController({
       appendLspLog
     });
   }
-
   async function updateDoc(doc, changedRows = null) {
     if (doc?.largeFileMode && !isIncrementalRowChange(changedRows)) {
       recordLintEngineEvent("vector-update-skipped-large-file", { fileName: doc?.name, changeKind: changedRows?.kind ?? "full" });
@@ -404,27 +490,64 @@ export function createLspController({
     }
     hoverController.clearHoverCacheForUri(uri);
     const version = nextLspDocumentVersion(doc);
+    const revision = tableFileState(doc).revision;
+    const generation = state.lsp.generation ?? 0;
+    const incrementalChanges = policy.action === "update-incremental"
+      ? lspChangedRowsToIncrementalChanges(doc, policy.change)
+      : null;
     hoverController.invalidateHover(false, "document-version-changed");
     docState.ready = false;
     docState.diagnosticsReady = false;
     docState.hoverReady = false;
-    docState.openedVersion = version;
     scheduleHoverReadyFallback(doc, uri, "post-change-diagnostics-fallback");
-    if (policy.action === "update-incremental") {
-      const changes = lspChangedRowsToIncrementalChanges(doc, policy.change);
-      recordLspTraffic(uri, "lsp_update_file_incremental", { fileName: doc.name, documentVersion: version, changedRows: policy.changedRowCount });
-      await lspUpdateFileIncremental(uri, version, changes);
-    } else {
-      recordLspTraffic(uri, "lsp_update_file", { fileName: doc.name, documentVersion: version });
-      await lspUpdateFile(uri, version, doc.toText());
-    }
-    clearLspUpdateFailureStatus(state, renderChrome);
+    const previousUpdate = docState.updatePromise ?? docState.openPromise ?? Promise.resolve();
+    let trackedPromise;
+    const operation = Promise.resolve(previousUpdate).catch(() => {}).then(async () => {
+      if (docState.updatePromise !== trackedPromise || state.lsp.generation !== generation
+        || !state.lsp.started || docToUri(doc) !== uri) return;
+      if (!docState.opened || docState.openedUri !== uri || docState.sessionGeneration !== generation) {
+        await openDoc(doc);
+      }
+      if (docState.updatePromise !== trackedPromise || state.lsp.generation !== generation
+        || !state.lsp.started || !docState.opened || docState.openedUri !== uri
+        || docState.sessionGeneration !== generation) return;
+      if (docState.openedVersion >= version && docState.syncedRevision >= revision) {
+        docState.requiresFullSync = false;
+        clearLspUpdateFailureStatus(state, renderChrome);
+        return;
+      }
+      const needsFullSync = policy.action !== "update-incremental"
+        || docState.requiresFullSync
+        || docState.syncedRevision !== revision - 1;
+      if (!needsFullSync) {
+        recordLspTraffic(uri, "lsp_update_file_incremental", { fileName: doc.name, documentVersion: version, changedRows: policy.changedRowCount });
+        await lspUpdateFileIncremental(uri, version, incrementalChanges, generation);
+      } else {
+        recordLspTraffic(uri, "lsp_update_file", { fileName: doc.name, documentVersion: version });
+        const fullText = doc.toText();
+        await lspUpdateFile(uri, version, fullText, generation);
+      }
+      if (docState.updatePromise !== trackedPromise || state.lsp.generation !== generation
+        || docToUri(doc) !== uri) return;
+      docState.openedVersion = version;
+      docState.syncedRevision = revision;
+      docState.sessionGeneration = generation;
+      docState.requiresFullSync = false;
+      clearLspUpdateFailureStatus(state, renderChrome);
+    }).catch((error) => {
+      if (docState.updatePromise !== trackedPromise) return;
+      docState.requiresFullSync = true;
+      throw error;
+    });
+    trackedPromise = operation.finally(() => {
+      if (docState.updatePromise === trackedPromise) docState.updatePromise = null;
+    });
+    docState.updatePromise = trackedPromise;
+    return trackedPromise;
   }
-
   function isIncrementalRowChange(change) {
     return change?.kind === "replaceRows";
   }
-
   function handleUpdateError(doc, error, context) {
     const uri = docToUri(doc);
     const docState = lspDocumentState(doc);
@@ -432,6 +555,7 @@ export function createLspController({
     docState.ready = false;
     docState.diagnosticsReady = false;
     docState.hoverReady = false;
+    docState.requiresFullSync = true;
     reportLspUpdateFailure({
       state,
       doc,
@@ -443,23 +567,45 @@ export function createLspController({
       renderChrome
     });
   }
-
-  async function closeDoc(doc) {
-    if (!isVectorLintEngine()) {
+  async function closeDoc(doc, { uri: uriOverride = null, allowInactiveEngine = false } = {}) {
+    if (!isVectorLintEngine() && !allowInactiveEngine) {
       recordLintEngineEvent("vector-close-skipped-legacy", { fileName: doc?.name });
       return;
     }
     if (!state.lsp.started) return;
-    const uri = docToUri(doc);
+    const uri = uriOverride ?? lspDocumentState(doc).openedUri ?? docToUri(doc);
     if (!uri) return;
+    const generation = state.lsp.generation ?? 0;
+    const docState = lspDocumentState(doc);
+    await Promise.resolve(docState.openPromise).catch(() => {});
+    await Promise.resolve(docState.updatePromise).catch(() => {});
+    if (state.lsp.generation !== generation || !state.lsp.started) return;
     recordLspTraffic(uri, "lsp_close_file", { fileName: doc.name });
-    await lspCloseFile(uri);
+    await lspCloseFile(uri, generation);
+    if (state.lsp.generation !== generation) return;
     resetLspDocumentState(doc);
+    state.lsp.openFileCount = Math.max(0, (state.lsp.openFileCount ?? 1) - 1);
     hoverController.clearHoverCacheForUri(uri);
     hoverController.invalidateHover(false, "file-closed");
     const fileKey = uriToFileKey(uri);
     setLintDiagnostics(state.lint.diagnostics.filter((d) => d.fileKey !== fileKey));
     updateGridDiagnostics();
+    await handleDiagnosticsChanged(uri);
+  }
+
+  async function rebindSavedDoc(doc, previousUri, { deferRender = false, expectedGeneration = null } = {}) {
+    const nextUri = docToUri(doc);
+    if (previousUri === nextUri) return;
+    if (previousUri && state.lsp.started) {
+      await closeDoc(doc, { uri: previousUri, allowInactiveEngine: true })
+        .catch((error) => reportCloseFailure(doc, error, "save-as-rebind"));
+    } else {
+      resetLspDocumentState(doc);
+    }
+    if (expectedGeneration != null && state.lsp.generation !== expectedGeneration) return;
+    if (nextUri && isVectorLintEngine() && state.lsp.started) {
+      await openDoc(doc, { deferRender }).catch((error) => reportOpenFailure(doc, error, "save-as-rebind"));
+    }
   }
 
   function reportCloseFailure(doc, error, context) {
@@ -499,55 +645,6 @@ export function createLspController({
       recordLspTraffic,
       appendLspLog
     });
-  }
-
-  async function handleDiagnosticsChanged(uri) {
-    if (!state.lint.enabled || !isVectorLintEngine()) {
-      recordLintEngineEvent("vector-diagnostics-ignored", { uri });
-      return;
-    }
-    recordLspTraffic(uri, "diagnostics_changed");
-    recordLspTraffic(uri, "lsp_get_diagnostics");
-    const fileKey = uriToFileKey(uri);
-    const doc = state.docs.find((d) => uriToFileKey(docToUri(d)) === fileKey);
-    const fileName = doc?.name ?? fileNameFromUri(uri);
-    const filePath = doc?.path ?? pathFromUri(uri);
-    const rawDiags = await lspGetDiagnostics(uri).catch((error) => {
-      reportLspRequestFailure({
-        uri,
-        operation: "get diagnostics",
-        eventKind: "lsp_get_diagnostics_failed",
-        fileName,
-        error,
-        context: "diagnostics-changed",
-        recordLspTraffic,
-        appendLspLog
-      });
-      return [];
-    });
-    recordLspReadiness(uri, "firstDiagnosticsReceived", { fileName, activeFile: activeDoc()?.name ?? "", diagnosticCount: rawDiags.length });
-
-    const displayDiags = rawDiags.map((d, i) => mapLspDiagnosticToDisplay(d, {
-      uri,
-      fileKey,
-      fileName,
-      filePath,
-      index: i,
-      doc
-    }));
-
-    setLintDiagnostics([
-      ...state.lint.diagnostics.filter((d) => d.fileKey !== fileKey),
-      ...displayDiags
-    ]);
-
-    updateGridDiagnostics();
-    renderChrome();
-    if (doc) {
-      lspDocumentState(doc).diagnosticsReady = true;
-      markDocHoverReady(doc, uri, "diagnostics-ready");
-    }
-    if (doc === activeDoc()) hoverController.scheduleHoverPrewarm("diagnostics-ready");
   }
 
   function computeCharOffset(doc, row, col) {
@@ -632,13 +729,15 @@ export function createLspController({
     const row = hit?.row ?? state.selection.focus.row;
     const col = hit?.column ?? state.selection.focus.column;
     const charOffset = computeCharOffset(doc, row, col);
+    const generation = state.lsp.generation ?? 0;
     let definitionFailed = false;
-    const result = await lspDefinition(uri, row, charOffset).catch((error) => {
+    const result = await lspDefinition(uri, row, charOffset, generation).catch((error) => {
       definitionFailed = true;
       reportDefinitionFailure(doc, uri, error, "go-to-definition");
       return null;
     });
     if (definitionFailed) return;
+    if (state.lsp.generation !== generation || !state.lsp.started) return;
     if (!result) {
       showToast("No definition found.");
       return;
@@ -679,9 +778,43 @@ export function createLspController({
     return Boolean(docToUri(activeDoc()));
   }
 
+  function handleReady(payload = {}) {
+    const generation = Number(payload.generation ?? 0);
+    if (!generation || generation !== state.lsp.generation) return;
+    readyGenerations.add(generation);
+    if (!state.lsp.started) return;
+    state.lsp.readiness = "ready";
+    state.lint.status = "";
+    renderChrome();
+    hoverController.retryQueuedHover("workspace-ready");
+    hoverController.scheduleHoverPrewarm("workspace-ready");
+  }
+
+  function handleStopped(payload = {}) {
+    const generation = Number(payload.generation ?? 0);
+    if (!generation || generation !== state.lsp.generation) return;
+    readyGenerations.delete(generation);
+    stoppedGenerations.add(generation);
+    diagnosticsEventController.clearPending();
+    state.lsp.started = false;
+    state.lsp.readiness = "stopped";
+    state.lsp.openFileCount = 0;
+    state.lint.status = "Vector-LSP stopped.";
+    hoverController.invalidateHover(true, "session-stopped");
+    for (const doc of state.docs) resetLspDocumentState(doc);
+    if (isVectorLintEngine()) {
+      setLintDiagnostics([]);
+      updateGridDiagnostics();
+    }
+    appendLspLog(`Vector-LSP stopped${payload.reason ? `: ${payload.reason}` : "."}`);
+    renderChrome();
+  }
+
   function startListeners() {
     lspListen(handleDiagnosticsChanged).catch(showError);
     lspLogListen((msg) => appendLspLog(msg)).catch((error) => reportStartupFailure("Vector-LSP log listener", error));
+    lspReadyListen(handleReady).catch((error) => reportStartupFailure("Vector-LSP ready listener", error));
+    lspStoppedListen(handleStopped).catch((error) => reportStartupFailure("Vector-LSP stopped listener", error));
   }
 
   return {
@@ -698,6 +831,7 @@ export function createLspController({
     pathFromUri,
     perf: {
       ...hoverController.perf,
+      diagnosticsPerf: diagnosticsEventController.getPerformanceSnapshot,
       lspTraffic,
       lspReadiness
     },
@@ -709,6 +843,7 @@ export function createLspController({
     reportOpenFailure,
     reportStartupFailure,
     reportWindowCloseFailure,
+    rebindSavedDoc,
     requestHover: hoverController.requestHover,
     scheduleHoverPrewarm: hoverController.scheduleHoverPrewarm,
     startListeners,

@@ -15,13 +15,22 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function makeSettingsController({ config = {}, lspStarted = false } = {}) {
+function makeSettingsController({
+  config = {},
+  diagnostics = [],
+  lspStarted = false,
+  saveConfigError = null,
+  workspace = null
+} = {}) {
   const { document, window } = installFakeAppStartupDom();
   const calls = [];
   const invoke = async (command) => {
     calls.push(["invoke", command]);
     if (command === "get_config") return config;
-    if (command === "save_config") return undefined;
+    if (command === "save_config") {
+      if (saveConfigError) throw saveConfigError;
+      return undefined;
+    }
     if (command === "open_folder_dialog") return "E:\\PickedFolder";
     if (command === "pick_file_path") return "E:\\Tools\\vector-lsp.exe";
     return undefined;
@@ -34,11 +43,11 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
     dockLayout: DEFAULT_DOCK_LAYOUT,
-    workspace: null,
+    workspace,
     lint: {
       engine: LINT_ENGINE_VECTOR,
       enabled: true,
-      diagnostics: [],
+      diagnostics: [...diagnostics],
       legacy: {
         settings: createDefaultLintSettings(),
         rulesOpen: false
@@ -46,7 +55,8 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
     },
     lsp: {
       started: lspStarted
-    }
+    },
+    config: { ...config }
   };
   const controller = createSettingsController({
     state,
@@ -79,7 +89,7 @@ function makeSettingsController({ config = {}, lspStarted = false } = {}) {
     showError: (error) => calls.push(["error", String(error)]),
     escapeHtml
   });
-  return { controller, document, calls, host };
+  return { controller, document, calls, host, state };
 }
 
 async function waitForSelector(document, selector) {
@@ -192,4 +202,62 @@ test("Lint Options Escape behaves like Cancel without saving or restarting LSP",
   assert.equal(calls.some((entry) => entry[0] === "invoke" && entry[1] === "save_config"), false);
   assert.equal(calls.includes("lsp-start"), false);
   assert.equal(document.listeners.get("keydown")?.length, 0);
+});
+
+test("V-TXT-14 keeps config, diagnostics, modal, and LSP session unchanged when config write fails", async () => {
+  const originalConfig = {
+    lintMode: "advanced",
+    pluginPath: "E:\\Plugins",
+    schemaPath: "E:\\Schema",
+    vectorLspPath: "E:\\Tools\\vector-lsp.exe",
+    debugLogging: true
+  };
+  const originalDiagnostics = [{ id: "existing-diagnostic" }];
+  const { controller, document, calls, state } = makeSettingsController({
+    config: originalConfig,
+    diagnostics: originalDiagnostics,
+    lspStarted: true,
+    saveConfigError: new Error("disk denied"),
+    workspace: { path: "E:\\Workspace" }
+  });
+  const pending = controller.showSettings();
+  let settled = false;
+  pending.then(() => {
+    settled = true;
+  });
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsPluginPath").value = "E:\\NewPlugins";
+  const saveButton = document.body.querySelector("[data-settings-choice='save']");
+  const cancelButton = document.body.querySelector("[data-settings-choice='cancel']");
+
+  try {
+    saveButton.click();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const observed = {
+      config: state.config,
+      diagnostics: state.lint.diagnostics,
+      errorCount: calls.filter((entry) => Array.isArray(entry) && entry[0] === "error").length,
+      gridUpdateCount: calls.filter((entry) => entry === "update-grid-diagnostics").length,
+      lspRestartCount: calls.filter((entry) => entry === "lsp-start").length,
+      modalOpen: Boolean(document.body.querySelector(".settings-modal")),
+      saveButtonReusable: saveButton.disabled !== true,
+      saveCallCount: calls.filter((entry) => Array.isArray(entry) && entry[0] === "invoke" && entry[1] === "save_config").length,
+      settled
+    };
+    assert.deepEqual(observed, {
+      config: originalConfig,
+      diagnostics: originalDiagnostics,
+      errorCount: 1,
+      gridUpdateCount: 0,
+      lspRestartCount: 0,
+      modalOpen: true,
+      saveButtonReusable: true,
+      saveCallCount: 1,
+      settled: false
+    });
+  } finally {
+    if (document.body.querySelector(".settings-modal")) cancelButton.click();
+  }
 });

@@ -153,21 +153,22 @@ export function lintSummaryText({
   legacyWorkspaceLoadStatus = "",
   legacyProfile = "",
   diagnostics = [],
+  counts = null,
   openFileCount = 0
 } = {}) {
   if (!lintEnabled) return "Lint off";
   if (legacyEngine) {
     if (legacyStatus) return legacyStatus;
     if (legacyWorkspaceLoadStatus === "failed") return `Workspace index failed - ${legacyProfile}`;
-    const counts = diagnosticCounts(diagnostics);
+    const summaryCounts = counts ?? diagnosticCounts(diagnostics);
     if (!diagnostics.length) return `No problems - ${legacyProfile}`;
-    return `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info - ${legacyProfile}`;
+    return `${summaryCounts.error} errors, ${summaryCounts.warning} warnings, ${summaryCounts.info} info - ${legacyProfile}`;
   }
   if (vectorEngine && !lspStarted) return "Open a folder to enable linting";
   if (lintStatus) return lintStatus;
-  const counts = diagnosticCounts(diagnostics);
+  const summaryCounts = counts ?? diagnosticCounts(diagnostics);
   if (!diagnostics.length) return `No problems (${openFileCount} file${openFileCount === 1 ? "" : "s"} linted)`;
-  return `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info (${openFileCount} files)`;
+  return `${summaryCounts.error} errors, ${summaryCounts.warning} warnings, ${summaryCounts.info} info (${openFileCount} files)`;
 }
 
 export function problemBadgeHtml({ diagnostics = [], fileKey = "", notificationsVisible = false, escapeHtml = escapeHtmlValue } = {}) {

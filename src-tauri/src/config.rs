@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -20,6 +20,19 @@ pub(crate) struct AppConfig {
     pub(crate) plugin_path: Option<String>,
     #[serde(default)]
     pub(crate) debug_logging: bool,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            vector_lsp_path: None,
+            schema_path: None,
+            lint_mode: Some("basic".to_string()),
+            schema_version: Some("3.2".to_string()),
+            plugin_path: None,
+            debug_logging: false,
+        }
+    }
 }
 
 pub(crate) struct AppConfigState {
@@ -78,8 +91,16 @@ mod tests {
         fs::write(&invalid, "{not valid json").unwrap();
 
         assert!(load_app_config_from(&missing).vector_lsp_path.is_none());
+        assert_eq!(
+            load_app_config_from(&missing).schema_version.as_deref(),
+            Some("3.2")
+        );
         assert_eq!(load_app_config_from(&missing).debug_logging, false);
         assert!(load_app_config_from(&invalid).schema_path.is_none());
+        assert_eq!(
+            load_app_config_from(&invalid).schema_version.as_deref(),
+            Some("3.2")
+        );
         assert_eq!(load_app_config_from(&invalid).debug_logging, false);
 
         let _ = fs::remove_dir_all(&dir);

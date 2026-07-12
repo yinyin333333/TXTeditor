@@ -21,11 +21,14 @@ export {
   lspCloseFile,
   lspDefinition,
   lspGetDiagnostics,
+  lspGetDiagnosticsBatch,
   lspHover,
   lspListen,
   lspLogListen,
   lspOpenFile,
+  lspReadyListen,
   lspStart,
+  lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental
 } from "./platform/lsp-client.js";
