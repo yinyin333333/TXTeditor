@@ -51,11 +51,15 @@ export function makeCellCommand(label, doc, edits) {
   const afterSerializedColumnCount = beforeShape.serializedColumnCount == null
     ? null
     : Math.max(beforeShape.serializedColumnCount, ...changes.map((change) => change.column + 1));
+  const undoLspChange = changes.some((change) => change.row >= beforeShape.rowCount)
+    ? { kind: "full", reason: "undo-restores-row-count" }
+    : { kind: "replaceRows", rows };
   return {
     label,
     changes,
     contentChanged: true,
     lspChange: { kind: "replaceRows", rows },
+    undoLspChange,
     timestamp: Date.now(),
     get isEmpty() {
       return changes.length === 0;

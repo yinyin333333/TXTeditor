@@ -75,6 +75,8 @@ export function lspChangedRowsToIncrementalChanges(doc, changedRows) {
   const rows = normalizeLspDocumentChange(changedRows).rows ?? [];
   return rows.map((row) => ({
     range: { start: { line: row, character: 0 }, end: { line: row, character: 0xFFFFFF } },
-    text: doc.rows[row]?.join("\t") ?? ""
+    text: typeof doc.toRowText === "function"
+      ? doc.toRowText(row)
+      : doc.rows[row]?.join("\t") ?? ""
   }));
 }

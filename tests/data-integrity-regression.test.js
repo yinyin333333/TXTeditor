@@ -122,6 +122,10 @@ test("V-TXT-03 out-of-bounds paste undo restores bytes and ragged table shape re
   const before = serializedShape(doc);
   const command = pasteTextCommand(doc, { row: 2, column: 1 }, "X\tY\r\nZ\tW");
 
+  assert.deepEqual(command.undoLspChange, {
+    kind: "full",
+    reason: "undo-restores-row-count"
+  });
   command.redo(doc);
   undo.push(command);
   const firstRedo = serializedShape(doc);
@@ -136,6 +140,13 @@ test("V-TXT-03 out-of-bounds paste undo restores bytes and ragged table shape re
   assert.deepEqual(secondRedo, firstRedo);
   assert.deepEqual(firstUndo, before);
   assert.deepEqual(secondUndo, before);
+});
+
+test("V-TXT-03 in-bounds paste undo keeps row-level LSP synchronization", () => {
+  const doc = TableDocument.fromText("items.txt", "id\nOLD", { dirty: false });
+  const command = pasteTextCommand(doc, { row: 1, column: 0 }, "NEW");
+
+  assert.deepEqual(command.undoLspChange, { kind: "replaceRows", rows: [1] });
 });
 
 test("V-TXT-04 CP1252 special bytes decode correctly and re-encode byte-for-byte", () => {

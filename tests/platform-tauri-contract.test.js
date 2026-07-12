@@ -251,6 +251,8 @@ test("Vector-LSP packaging contract keeps adjacent executable and contrib resour
 
   assert.match(rustLspService, /std::env::current_exe\(\)/);
   assert.match(rustLspService, /candidates\.push\(dir\.join\(exe\)\)/);
+  assert.match(releaseWorkflow, /repository:\s+yinyin333333\/vector-lsp/);
+  assert.doesNotMatch(releaseWorkflow, /repository:\s+eezstreet\/vector-lsp/);
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/target\/x86_64-pc-windows-msvc\/release\/vector-lsp\.exe": "vector-lsp\.exe"/);
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/contrib": "contrib"/);
   assert.match(releaseWorkflow, /Copy-Item \$vlspExe \$portableDir/);

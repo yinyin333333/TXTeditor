@@ -361,6 +361,15 @@ export class TableDocument {
     return this.finalNewline ? body + this.lineEnding : body;
   }
 
+  toRowText(rowIndex) {
+    const row = this.rows[rowIndex];
+    if (!row) return "";
+    const columnCount = this.serializedColumnCount && this.serializedColumnCount > 0
+      ? this.serializedColumnCount
+      : null;
+    return serializeRow(row, columnCount);
+  }
+
   *toTextChunks({ chunkRows = 1000 } = {}) {
     yield* serializeTextChunks(this.rows, {
       chunkRows,
