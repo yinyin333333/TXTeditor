@@ -46,15 +46,8 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     searchModal.style.top = `${Math.round(next.top)}px`;
   }
 
-  function resetSearchModalPosition() {
-    searchDrag = null;
-    if (!searchModal) return;
-    searchModal.classList.remove("search-modal-positioned");
-    searchModal.style.left = "";
-    searchModal.style.top = "";
-  }
-
   function clampSearchModalToViewport() {
+    if (els.searchPanel.classList.contains("hidden")) return;
     if (!searchModal?.classList.contains("search-modal-positioned")) return;
     const rect = searchModal.getBoundingClientRect();
     setSearchModalPosition(rect.left, rect.top);
@@ -90,8 +83,8 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
 
   function showSearch() {
     Object.assign(state.search, searchStateAfterInput());
-    resetSearchModalPosition();
     els.searchPanel.classList.remove("hidden");
+    clampSearchModalToViewport();
     els.searchInput.focus();
     els.searchInput.select();
   }

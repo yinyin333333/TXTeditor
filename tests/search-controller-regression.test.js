@@ -166,7 +166,7 @@ test("opening Find starts again at the active cell and subsequent searches advan
   assert.deepEqual(rows.state.selection.focus, { row: 1, column: 1 });
 });
 
-test("Find title dragging clamps to the viewport and controls do not initiate dragging", () => {
+test("Find title dragging clamps to the viewport and keeps its position when reopened", () => {
   const originalWindow = globalThis.window;
   const viewport = eventTarget({ innerWidth: 800, innerHeight: 600 });
   globalThis.window = viewport;
@@ -177,6 +177,7 @@ test("Find title dragging clamps to the viewport and controls do not initiate dr
       focus: { row: 0, column: 0 }
     });
     harness.controller.wireEvents();
+    harness.controller.showSearch();
 
     assert.equal(harness.searchInput.listeners.has("pointerdown"), false);
     assert.equal(harness.scopeInput.listeners.has("pointerdown"), false);
@@ -212,10 +213,15 @@ test("Find title dragging clamps to the viewport and controls do not initiate dr
     assert.equal(harness.modal.style.top, "72px");
 
     harness.handle.dispatch("pointerup", { pointerId: 7 });
+    harness.controller.closeSearch();
+    viewport.dispatch("resize");
+    assert.equal(harness.modal.style.left, "72px");
+    assert.equal(harness.modal.style.top, "72px");
+
     harness.controller.showSearch();
-    assert.equal(harness.modal.classList.contains("search-modal-positioned"), false);
-    assert.equal(harness.modal.style.left, "");
-    assert.equal(harness.modal.style.top, "");
+    assert.equal(harness.modal.classList.contains("search-modal-positioned"), true);
+    assert.equal(harness.modal.style.left, "72px");
+    assert.equal(harness.modal.style.top, "72px");
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
