@@ -57,9 +57,12 @@ export function pasteTextCommand(doc, start, text) {
 
 export function pasteTextToRangesCommand(doc, ranges, focus, text) {
   const rows = clipboardRows(text);
-  if (rows.length === 1 && rows[0].length === 1 && ranges.length > 1) {
-    const value = rows[0][0];
-    return makeCellCommand("Paste Selection", doc, rangeCells(ranges).map(({ row, column }) => ({ row, column, value })));
+  if (rows.length === 1 && rows[0].length === 1) {
+    const cells = rangeCells(ranges);
+    if (cells.length > 1) {
+      const value = rows[0][0];
+      return makeCellCommand("Paste Selection", doc, cells.map(({ row, column }) => ({ row, column, value })));
+    }
   }
   return pasteTextCommand(doc, focus, text);
 }

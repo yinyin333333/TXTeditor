@@ -434,6 +434,66 @@ test("copy and paste support first-row header cells", () => {
   assert.equal(doc.getCell(0, 1), "renamed");
 });
 
+test("single-cell paste fills a contiguous multi-cell selection as one undoable command", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6", { dirty: false });
+  const undo = new UndoManager();
+  const beforeRevision = tableFileState(doc).revision;
+  const command = pasteTextToRangesCommand(
+    doc,
+    [{ top: 1, left: 0, bottom: 2, right: 1 }],
+    { row: 1, column: 0 },
+    "filled"
+  );
+
+  assert.equal(command.label, "Paste Selection");
+  assert.equal(command.changes.length, 4);
+  assert.deepEqual(command.lspChange, { kind: "replaceRows", rows: [1, 2] });
+
+  command.redo(doc);
+  undo.push(command);
+  assert.equal(tableFileState(doc).revision, beforeRevision + 1);
+  assert.deepEqual(doc.rows, [
+    ["a", "b", "c"],
+    ["filled", "filled", "3"],
+    ["filled", "filled", "6"]
+  ]);
+
+  undo.undo(doc);
+  assert.deepEqual(doc.rows, [
+    ["a", "b", "c"],
+    ["1", "2", "3"],
+    ["4", "5", "6"]
+  ]);
+  undo.redo(doc);
+  assert.equal(doc.getCell(2, 1), "filled");
+});
+
+test("single-cell paste fills non-contiguous cells while matrix paste remains focus-based", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
+  const selected = [
+    { top: 0, left: 2, bottom: 0, right: 2 },
+    { top: 2, left: 0, bottom: 2, right: 0 }
+  ];
+  const fill = pasteTextToRangesCommand(doc, selected, { row: 0, column: 2 }, "same");
+  fill.redo(doc);
+  assert.equal(doc.getCell(0, 2), "same");
+  assert.equal(doc.getCell(2, 0), "same");
+  assert.equal(doc.getCell(1, 1), "2");
+
+  const matrix = pasteTextToRangesCommand(
+    doc,
+    [{ top: 0, left: 0, bottom: 2, right: 2 }],
+    { row: 1, column: 1 },
+    "x\ty"
+  );
+  assert.equal(matrix.label, "Paste Range");
+  assert.equal(matrix.changes.length, 2);
+  matrix.redo(doc);
+  assert.equal(doc.getCell(1, 1), "x");
+  assert.equal(doc.getCell(1, 2), "y");
+  assert.equal(doc.getCell(0, 0), "a");
+});
+
 test("fill copies the top-left selected value over the selection", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
   const command = fillSelectionCommand(doc, { top: 1, left: 0, bottom: 2, right: 2 });
