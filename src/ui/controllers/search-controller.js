@@ -1,5 +1,6 @@
 import { findInTable, normalizeSearchScope } from "../../core/search.js";
 import {
+  clampSearchModalPosition,
   searchScrollOptionsForScope,
   searchShouldIncludeStart,
   searchStatusText,
@@ -11,13 +12,91 @@ import {
 } from "../search-policy.js";
 
 export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight, saveSelectionState = () => {} }) {
+  const searchModalCandidate = els.searchPanel.querySelector?.(".search-modal");
+  const searchModal = searchModalCandidate?.classList
+    && typeof searchModalCandidate.getBoundingClientRect === "function"
+    ? searchModalCandidate
+    : null;
+  const searchDragHandle = searchModal?.querySelector?.("[data-search-drag-handle]") ?? null;
+  let searchDrag = null;
+
+  function viewportSize() {
+    return {
+      viewportWidth: Number(globalThis.window?.innerWidth)
+        || Number(globalThis.document?.documentElement?.clientWidth)
+        || 0,
+      viewportHeight: Number(globalThis.window?.innerHeight)
+        || Number(globalThis.document?.documentElement?.clientHeight)
+        || 0
+    };
+  }
+
+  function setSearchModalPosition(left, top) {
+    if (!searchModal) return;
+    const rect = searchModal.getBoundingClientRect();
+    const next = clampSearchModalPosition({
+      left,
+      top,
+      width: rect.width,
+      height: rect.height,
+      ...viewportSize()
+    });
+    searchModal.classList.add("search-modal-positioned");
+    searchModal.style.left = `${Math.round(next.left)}px`;
+    searchModal.style.top = `${Math.round(next.top)}px`;
+  }
+
+  function resetSearchModalPosition() {
+    searchDrag = null;
+    if (!searchModal) return;
+    searchModal.classList.remove("search-modal-positioned");
+    searchModal.style.left = "";
+    searchModal.style.top = "";
+  }
+
+  function clampSearchModalToViewport() {
+    if (!searchModal?.classList.contains("search-modal-positioned")) return;
+    const rect = searchModal.getBoundingClientRect();
+    setSearchModalPosition(rect.left, rect.top);
+  }
+
+  function beginSearchDrag(event) {
+    if (!searchModal || event.button !== 0 || event.isPrimary === false) return;
+    const rect = searchModal.getBoundingClientRect();
+    searchDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    };
+    setSearchModalPosition(rect.left, rect.top);
+    event.preventDefault();
+    if (Number.isFinite(event.pointerId)) event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveSearchDrag(event) {
+    if (!searchDrag || event.pointerId !== searchDrag.pointerId) return;
+    event.preventDefault();
+    setSearchModalPosition(
+      event.clientX - searchDrag.offsetX,
+      event.clientY - searchDrag.offsetY
+    );
+  }
+
+  function endSearchDrag(event) {
+    if (!searchDrag || event.pointerId !== searchDrag.pointerId) return;
+    if (Number.isFinite(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+    searchDrag = null;
+  }
+
   function showSearch() {
+    resetSearchModalPosition();
     els.searchPanel.classList.remove("hidden");
     els.searchInput.focus();
     els.searchInput.select();
   }
 
   function closeSearch() {
+    searchDrag = null;
     els.searchPanel.classList.add("hidden");
     els.host.focus();
   }
@@ -80,6 +159,11 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
       event.preventDefault();
       grid.scrollByWheel(event);
     }, { passive: false });
+    searchDragHandle?.addEventListener("pointerdown", beginSearchDrag);
+    searchDragHandle?.addEventListener("pointermove", moveSearchDrag);
+    searchDragHandle?.addEventListener("pointerup", endSearchDrag);
+    searchDragHandle?.addEventListener("pointercancel", endSearchDrag);
+    globalThis.window?.addEventListener?.("resize", clampSearchModalToViewport);
   }
 
   return {

@@ -1546,6 +1546,21 @@ details:not([open]) .problem-file-header::before {
   gap: 10px;
 }
 
+.search-modal.search-modal-positioned {
+  position: fixed;
+  margin: 0;
+}
+
+.search-modal [data-search-drag-handle] {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.search-modal [data-search-drag-handle]:active {
+  cursor: grabbing;
+}
+
 .search-modal .modal-input {
   margin-bottom: 0;
 }
