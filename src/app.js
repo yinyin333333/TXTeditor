@@ -164,6 +164,7 @@ const grid = new CanvasGrid({
 
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
+grid.setMouseResizeLocked(state.mouseResizeLocked);
 grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
 gridCommandController = createGridCommandController({
   state,

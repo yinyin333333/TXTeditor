@@ -3,6 +3,7 @@ import test from "node:test";
 import { createDefaultLintSettings } from "../src/core/lint-engine.js";
 import { LINT_ENGINE_VECTOR } from "../src/core/lint-controller-policy.js";
 import { DEFAULT_GRID_FONT } from "../src/ui/app-settings-policy.js";
+import { createInitialAppState } from "../src/ui/app-startup-state.js";
 import { DEFAULT_DOCK_LAYOUT } from "../src/ui/dock-layout-policy.js";
 import { createSettingsController } from "../src/ui/controllers/settings-controller.js";
 import { installFakeAppStartupDom } from "./helpers/fake-dom-app-startup.mjs";
@@ -40,6 +41,7 @@ function makeSettingsController({
   const state = {
     theme: "dark",
     colorizeColumns: true,
+    mouseResizeLocked: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
     dockLayout: DEFAULT_DOCK_LAYOUT,
@@ -65,6 +67,7 @@ function makeSettingsController({
       syncTheme: () => calls.push("sync-theme"),
       draw: () => calls.push("draw"),
       setColorizeColumns: (enabled) => calls.push(["colorize", enabled]),
+      setMouseResizeLocked: (locked) => calls.push(["mouse-resize-locked", locked]),
       setFontFamily: (font) => calls.push(["font", font]),
       setVectorLspHoverEnabled: (enabled) => calls.push(["hover", enabled])
     },
@@ -107,6 +110,7 @@ test("App Settings modal renders visual controls in the controller behavior path
   controller.showAppSettings();
 
   assert.equal(document.body.querySelector("#settingsColorizeColumns")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsMouseResizeLocked")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']")?.tagName, "BUTTON");
@@ -115,6 +119,25 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("mouse resize lock defaults off, applies immediately, and is restored from storage", () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, false);
+
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsMouseResizeLocked");
+  assert.equal(input.checked, false);
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+
+  assert.equal(state.mouseResizeLocked, true);
+  assert.equal(localStorage.getItem("txteditor.mouseResizeLocked"), "on");
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "mouse-resize-locked"), [
+    ["mouse-resize-locked", true]
+  ]);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, true);
 });
 
 test("App Settings closes on Escape and removes its temporary key listener", () => {

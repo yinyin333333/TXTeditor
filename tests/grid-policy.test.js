@@ -1748,3 +1748,73 @@ test("editor presentation policy preserves overlay geometry and cell state", () 
     fontWeight: "400"
   });
 });
+
+test("mouse resize lock disables resize handles and clears an active mouse resize", () => {
+  const geometry = {
+    mouseResizeLocked: false,
+    zoom: 1,
+    screenXForColumn: () => 100,
+    scaledColumnWidth: () => 80,
+    screenYForRow: () => 50,
+    scaledRowHeight: () => 26
+  };
+  const columnBoundary = { kind: "column-header", row: 0, column: 1, x: 180, y: 10 };
+  const rowBoundary = { kind: "row-header", row: 2, column: 0, x: 10, y: 76 };
+
+  assert.deepEqual(CanvasGrid.prototype.resizeHit.call(geometry, columnBoundary), { kind: "column", index: 1 });
+  assert.deepEqual(CanvasGrid.prototype.resizeHit.call(geometry, rowBoundary), { kind: "row", index: 2 });
+
+  geometry.mouseResizeLocked = true;
+  assert.equal(CanvasGrid.prototype.resizeHit.call(geometry, columnBoundary), null);
+  assert.equal(CanvasGrid.prototype.resizeHit.call(geometry, rowBoundary), null);
+
+  let draws = 0;
+  const activeResize = {
+    mouseResizeLocked: false,
+    resizing: { kind: "column", index: 1 },
+    resizeGuide: { kind: "column", x: 180 },
+    host: { style: { cursor: "col-resize" } },
+    draw: () => { draws += 1; }
+  };
+  CanvasGrid.prototype.setMouseResizeLocked.call(activeResize, true);
+  assert.equal(activeResize.mouseResizeLocked, true);
+  assert.equal(activeResize.resizing, null);
+  assert.equal(activeResize.resizeGuide, null);
+  assert.equal(activeResize.host.style.cursor, "default");
+  assert.equal(draws, 1);
+});
+
+test("locked resize boundaries fall through to normal selection and skip double-click auto-fit", () => {
+  const cellBoundary = { kind: "cell", row: 2, column: 1, x: 180, y: 76 };
+  const selections = [];
+  const grid = {
+    host: { focus: () => {}, style: {} },
+    hideFirstColumnHoverPreview: () => {},
+    isScrollbarEvent: () => false,
+    hitTest: () => cellBoundary,
+    resizeHit: () => null,
+    applyHitSelection: (...args) => selections.push(args),
+    clearHoverState: () => {},
+    draw: () => {},
+    notifySelectionChanged: () => {},
+    dragging: false,
+    resizing: null
+  };
+
+  CanvasGrid.prototype.onMouseDown.call(grid, {
+    button: 0,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false
+  });
+  assert.equal(selections.length, 1);
+  assert.deepEqual(selections[0][0], cellBoundary);
+  assert.equal(grid.resizing, null);
+
+  let autoFits = 0;
+  grid.hitTest = () => ({ kind: "column-header", row: 0, column: 1, x: 180, y: 10 });
+  grid.onAutoFitColumn = () => { autoFits += 1; };
+  grid.startEdit = () => { throw new Error("column header must not start cell editing"); };
+  CanvasGrid.prototype.onDblClick.call(grid, {});
+  assert.equal(autoFits, 0);
+});

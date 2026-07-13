@@ -94,6 +94,13 @@ export function createSettingsController({
     renderChrome();
   }
 
+  function setMouseResizeLocked(locked) {
+    state.mouseResizeLocked = Boolean(locked);
+    localStorage.setItem("txteditor.mouseResizeLocked", state.mouseResizeLocked ? "on" : "off");
+    grid.setMouseResizeLocked(state.mouseResizeLocked);
+    renderChrome();
+  }
+
   function toggleVectorLspHover() {
     setVectorLspHover(!state.vectorLspHover);
   }
@@ -185,6 +192,7 @@ export function createSettingsController({
     backdrop.className = "modal-backdrop";
     const visualControls = appSettingsVisualControls({
       colorizeColumns: state.colorizeColumns,
+      mouseResizeLocked: state.mouseResizeLocked,
       vectorLspHover: state.vectorLspHover,
       legacyLintEngine: isLegacyLintEngine(),
       theme: state.theme,
@@ -211,6 +219,10 @@ export function createSettingsController({
           <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.colorize.id}"${visualControls.colorize.checked ? " checked" : ""} />
             ${visualControls.colorize.label}
+          </label>
+          <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.mouseResize.id}"${visualControls.mouseResize.checked ? " checked" : ""} />
+            ${visualControls.mouseResize.label}
           </label>
           <div class="settings-label">Lint Engine</div>
           <div class="settings-segmented" role="group" aria-label="Lint Engine">
@@ -242,6 +254,7 @@ export function createSettingsController({
     document.body.append(backdrop);
 
     const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
+    const mouseResizeInput = backdrop.querySelector("#settingsMouseResizeLocked");
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
     const fontInput = backdrop.querySelector("#settingsGridFont");
@@ -250,6 +263,7 @@ export function createSettingsController({
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
     const refresh = () => {
       colorizeInput.checked = state.colorizeColumns;
+      mouseResizeInput.checked = state.mouseResizeLocked;
       hoverInput.checked = state.vectorLspHover;
       hoverInput.disabled = isLegacyLintEngine();
       hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
@@ -259,6 +273,7 @@ export function createSettingsController({
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
     };
     colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
+    mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
     hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
     for (const button of lintEngineButtons) {
@@ -529,6 +544,7 @@ export function createSettingsController({
     saveLegacyLintSettings,
     saveLintSettings,
     setColorizeColumns,
+    setMouseResizeLocked,
     setLegacyLintProfile,
     setLegacyLintRuleEnabled,
     setLintEngine,

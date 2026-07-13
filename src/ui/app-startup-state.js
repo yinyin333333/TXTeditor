@@ -24,6 +24,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedTheme = storage.getItem("txteditor.theme") === "light" ? "light" : "dark";
   const savedGridFont = normaliseGridFont(storage.getItem("txteditor.gridFont"));
   const savedColorize = storage.getItem("txteditor.colorize") === "on";
+  const savedMouseResizeLocked = storage.getItem("txteditor.mouseResizeLocked") === "on";
   const savedVectorLspHover = vectorLspHoverFromStorage(storage.getItem("txteditor.vectorLspHover"));
   const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
   const savedLintEngine = normalizeLintEngine(storage.getItem("txteditor.lint.engine"));
@@ -52,6 +53,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     theme: savedTheme,
     gridFont: savedGridFont,
     colorizeColumns: savedColorize,
+    mouseResizeLocked: savedMouseResizeLocked,
     vectorLspHover: savedVectorLspHover,
     shortcuts: savedShortcuts,
     lint: {
