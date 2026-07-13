@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  SEARCH_SCOPE_ALL
+  SEARCH_SCOPE_ALL,
+  SEARCH_SCOPE_COLUMN_TITLES,
+  SEARCH_SCOPE_ROW_TITLES
 } from "../src/core/search.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import { clampSearchModalPosition } from "../src/ui/search-policy.js";
@@ -126,6 +128,43 @@ function searchHarness({
   });
   return { controller, handle, modal, panel, scopeInput, searchInput, state, scrolls };
 }
+
+test("opening Find starts again at the active cell and subsequent searches advance and wrap", () => {
+  const all = searchHarness({
+    rows: [["name", "ref"], ["needle", "x"], ["needle", "y"]],
+    focus: { row: 1, column: 0 }
+  });
+  all.controller.showSearch();
+  assert.deepEqual(all.state.search, { lastQuery: "", lastScope: SEARCH_SCOPE_ALL });
+  all.controller.findNext();
+  assert.deepEqual(all.state.selection.focus, { row: 1, column: 0 });
+  all.controller.findNext();
+  assert.deepEqual(all.state.selection.focus, { row: 2, column: 0 });
+  all.controller.findNext();
+  assert.deepEqual(all.state.selection.focus, { row: 1, column: 0 });
+
+  const columns = searchHarness({
+    rows: [["needle", "x", "needle"], ["a", "b", "c"]],
+    scope: SEARCH_SCOPE_COLUMN_TITLES,
+    focus: { row: 1, column: 2 }
+  });
+  columns.controller.showSearch();
+  columns.controller.findNext();
+  assert.deepEqual(columns.state.selection.focus, { row: 1, column: 2 });
+  columns.controller.findNext();
+  assert.deepEqual(columns.state.selection.focus, { row: 1, column: 0 });
+
+  const rows = searchHarness({
+    rows: [["name", "ref"], ["needle", "a"], ["needle", "b"]],
+    scope: SEARCH_SCOPE_ROW_TITLES,
+    focus: { row: 2, column: 1 }
+  });
+  rows.controller.showSearch();
+  rows.controller.findNext();
+  assert.deepEqual(rows.state.selection.focus, { row: 2, column: 1 });
+  rows.controller.findNext();
+  assert.deepEqual(rows.state.selection.focus, { row: 1, column: 1 });
+});
 
 test("Find title dragging clamps to the viewport and controls do not initiate dragging", () => {
   const originalWindow = globalThis.window;

@@ -89,6 +89,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   }
 
   function showSearch() {
+    Object.assign(state.search, searchStateAfterInput());
     resetSearchModalPosition();
     els.searchPanel.classList.remove("hidden");
     els.searchInput.focus();
