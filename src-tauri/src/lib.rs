@@ -12,6 +12,7 @@ mod workspace_files;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(lsp_service::LspManager::new())
         .setup(app_bootstrap::setup_app)
         .invoke_handler(tauri::generate_handler![
