@@ -8,6 +8,7 @@ import {
   resizeRowCommand
 } from "../../core/operations.js";
 import { indexRange } from "../row-operation-policy.js";
+import { persistFreezeState } from "../freeze-state-policy.js";
 
 export function createGridCommandController({
   state,
@@ -20,12 +21,14 @@ export function createGridCommandController({
   showError,
   applyFreezeToDoc,
   rowsForContextOperation,
-  columnsFromSelection
+  columnsFromSelection,
+  storage = globalThis.localStorage
 }) {
   function toggleFreeze(kind) {
     if (!hasOpenDocument()) return;
     if (kind === "row") state.freezeRow = !state.freezeRow;
     if (kind === "column") state.freezeColumn = !state.freezeColumn;
+    persistFreezeState(state, storage);
     applyFreezeToDoc(activeDoc());
     grid.layout();
     renderChrome();

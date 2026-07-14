@@ -19,6 +19,7 @@ import { initialSearchState } from "./search-policy.js";
 import { normaliseGridFont } from "./app-settings-policy.js";
 import { readJsonStorage } from "./app-runtime-utils.js";
 import { loadShortcutBindings } from "./shortcut-policy.js";
+import { freezeStateFromStorage } from "./freeze-state-policy.js";
 
 export function createInitialAppState({ storage = localStorage } = {}) {
   const savedTheme = storage.getItem("txteditor.theme") === "light" ? "light" : "dark";
@@ -32,6 +33,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedDockLayout = normalizeDockLayout(readJsonStorage(DOCK_LAYOUT_KEY, DEFAULT_DOCK_LAYOUT));
   const savedPanelState = panelStateFromStorage(storage, savedDockLayout);
   const savedShortcuts = loadShortcutBindings(storage);
+  const savedFreeze = freezeStateFromStorage(storage);
   const state = {
     docs: [],
     active: 0,
@@ -45,8 +47,8 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     problemsWidth: savedPanelState.problemsWidth,
     problemsHeight: savedPanelState.problemsHeight,
     dockLayout: savedPanelState.dockLayout,
-    freezeRow: false,
-    freezeColumn: false,
+    freezeRow: savedFreeze.row,
+    freezeColumn: savedFreeze.column,
     contextHit: null,
     contextMenuActiveGroup: "",
     contextMenuOpen: false,
