@@ -244,6 +244,7 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "read_text_files",
     "save_config",
     "save_file_dialog",
+    "startup_open_paths",
     "write_text_file_chunk_safe",
     "write_text_file_safe"
   ]);

@@ -2,7 +2,8 @@ import { TableDocument, clamp } from "./core/table-model.js";
 import { makeCellCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument, undoManagerForDocument } from "./core/document-undo-state.js";
 import {
-  listenForNativeDrops
+  listenForNativeDrops,
+  startupOpenPathsNative
 } from "./core/io.js";
 import {
   exposeTxteditorPerf
@@ -439,6 +440,9 @@ settingsController.loadConfig().catch((error) => {
 });
 listenForNativeDrops((paths) => openDroppedNativePaths(paths)).catch(showError);
 lspController.startListeners();
+startupOpenPathsNative()
+  .then((paths) => openDroppedNativePaths(paths))
+  .catch(showError);
 
 function activeDoc() {
   return state.docs[state.active] ?? EMPTY_DOC;

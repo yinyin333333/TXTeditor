@@ -10,7 +10,8 @@ export {
   openWorkspaceNative,
   readFileAsDocument,
   saveDocumentNative,
-  saveTextNative
+  saveTextNative,
+  startupOpenPathsNative
 } from "./platform/file-io.js";
 export {
   closeWindow,

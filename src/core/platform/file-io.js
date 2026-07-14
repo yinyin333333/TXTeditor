@@ -27,6 +27,15 @@ export async function readFileAsDocument(file, DocumentType) {
   return DocumentType.fromText(file.name, text, { encoding, path: file.name, fileSizeBytes: file.size });
 }
 
+export async function startupOpenPathsNative(invokeFn = null) {
+  if (!invokeFn && !isTauriRuntime()) return [];
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  const paths = await invoke("startup_open_paths");
+  return Array.isArray(paths)
+    ? paths.filter((path) => typeof path === "string" && path.length > 0)
+    : [];
+}
+
 export async function openFilesNative(DocumentType) {
   const api = await tauriApi();
   const paths = await api.invoke("open_files_dialog");

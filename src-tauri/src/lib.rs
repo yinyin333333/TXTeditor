@@ -1,6 +1,7 @@
 mod app_bootstrap;
 mod config;
 mod file_io;
+mod launch_paths;
 mod lsp_protocol;
 mod lsp_service;
 mod native_paths;
@@ -22,6 +23,7 @@ pub fn run() {
             file_io::read_text_files,
             file_io::write_text_file_safe,
             file_io::write_text_file_chunk_safe,
+            launch_paths::startup_open_paths,
             workspace_files::list_workspace_files,
             workspace_files::list_sibling_txt_files,
             config::get_config,
