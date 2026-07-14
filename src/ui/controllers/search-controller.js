@@ -1,4 +1,9 @@
-import { findInTable, normalizeSearchScope } from "../../core/search.js";
+import {
+  SEARCH_DIRECTION_BACKWARD,
+  SEARCH_DIRECTION_FORWARD,
+  findInTable,
+  normalizeSearchScope
+} from "../../core/search.js";
 import {
   clampSearchModalPosition,
   searchScrollOptionsForScope,
@@ -101,12 +106,12 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     );
   }
 
-  function findNext() {
+  function find(direction = SEARCH_DIRECTION_FORWARD) {
     const query = els.searchInput.value;
     const scope = selectedSearchScope();
     const includeStart = searchShouldIncludeStart(query, scope, state.search.lastQuery, state.search.lastScope);
     const focus = state.selection.focus;
-    const found = findInTable(activeDoc(), query, focus, { includeStart, scope });
+    const found = findInTable(activeDoc(), query, focus, { direction, includeStart, scope });
     if (!found) {
       els.searchStatus.textContent = "No results";
       return;
@@ -121,12 +126,25 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     els.searchStatus.textContent = searchStatusText(scope, found, target);
   }
 
+  function findNext() {
+    return find(SEARCH_DIRECTION_FORWARD);
+  }
+
+  function findPrevious() {
+    return find(SEARCH_DIRECTION_BACKWARD);
+  }
+
+  function submitSearch(event) {
+    if (!shouldSubmitSearchKey(event.key)) return false;
+    event.preventDefault();
+    if (event.shiftKey) findPrevious();
+    else findNext();
+    return true;
+  }
+
   function wireEvents() {
     els.searchInput.addEventListener("keydown", (event) => {
-      if (shouldSubmitSearchKey(event.key)) {
-        event.preventDefault();
-        findNext();
-      }
+      submitSearch(event);
       if (shouldCloseSearchKey(event.key)) {
         event.preventDefault();
         closeSearch();
@@ -136,16 +154,13 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
       Object.assign(state.search, searchStateAfterInput());
     });
     els.searchPanel.querySelectorAll("input[name='searchScope']").forEach((input) => {
-      input.addEventListener("keydown", (event) => {
-        if (!shouldSubmitSearchKey(event.key)) return;
-        event.preventDefault();
-        findNext();
-      });
+      input.addEventListener("keydown", submitSearch);
       input.addEventListener("change", () => {
         Object.assign(state.search, searchStateAfterInput());
       });
     });
     els.searchPanel.addEventListener("click", (event) => {
+      if (event.target.closest("[data-search-previous]")) findPrevious();
       if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();
     });
     els.searchPanel.addEventListener("wheel", (event) => {
@@ -163,6 +178,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   return {
     closeSearch,
     findNext,
+    findPrevious,
     showSearch,
     wireEvents
   };

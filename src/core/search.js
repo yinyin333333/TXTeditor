@@ -1,6 +1,8 @@
 export const SEARCH_SCOPE_ALL = "all";
 export const SEARCH_SCOPE_COLUMN_TITLES = "column-titles";
 export const SEARCH_SCOPE_ROW_TITLES = "row-titles";
+export const SEARCH_DIRECTION_FORWARD = "forward";
+export const SEARCH_DIRECTION_BACKWARD = "backward";
 
 export function normalizeSearchScope(scope) {
   if (scope === SEARCH_SCOPE_COLUMN_TITLES || scope === SEARCH_SCOPE_ROW_TITLES) return scope;
@@ -13,16 +15,27 @@ export function findInTable(doc, query, start = { row: 0, column: 0 }, options =
   const scope = normalizeSearchScope(options.scope);
   const total = searchCandidateCount(doc, scope);
   if (total <= 0) return null;
-  const startIndex = searchStartIndex(doc, scope, start) + (options.includeStart ? 0 : 1);
+  const direction = normalizeSearchDirection(options.direction);
+  const offset = options.includeStart ? 0 : direction === SEARCH_DIRECTION_BACKWARD ? -1 : 1;
+  const startIndex = searchStartIndex(doc, scope, start) + offset;
 
   for (let step = 0; step < total; step++) {
-    const index = (startIndex + step) % total;
+    const delta = direction === SEARCH_DIRECTION_BACKWARD ? -step : step;
+    const index = wrapIndex(startIndex + delta, total);
     const { row, column } = searchCandidateAt(doc, scope, index);
     const raw = doc.getCell(row, column);
     const hay = searchableText(raw, options);
     if (hay.includes(needle)) return { row, column };
   }
   return null;
+}
+
+export function normalizeSearchDirection(direction) {
+  return direction === SEARCH_DIRECTION_BACKWARD ? SEARCH_DIRECTION_BACKWARD : SEARCH_DIRECTION_FORWARD;
+}
+
+function wrapIndex(index, total) {
+  return ((index % total) + total) % total;
 }
 
 function searchCandidateCount(doc, scope) {
