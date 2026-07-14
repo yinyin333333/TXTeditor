@@ -24,6 +24,9 @@ import {
   lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental,
+  listSiblingTextFilesNative,
+  listWorkspaceNative,
+  loadLintReferenceDataset,
   openNativePathsBulk,
   openWorkspaceNative,
   pickFilePath,
@@ -223,7 +226,9 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
   assert.deepEqual([...new Set(jsCommands)], [
     "close_window",
     "get_config",
+    "list_sibling_txt_files",
     "list_workspace_files",
+    "load_lint_reference_dataset",
     "lsp_close_file",
     "lsp_definition",
     "lsp_get_diagnostics",
@@ -299,9 +304,17 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   const calls = [];
   const responses = new Map([
     ["get_config", [{ lintMode: "advanced", schemaVersion: "3.2" }]],
+    ["load_lint_reference_dataset", [{ gameVersion: "3.2", canonicalSha256: "verified", files: [] }]],
     ["pick_file_path", ["E:\\Tools\\vector-lsp.exe"]],
     ["open_folder_dialog", ["E:\\PickedFolder", "E:\\Workspace"]],
-    ["list_workspace_files", [{ path: "E:\\Workspace", files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }] }]],
+    ["list_workspace_files", [
+      { path: "E:\\Workspace", files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }] },
+      { path: "E:\\Workspace", files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }] }
+    ]],
+    ["list_sibling_txt_files", [{
+      path: "E:\\Mod\\global\\excel",
+      files: [{ path: "E:\\Mod\\global\\excel\\ItemTypes.txt", name: "ItemTypes.txt" }]
+    }]],
     ["save_file_dialog", ["E:\\SavedAs.txt", "E:\\Export.txt"]],
     ["lsp_get_diagnostics", [[{ row: 1, column: 2, message: "warn" }]]],
     ["lsp_get_diagnostics_batch", [[{
@@ -335,6 +348,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   try {
     assert.equal(isTauriRuntime(), true);
     assert.deepEqual(await getConfig(), { lintMode: "advanced", schemaVersion: "3.2" });
+    assert.deepEqual(await loadLintReferenceDataset("3.2"), { gameVersion: "3.2", canonicalSha256: "verified", files: [] });
     await saveConfig({ lintMode: "basic" });
     assert.equal(await pickFilePath(), "E:\\Tools\\vector-lsp.exe");
     assert.equal(await pickFolderPath(), "E:\\PickedFolder");
@@ -342,6 +356,14 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.deepEqual(await openWorkspaceNative(), {
       path: "E:\\Workspace",
       files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }]
+    });
+    assert.deepEqual(await listWorkspaceNative("E:\\Workspace"), {
+      path: "E:\\Workspace",
+      files: [{ path: "E:\\Workspace\\items.txt", name: "items.txt" }]
+    });
+    assert.deepEqual(await listSiblingTextFilesNative("E:\\Mod\\global\\excel\\MagicPrefix.txt"), {
+      path: "E:\\Mod\\global\\excel",
+      files: [{ path: "E:\\Mod\\global\\excel\\ItemTypes.txt", name: "ItemTypes.txt" }]
     });
 
     const existingDoc = TableDocument.fromText("items.txt", "id\n1", { path: "E:\\items.txt" });
@@ -360,6 +382,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
     await lspStart("E:\\Workspace", 7);
+    await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace");
     await lspOpenFile("file:///items.txt", 1, "id\n1", 7);
     await lspUpdateFile("file:///items.txt", 2, "id\n2", 7);
     await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }], 7);
@@ -398,18 +421,22 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.notEqual(chunkTransactionIds[0], chunkTransactionIds[1]);
     assert.deepEqual(calls, [
       ["invoke", "get_config", undefined],
+      ["invoke", "load_lint_reference_dataset", { gameVersion: "3.2" }],
       ["invoke", "save_config", { config: { lintMode: "basic" } }],
       ["invoke", "pick_file_path", undefined],
       ["invoke", "open_folder_dialog", undefined],
       ["invoke", "close_window", undefined],
       ["invoke", "open_folder_dialog", undefined],
       ["invoke", "list_workspace_files", { path: "E:\\Workspace" }],
+      ["invoke", "list_workspace_files", { path: "E:\\Workspace" }],
+      ["invoke", "list_sibling_txt_files", { path: "E:\\Mod\\global\\excel\\MagicPrefix.txt" }],
       ["invoke", "write_text_file_chunk_safe", { path: "E:\\items.txt", text: "id\n1", encoding: "utf-8", transactionId: chunkTransactionIds[0], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "items.txt" }],
       ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", encoding: "utf-8", transactionId: chunkTransactionIds[1], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7 }],
+      ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8 }],
       ["invoke", "lsp_open_file", { uri: "file:///items.txt", version: 1, text: "id\n1", generation: 7 }],
       ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2", generation: 7 }],
       ["invoke", "lsp_update_file_incremental", { uri: "file:///items.txt", version: 3, changes: [{ range: { start: { line: 0, character: 0 } }, text: "id" }], generation: 7 }],

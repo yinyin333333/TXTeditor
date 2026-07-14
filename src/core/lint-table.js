@@ -58,6 +58,7 @@ export function tableFromDocument(doc) {
     },
     eachRow(callback) {
       for (let rowIndex = 1; rowIndex < this.rows.length; rowIndex += 1) {
+        if (String(this.rows[rowIndex]?.[0] ?? "").trimStart().startsWith("*")) continue;
         callback({
           table: this,
           rowIndex,

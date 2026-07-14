@@ -1,3 +1,5 @@
+import { lspSiblingParentPath } from "./lsp-uri-policy.js";
+
 export function lspOpenDocumentPolicy({ vectorEngine, lspStarted, uri, docState, version }) {
   if (!vectorEngine) return { action: "skip-legacy", event: "vector-open-skipped-legacy" };
   if (!lspStarted) return { action: "skip-not-started" };
@@ -13,13 +15,53 @@ export function lspWorkspaceSessionPolicy({
   started,
   activeWorkspacePath,
   requestedWorkspacePath,
+  activeContextMode = "workspace",
+  requestedContextMode = "workspace",
+  activeReferenceRootPath = "",
+  requestedReferenceRootPath = "",
   forceRestart = false
 }) {
   const activeKey = lspWorkspaceKey(activeWorkspacePath);
   const requestedKey = lspWorkspaceKey(requestedWorkspacePath);
+  const activeMode = lspContextMode(activeContextMode);
+  const requestedMode = lspContextMode(requestedContextMode);
+  const activeReferenceRootKey = lspWorkspaceKey(activeReferenceRootPath);
+  const requestedReferenceRootKey = lspWorkspaceKey(requestedReferenceRootPath);
   if (!started) return { action: "start", activeKey, requestedKey };
-  if (forceRestart || activeKey !== requestedKey) return { action: "restart", activeKey, requestedKey };
+  if (forceRestart || activeKey !== requestedKey || activeMode !== requestedMode
+    || activeReferenceRootKey !== requestedReferenceRootKey) {
+    return { action: "restart", activeKey, requestedKey };
+  }
   return { action: "sync", activeKey, requestedKey };
+}
+
+export function lspContextMode(value) {
+  return value === "sibling" ? "sibling" : "workspace";
+}
+
+export function lspDocumentMatchesSessionScope({
+  documentPath,
+  hasUri = true,
+  workspacePath,
+  contextMode,
+  referenceRootPath = ""
+}) {
+  if (!hasUri) return false;
+  if (lspContextMode(contextMode) !== "sibling") {
+    const documentKey = lspWorkspaceKey(documentPath);
+    const workspaceKey = lspWorkspaceKey(workspacePath);
+    if (!workspaceKey) return Boolean(documentKey);
+    return lspPathWithin(documentKey, workspaceKey);
+  }
+  const sameSiblingParent = lspWorkspaceKey(lspSiblingParentPath(documentPath)) === lspWorkspaceKey(workspacePath);
+  const documentKey = lspWorkspaceKey(documentPath);
+  const referenceKey = lspWorkspaceKey(referenceRootPath);
+  return sameSiblingParent || lspPathWithin(documentKey, referenceKey);
+}
+
+function lspPathWithin(pathKey, rootKey) {
+  if (!pathKey || !rootKey) return false;
+  return pathKey === rootKey || pathKey.startsWith(rootKey.endsWith("/") ? rootKey : `${rootKey}/`);
 }
 
 export function lspWorkspaceKey(pathValue) {

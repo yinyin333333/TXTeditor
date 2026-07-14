@@ -2,6 +2,8 @@ export { isTauriRuntime } from "./platform/tauri-api.js";
 export { decodeBuffer, encodeText } from "./platform/text-codec.js";
 export {
   listenForNativeDrops,
+  listSiblingTextFilesNative,
+  listWorkspaceNative,
   openFilesNative,
   openNativePaths,
   openNativePathsBulk,
@@ -13,6 +15,7 @@ export {
 export {
   closeWindow,
   getConfig,
+  loadLintReferenceDataset,
   pickFilePath,
   pickFolderPath,
   saveConfig

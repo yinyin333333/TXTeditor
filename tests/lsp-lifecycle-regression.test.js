@@ -838,7 +838,7 @@ test("syncOpenDocs stops the old generation after a workspace restart without co
     const controller = createLspHarness(state, first);
     const oldSync = controller.syncOpenDocs();
     await oldOpenStarted.promise;
-    const restart = controller.startWorkspace("E:\\B");
+    const restart = controller.startWorkspace("E:\\A", { forceRestart: true });
     assert.equal(state.lsp.generation, 2);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
@@ -924,7 +924,7 @@ test("stale didOpen completion cannot clear the current generation open promise 
     oldOpenPromise = controller.openDoc(doc);
     await oldOpenStarted.promise;
 
-    restartPromise = controller.startWorkspace("E:\\B");
+    restartPromise = controller.startWorkspace("E:\\A", { forceRestart: true });
     await currentOpenStarted.promise;
     const currentOpenPromise = lspDocumentState(doc).openPromise;
     assert.ok(currentOpenPromise);
@@ -1048,7 +1048,7 @@ test("stale didChange rejection cannot overwrite the reopened generation state o
       .catch((error) => controller.handleUpdateError(doc, error, "stale-generation-update"));
     await oldUpdateStarted.promise;
 
-    await controller.startWorkspace("E:\\B");
+    await controller.startWorkspace("E:\\A", { forceRestart: true });
     await controller.handleDiagnosticsChanged({
       uri,
       generation: 2,

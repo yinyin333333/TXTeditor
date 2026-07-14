@@ -1,7 +1,7 @@
 import { TableDocument } from "../../core/table-model.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import { markTableSaved, tableFileState } from "../../core/table-file-state.js";
-import { docToUri } from "../../core/lsp-uri-policy.js";
+import { docToUri, lspStandaloneParentPath } from "../../core/lsp-uri-policy.js";
 import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
@@ -43,6 +43,7 @@ export function createDocumentController({
   reportLspCloseFailure,
   lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
+  ensureDocumentSession = async () => {},
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
   resetLegacyWorkspaceIndex,
@@ -137,6 +138,21 @@ export function createDocumentController({
     focusGrid();
     if (doc.largeFileMode) return;
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
+      const referenceRootPath = state.workspace?.path ?? "";
+      const siblingParent = isTauriRuntime()
+        ? lspStandaloneParentPath(doc.path, referenceRootPath)
+        : null;
+      if (siblingParent) {
+        try {
+          const options = { contextMode: "sibling" };
+          if (referenceRootPath) options.referenceRootPath = referenceRootPath;
+          await lspStartWorkspace(siblingParent, options);
+        } catch (error) {
+          reportLspOpenFailure(doc, error, "sibling-session-start");
+        }
+        scheduleHoverPrewarm("document-opened");
+        return;
+      }
       lspOpenDoc(doc).catch((error) => reportLspOpenFailure(doc, error, "document-open"));
       scheduleHoverPrewarm("document-opened");
     } else {
@@ -306,6 +322,7 @@ export function createDocumentController({
   async function closeTab(index) {
     if (index < 0 || index >= state.docs.length) return;
     commitActiveEdit();
+    const previouslyActiveDoc = activeDoc();
     const doc = state.docs[index];
     if (doc.dirty) {
       const choice = await askCloseChoice(doc);
@@ -343,6 +360,14 @@ export function createDocumentController({
     if (isLegacyLintEngine()) scheduleLegacyLintFull("tab-closed", 0);
     updateGridDiagnostics();
     renderChrome();
+    const nextActiveDoc = activeDoc();
+    if (isVectorLintEngine() && nextActiveDoc && nextActiveDoc !== previouslyActiveDoc) {
+      try {
+        await ensureDocumentSession(nextActiveDoc);
+      } catch (error) {
+        reportLspOpenFailure(nextActiveDoc, error, "tab-close-session-rebind");
+      }
+    }
   }
 
   function askCloseChoice(doc) {

@@ -10,6 +10,7 @@
     "start": "node scripts/dev-server.js",
     "dev": "node scripts/dev-server.js",
     "build:web": "node scripts/build-web.js",
+    "build:release:sanitized": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release-sanitized.ps1",
     "icons": "node scripts/generate-tauri-icons.js",
     "fixture": "node scripts/generate-fixture.js",
     "fixture:20k": "node scripts/generate-fixture.js 20000",

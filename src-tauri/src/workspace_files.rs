@@ -12,6 +12,38 @@ pub(crate) fn list_workspace_files(path: String) -> Result<WorkspacePayload, Str
     Ok(WorkspacePayload { path, files })
 }
 
+#[tauri::command]
+pub(crate) fn list_sibling_txt_files(path: String) -> Result<WorkspacePayload, String> {
+    let target = Path::new(&path);
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("File has no parent directory: {path}"))?;
+    let canonical_parent = fs::canonicalize(parent).map_err(|err| err.to_string())?;
+    let mut entries = fs::read_dir(&canonical_parent)
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    entries.sort_by_key(|entry| entry.path());
+
+    let mut files = Vec::new();
+    for entry in entries {
+        let file_type = entry.file_type().map_err(|err| err.to_string())?;
+        if !file_type.is_file() || !is_txt(&entry.path()) {
+            continue;
+        }
+        let entry_path = entry.path();
+        files.push(workspace_file_from_entry_path(
+            &entry_path,
+            entry.metadata().ok(),
+        ));
+    }
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(WorkspacePayload {
+        path: user_facing_path(&canonical_parent),
+        files,
+    })
+}
+
 pub(crate) fn collect_text_files(
     path: &Path,
     files: &mut Vec<WorkspaceFile>,
@@ -106,6 +138,12 @@ fn is_text_like(path: &Path) -> bool {
         path.extension().and_then(|value| value.to_str()).map(|value| value.to_ascii_lowercase()),
         Some(ext) if matches!(ext.as_str(), "txt" | "tsv" | "tbl" | "csv")
     )
+}
+
+fn is_txt(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("txt"))
 }
 
 #[derive(Serialize)]
@@ -242,6 +280,37 @@ mod tests {
             vec![Some(5), Some(6), Some(1)]
         );
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_sibling_txt_files_is_non_recursive_and_txt_only() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "txteditor-list-siblings-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        let target = root.join("MagicPrefix.txt");
+        fs::write(&target, "Name\nCaster\n").unwrap();
+        fs::write(root.join("ItemTypes.TXT"), "Code\nstaf\n").unwrap();
+        fs::write(root.join("ignored.tsv"), "Code\nnope\n").unwrap();
+        fs::write(root.join("nested").join("Properties.txt"), "code\nac\n").unwrap();
+
+        let payload = list_sibling_txt_files(target.to_string_lossy().to_string()).unwrap();
+        let names = payload
+            .files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["ItemTypes.TXT", "MagicPrefix.txt"]);
+        assert_eq!(payload.path, user_facing_path(&root));
+        assert!(payload.files.iter().all(|file| file.modified_ms.is_some()));
         fs::remove_dir_all(&root).unwrap();
     }
 

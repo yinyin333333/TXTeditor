@@ -20,13 +20,16 @@ function makeSettingsController({
   config = {},
   diagnostics = [],
   lspStarted = false,
+  lintEnabled = true,
   saveConfigError = null,
-  workspace = null
+  workspace = null,
+  legacy = false
 } = {}) {
   const { document, window } = installFakeAppStartupDom();
   const calls = [];
-  const invoke = async (command) => {
-    calls.push(["invoke", command]);
+  const lspStarts = [];
+  const invoke = async (command, args) => {
+    calls.push(["invoke", command, args]);
     if (command === "get_config") return config;
     if (command === "save_config") {
       if (saveConfigError) throw saveConfigError;
@@ -47,12 +50,19 @@ function makeSettingsController({
     dockLayout: DEFAULT_DOCK_LAYOUT,
     workspace,
     lint: {
-      engine: LINT_ENGINE_VECTOR,
-      enabled: true,
+      engine: legacy ? "legacy" : LINT_ENGINE_VECTOR,
+      enabled: lintEnabled,
       diagnostics: [...diagnostics],
       legacy: {
         settings: createDefaultLintSettings(),
-        rulesOpen: false
+        rulesOpen: false,
+        referenceDataset: {
+          status: "ready",
+          selectedVersion: "3.2",
+          digest: "old-digest",
+          documents: [{ name: "hidden-reference.txt" }]
+        },
+        workspaceIndexCache: { signature: "old", profile: "RotW", index: {} }
       }
     },
     lsp: {
@@ -74,25 +84,28 @@ function makeSettingsController({
     dockForPanel: (panel) => state.dockLayout[panel],
     setPanelDock: (panel, edge) => { state.dockLayout = { ...state.dockLayout, [panel]: edge }; },
     resetDockLayout: () => { state.dockLayout = DEFAULT_DOCK_LAYOUT; },
-    isLegacyLintEngine: () => false,
-    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => state.lint.engine === "legacy",
+    isVectorLintEngine: () => state.lint.engine === LINT_ENGINE_VECTOR,
     effectiveVectorLspHoverEnabled: () => true,
     cancelLegacyLintJobs: () => calls.push("cancel-legacy"),
-    scheduleLegacyLintFull: () => calls.push("schedule-legacy"),
-    legacyLintDisplayActive: () => false,
+    scheduleLegacyLintFull: (reason, delay) => calls.push(["schedule-legacy", reason, delay]),
+    legacyLintDisplayActive: () => state.lint.engine === "legacy",
     currentLegacyProfileRules: () => ({}),
     invalidateLspHover: () => calls.push("invalidate-hover"),
     setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
     updateGridDiagnostics: () => calls.push("update-grid-diagnostics"),
-    lspStartWorkspace: async () => calls.push("lsp-start"),
-    syncOpenDocsToVectorLsp: async () => calls.push("lsp-sync"),
+    lspStartWorkspace: async (...args) => {
+      lspStarts.push(args);
+      calls.push("lsp-start");
+    },
+    ensureDocumentSession: async (options) => calls.push(["ensure-document-session", options]),
     recordLintEngineEvent: (name) => calls.push(["lint-event", name]),
     renderChrome: () => calls.push("render"),
     reportBackgroundFailure: (label) => calls.push(["background-failure", label]),
     showError: (error) => calls.push(["error", String(error)]),
     escapeHtml
   });
-  return { controller, document, calls, host, state };
+  return { controller, document, calls, host, lspStarts, state };
 }
 
 async function waitForSelector(document, selector) {
@@ -195,6 +208,96 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
 
   document.body.querySelector("[data-settings-choice='cancel']").click();
   await pending;
+});
+
+test("standalone Vector Lint Options save and Restart LSP force-rebind the active document session", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    diagnostics: [{ id: "old" }],
+    config: { schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+
+  const savePending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsSchemaVersion").value = "3.1";
+  document.body.querySelector("#settingsReferenceVersion").value = "3.1";
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await savePending;
+
+  assert.equal(state.config.schemaVersion, "3.1");
+  assert.equal(state.config.referenceVersion, "3.1");
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(calls.includes("lsp-start"), false);
+  assert.equal(calls.includes("update-grid-diagnostics"), true);
+
+  const restartPending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("[data-settings-choice='restart-lsp']").click();
+  await restartPending;
+
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }],
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("Legacy reference changes force a fresh Vector session while lint reactivation ensures one", async () => {
+  const engineSwitch = makeSettingsController({
+    legacy: true,
+    config: { schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+  assert.equal(await engineSwitch.controller.setLegacyLintReferenceVersion("3.1"), true);
+  engineSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
+  assert.equal(engineSwitch.state.lint.engine, LINT_ENGINE_VECTOR);
+  assert.equal(engineSwitch.state.config.referenceVersion, "3.1");
+  assert.deepEqual(engineSwitch.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(engineSwitch.calls.includes("lsp-start"), false);
+
+  const lintEnable = makeSettingsController({ lintEnabled: false });
+  lintEnable.controller.toggleLint();
+  assert.equal(lintEnable.state.lint.enabled, true);
+  assert.deepEqual(lintEnable.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", {}]
+  ]);
+
+  const workspaceSwitch = makeSettingsController({
+    legacy: true,
+    workspace: { path: "E:\\Workspace" }
+  });
+  workspaceSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
+  assert.equal(workspaceSwitch.calls.includes("lsp-start"), true);
+  assert.deepEqual(workspaceSwitch.lspStarts, [["E:\\Workspace", { forceRestart: true }]]);
+  assert.equal(workspaceSwitch.calls.some((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), false);
+});
+
+test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {
+  const { controller, calls, state } = makeSettingsController({
+    legacy: true,
+    diagnostics: [{ id: "old" }],
+    workspace: { path: "E:\\Workspace" },
+    config: { lintMode: "basic", schemaVersion: "3.2" }
+  });
+
+  const first = controller.setLegacyLintReferenceVersion("3.1");
+  const latest = controller.setLegacyLintReferenceVersion("2.4");
+  assert.equal(await first, false);
+  assert.equal(await latest, true);
+
+  assert.equal(state.config.referenceVersion, "2.4");
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.equal(state.lint.legacy.referenceDataset.status, "not-started");
+  assert.deepEqual(state.lint.legacy.referenceDataset.documents, []);
+  assert.deepEqual(state.lint.legacy.workspaceIndexCache, { signature: "", profile: "", index: null });
+  assert.equal(calls.some((entry) => entry === "lsp-start"), false);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "reference-version-changed" && entry[2] === 0).length, 1);
+  assert.deepEqual(calls
+    .filter((entry) => Array.isArray(entry) && entry[0] === "invoke" && entry[1] === "save_config")
+    .map((entry) => entry[2].config.referenceVersion), ["3.1", "2.4"]);
 });
 
 test("Lint Options Escape behaves like Cancel without saving or restarting LSP", async () => {

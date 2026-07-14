@@ -4,6 +4,7 @@ mod file_io;
 mod lsp_protocol;
 mod lsp_service;
 mod native_paths;
+mod reference_data;
 mod workspace_files;
 
 // Tauri command wiring lives here; implementation details stay in focused modules.
@@ -21,9 +22,11 @@ pub fn run() {
             file_io::write_text_file_safe,
             file_io::write_text_file_chunk_safe,
             workspace_files::list_workspace_files,
+            workspace_files::list_sibling_txt_files,
             config::get_config,
             config::save_config,
             config::pick_file_path,
+            reference_data::load_lint_reference_dataset,
             lsp_service::lsp_start,
             lsp_service::lsp_open_file,
             lsp_service::lsp_update_file,

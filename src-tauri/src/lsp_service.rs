@@ -134,7 +134,7 @@ impl Drop for LspManager {
     }
 }
 
-fn find_vector_lsp_binary() -> Result<PathBuf, String> {
+pub(crate) fn find_vector_lsp_binary() -> Result<PathBuf, String> {
     let exe = if cfg!(windows) {
         "vector-lsp.exe"
     } else {
@@ -175,6 +175,7 @@ struct EditorLaunchSpec {
     binary: PathBuf,
     lint_mode: String,
     schema_version: Option<String>,
+    reference_version: Option<String>,
     schema_path: Option<PathBuf>,
     plugin_path: Option<PathBuf>,
     debug_logging: bool,
@@ -218,10 +219,22 @@ impl EditorLaunchSpec {
                 None,
             )
         };
+        let reference_version = config
+            .reference_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                (lint_mode == "basic")
+                    .then(|| schema_version.clone())
+                    .flatten()
+            });
         Ok(Self {
             binary,
             lint_mode,
             schema_version,
+            reference_version,
             schema_path,
             plugin_path,
             debug_logging: config.debug_logging,
@@ -240,10 +253,11 @@ impl EditorLaunchSpec {
             })
             .unwrap_or_else(|| "none".to_string());
         format!(
-            "vector-lsp editor launch: executable={} mode={} schema={} encoding=auto transport=stdio singleShot=false pluginPath={}",
+            "vector-lsp editor launch: executable={} mode={} schema={} reference={} encoding=auto transport=stdio singleShot=false pluginPath={}",
             self.binary.display(),
             self.lint_mode,
             schema,
+            self.reference_version.as_deref().unwrap_or("disabled"),
             self.plugin_path
                 .as_ref()
                 .map(|path| path.display().to_string())
@@ -274,6 +288,7 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
         "VLSP_SCHEMA_LOADER",
         "VLSP_SCHEMA_PATH",
         "VLSP_SCHEMA_VARIANT",
+        "VLSP_REFERENCE_VARIANT",
         "VLSP_PLUGIN_PATH",
         "VLSP_WORKSPACE_PATH",
         "VLSP_ENCODING",
@@ -289,6 +304,9 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
     }
     if let Some(version) = &spec.schema_version {
         command.env("VLSP_SCHEMA_VARIANT", version);
+    }
+    if let Some(version) = &spec.reference_version {
+        command.env("VLSP_REFERENCE_VARIANT", version);
     }
     if let Some(path) = &spec.plugin_path {
         command.env("VLSP_PLUGIN_PATH", path);
@@ -668,14 +686,32 @@ fn require_newer_document_version(uri: &str, current: u32, incoming: u32) -> Res
     }
 }
 
+fn reference_context_mode(value: Option<&str>) -> Result<&'static str, String> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("workspace") => Ok("workspace"),
+        Some("sibling") => Ok("sibling"),
+        Some(value) => Err(format!(
+            "Unsupported LSP reference context mode '{value}'. Expected 'workspace' or 'sibling'."
+        )),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
     generation: u64,
+    context_mode: Option<String>,
+    reference_root_path: Option<String>,
     state: tauri::State<'_, LspManager>,
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
 ) -> Result<LspStartResult, String> {
+    let reference_context_mode = reference_context_mode(context_mode.as_deref())?;
+    let reference_root_uri = reference_root_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(path_to_uri);
     if generation == 0 {
         return Err("LSP generation must be positive".to_string());
     }
@@ -749,7 +785,11 @@ pub(crate) async fn lsp_start(
             "params": {
                 "processId": std::process::id(),
                 "rootUri": root_uri,
-                "initializationOptions": { "sessionGeneration": generation },
+                "initializationOptions": {
+                    "sessionGeneration": generation,
+                    "referenceContextMode": reference_context_mode,
+                    "referenceRootUri": reference_root_uri
+                },
                 "capabilities": { "textDocument": { "publishDiagnostics": {} } }
             }
         }),
@@ -1665,6 +1705,17 @@ mod tests {
     }
 
     #[test]
+    fn reference_context_mode_is_explicit_and_rejects_unknown_values() {
+        assert_eq!(reference_context_mode(None).unwrap(), "workspace");
+        assert_eq!(
+            reference_context_mode(Some("workspace")).unwrap(),
+            "workspace"
+        );
+        assert_eq!(reference_context_mode(Some("sibling")).unwrap(), "sibling");
+        assert!(reference_context_mode(Some("recursive-sibling")).is_err());
+    }
+
+    #[test]
     fn editor_launch_defaults_match_the_ui_and_resolve_absolute_paths() {
         let binary = std::env::current_exe().unwrap();
         let config = AppConfig {
@@ -1677,6 +1728,7 @@ mod tests {
         assert!(spec.binary.is_absolute());
         assert_eq!(spec.lint_mode, "basic");
         assert_eq!(spec.schema_version.as_deref(), Some("3.2"));
+        assert_eq!(spec.reference_version.as_deref(), Some("3.2"));
         assert!(spec.schema_path.is_none());
         assert!(spec.plugin_path.is_none());
         assert!(canonical_existing_path(".", "cwd").unwrap().is_absolute());
@@ -1688,6 +1740,7 @@ mod tests {
             binary: std::env::current_exe().unwrap(),
             lint_mode: "basic".to_string(),
             schema_version: Some("3.2".to_string()),
+            reference_version: Some("3.2".to_string()),
             schema_path: None,
             plugin_path: None,
             debug_logging: false,
@@ -1724,6 +1777,40 @@ mod tests {
             environment.get("VLSP_SCHEMA_VARIANT"),
             Some(&Some("3.2".to_string()))
         );
+        assert_eq!(
+            environment.get("VLSP_REFERENCE_VARIANT"),
+            Some(&Some("3.2".to_string()))
+        );
+    }
+
+    #[test]
+    fn advanced_editor_mode_never_guesses_a_reference_version() {
+        let binary = std::env::current_exe().unwrap();
+        let config = AppConfig {
+            vector_lsp_path: Some(binary.to_string_lossy().to_string()),
+            lint_mode: Some("advanced".to_string()),
+            schema_path: Some(binary.to_string_lossy().to_string()),
+            schema_version: Some("3.2".to_string()),
+            reference_version: None,
+            ..Default::default()
+        };
+
+        let spec = EditorLaunchSpec::resolve(&config).unwrap();
+        assert_eq!(spec.lint_mode, "advanced");
+        assert!(spec.reference_version.is_none());
+
+        let mut command = Command::new(&spec.binary);
+        configure_editor_command(&mut command, &spec);
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(environment.get("VLSP_REFERENCE_VARIANT"), Some(&None));
     }
 
     #[test]

@@ -58,16 +58,24 @@ export function createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
-  syncOpenDocsToVectorLsp,
+  ensureDocumentSession = async () => {},
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
   showError,
   escapeHtml
 }) {
+  let legacyReferenceSelectionRequest = 0;
+  let legacyReferenceSaveQueue = Promise.resolve();
+  let configLoaded = Object.keys(state.config ?? {}).length > 0;
+  let configSnapshot = { ...(state.config ?? {}) };
+
   async function loadConfig() {
     const config = await getConfig();
     state.config = config ?? {};
+    configSnapshot = { ...state.config };
+    configLoaded = true;
+    renderLintControls();
   }
 
   function toggleTheme() {
@@ -129,9 +137,9 @@ export function createSettingsController({
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
     } else if (state.workspace?.path) {
-      lspStartWorkspace(state.workspace.path).catch(showError);
-    } else if (state.lsp.started) {
-      syncOpenDocsToVectorLsp().catch(showError);
+      lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+    } else {
+      ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
     renderChrome();
   }
@@ -145,8 +153,12 @@ export function createSettingsController({
     } else if (isLegacyLintEngine() && state.problemsVisible) {
       const schedule = legacyLintImmediateSchedule("lint-enabled");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (isVectorLintEngine() && state.workspace?.path && !state.lsp.started) {
-      lspStartWorkspace(state.workspace.path).catch(showError);
+    } else if (isVectorLintEngine()) {
+      if (state.workspace?.path) {
+        if (!state.lsp.started) lspStartWorkspace(state.workspace.path).catch(showError);
+      } else {
+        ensureDocumentSession({}).catch(showError);
+      }
     }
     saveLintSettings();
     renderChrome();
@@ -168,6 +180,62 @@ export function createSettingsController({
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
     }
     renderChrome();
+  }
+
+  async function setLegacyLintReferenceVersion(value) {
+    const supported = new Set(["", "3.2", "3.1", "2.4", "1.13c"]);
+    const referenceVersion = supported.has(String(value ?? "")) ? String(value ?? "") : "";
+    const request = ++legacyReferenceSelectionRequest;
+    const save = legacyReferenceSaveQueue
+      .catch(() => {})
+      .then(async () => {
+        if (!configLoaded) {
+          configSnapshot = { ...((await getConfig()) ?? {}) };
+          configLoaded = true;
+        }
+        const updated = {
+          ...configSnapshot,
+          referenceVersion: referenceVersion || undefined
+        };
+        await saveConfig(updated);
+        configSnapshot = updated;
+        return updated;
+      });
+    legacyReferenceSaveQueue = save;
+    try {
+      const updated = await save;
+      if (request !== legacyReferenceSelectionRequest) return false;
+      state.config = updated;
+    } catch (error) {
+      if (request === legacyReferenceSelectionRequest) {
+        showError(`Failed to save bundled reference version: ${error}`);
+        renderChrome();
+      }
+      return false;
+    }
+    invalidateLegacyReferenceData("reference-version-changed");
+    renderChrome();
+    return true;
+  }
+
+  function invalidateLegacyReferenceData(reason) {
+    state.lint.legacy.referenceDataset = {
+      status: "not-started",
+      selectedVersion: "",
+      gameVersion: "",
+      schemaVariant: "",
+      digest: "",
+      documents: [],
+      error: "",
+      loadMs: 0
+    };
+    state.lint.legacy.workspaceIndexCache = { signature: "", profile: "", index: null };
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+    if (legacyLintDisplayActive()) {
+      const schedule = legacyLintImmediateSchedule(reason);
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
   }
 
   function setLegacyLintRuleEnabled(ruleId, enabled) {
@@ -318,6 +386,16 @@ export function createSettingsController({
     const versionOptions = VERSIONS.map((v) =>
       `<option value="${escapeHtml(v)}"${schemaVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
     ).join("");
+    const referenceVersion = config.referenceVersion ?? "";
+    const referenceVersionOptions = [
+      ["", "Use schema/profile version"],
+      ["3.2", "3.2"],
+      ["3.1", "3.1"],
+      ["2.4", "2.4"],
+      ["1.13c", "1.13c"]
+    ].map(([value, label]) =>
+      `<option value="${escapeHtml(value)}"${referenceVersion === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
 
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -355,6 +433,9 @@ export function createSettingsController({
             ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">Browse&hellip;</button>` : ""}
           </div>
         </div>
+        <label class="settings-label">Bundled Reference Data</label>
+        <select class="modal-input settings-version-select" id="settingsReferenceVersion">${referenceVersionOptions}</select>
+        <div class="settings-hint">One version is used for the whole lint session. Advanced mode requires an explicit version; leave this disabled only when no baseline fallback is wanted.</div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsDebugLogging"${config.debugLogging ? " checked" : ""} />
@@ -376,6 +457,7 @@ export function createSettingsController({
     const schemaInput = backdrop.querySelector("#settingsSchemaPath");
     const pluginInput = backdrop.querySelector("#settingsPluginPath");
     const versionSelect = backdrop.querySelector("#settingsSchemaVersion");
+    const referenceVersionSelect = backdrop.querySelector("#settingsReferenceVersion");
 
     tabs.forEach((tab) => tab.addEventListener("click", () => {
       const isBasic = tab.dataset.settingsTab === "basic";
@@ -434,6 +516,7 @@ export function createSettingsController({
             ...config,
             lintMode: selectedMode,
             schemaVersion: versionSelect?.value || "3.2",
+            referenceVersion: referenceVersionSelect?.value || undefined,
             pluginPath: pluginInput?.value.trim() || undefined,
             schemaPath: schemaInput?.value.trim() || undefined,
             vectorLspPath: lspInput?.value.trim() || undefined,
@@ -448,17 +531,29 @@ export function createSettingsController({
             return;
           }
           state.config = updated;
+          configSnapshot = { ...updated };
+          configLoaded = true;
           finish();
-          if (state.workspace) {
+          if (isLegacyLintEngine()) {
+            invalidateLegacyReferenceData("reference-version-changed");
+          } else {
             setLintDiagnostics([]);
             updateGridDiagnostics();
-            lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+            if (state.workspace?.path) {
+              lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+            } else {
+              ensureDocumentSession({ forceRestart: true }).catch(showError);
+            }
           }
         }
         if (choice === "cancel") finish();
         if (choice === "restart-lsp") {
           finish();
-          if (state.workspace) lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+          if (state.workspace?.path) {
+            lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+          } else {
+            ensureDocumentSession({ forceRestart: true }).catch(showError);
+          }
         }
       });
     });
@@ -479,6 +574,7 @@ export function createSettingsController({
       lintEnabled: state.lint.enabled,
       profiles: lintProfileOptions(),
       activeProfile: state.lint.legacy.settings.profile,
+      activeReferenceVersion: state.config?.referenceVersion ?? "",
       rulesOpen: state.lint.legacy.rulesOpen
     });
     const lintButton = `<button class="toggle-button${controls.lintButton.active ? " active" : ""}" data-command="${controls.lintButton.id}">${controls.lintButton.label}</button>`;
@@ -486,13 +582,21 @@ export function createSettingsController({
       const options = controls.profileSelect.options.map((option) =>
         `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
       ).join("");
+      const referenceOptions = controls.referenceSelect.options.map((option) =>
+        `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+      ).join("");
       els.lintControls.innerHTML = `
         ${lintButton}
         <select id="${controls.profileSelect.id}" class="${controls.profileSelect.className}" title="${controls.profileSelect.title}">${options}</select>
+        <select id="${controls.referenceSelect.id}" class="${controls.referenceSelect.className}" title="${controls.referenceSelect.title}">${referenceOptions}</select>
         <button data-command="${controls.rulesButton.id}" class="${controls.rulesButton.active ? "active" : ""}">${controls.rulesButton.label}</button>
       `;
       const select = els.lintControls.querySelector("#lintProfileSelect");
       select?.addEventListener("change", () => setLegacyLintProfile(select.value));
+      const referenceSelect = els.lintControls.querySelector("#lintReferenceVersionSelect");
+      referenceSelect?.addEventListener("change", () => {
+        setLegacyLintReferenceVersion(referenceSelect.value).catch((error) => showError(error));
+      });
       renderLegacyLintRulesPanel();
       return;
     }
@@ -546,6 +650,7 @@ export function createSettingsController({
     setColorizeColumns,
     setMouseResizeLocked,
     setLegacyLintProfile,
+    setLegacyLintReferenceVersion,
     setLegacyLintRuleEnabled,
     setLintEngine,
     setTheme,

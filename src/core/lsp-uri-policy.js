@@ -7,6 +7,25 @@ export function docToUri(doc) {
   try { return new URL(base).href; } catch { return base; }
 }
 
+export function lspSiblingParentPath(pathValue) {
+  const value = String(pathValue || "").trim();
+  const separatorIndex = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
+  if (separatorIndex < 0) return null;
+  if (separatorIndex === 0) return value[0];
+  const parent = value.slice(0, separatorIndex);
+  if (/^[a-zA-Z]:$/.test(parent)) return `${parent}${value[separatorIndex]}`;
+  return parent || null;
+}
+
+export function lspStandaloneParentPath(pathValue, workspacePath = "") {
+  const parent = lspSiblingParentPath(pathValue);
+  if (!parent) return null;
+  const fileKey = normalizedDirectoryIdentity(pathValue);
+  const workspaceKey = normalizedDirectoryIdentity(workspacePath).replace(/\/$/, "");
+  if (workspaceKey && (fileKey === workspaceKey || fileKey.startsWith(`${workspaceKey}/`))) return null;
+  return parent;
+}
+
 export function uriToFileKey(uri, pathKey = defaultLspPathKey) {
   return pathKey(pathFromUri(uri) ?? safeDecodeURIComponent(String(uri || "")));
 }
@@ -33,6 +52,10 @@ export function fileNameFromUri(uri) {
 
 function defaultLspPathKey(pathValue) {
   return String(pathValue || "").replace(/\\/g, "/").toLowerCase();
+}
+
+function normalizedDirectoryIdentity(pathValue) {
+  return String(pathValue || "").trim().replace(/\\/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
 }
 
 function encodeFilePath(pathValue) {

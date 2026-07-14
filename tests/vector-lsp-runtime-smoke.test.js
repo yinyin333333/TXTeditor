@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   NO_VECTOR_LSP_EXE_MESSAGE,
+  defaultVectorRoot,
   findExistingVectorLspExecutable,
   missingVectorLspContribMessage,
   prepareStaging,
@@ -40,7 +41,9 @@ test("Vector-LSP no-executable diagnostic text is explicit without running optio
   assert.equal(findExistingVectorLspExecutable(vectorRoot), null);
   assert.equal(resolveVectorLspExecutable({ vectorRoot }), null);
   assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /^REAL VECTOR-LSP SMOKE NOT RUN:/);
-  assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /building E:\\vector-lsp is forbidden/);
+  assert.match(NO_VECTOR_LSP_EXE_MESSAGE, /--vector-lsp-exe or --vector-lsp-root/);
+  assert.doesNotMatch(NO_VECTOR_LSP_EXE_MESSAGE, /[A-Za-z]:\\/);
+  assert.equal(defaultVectorRoot(repoRootForDefault()), path.resolve(repoRootForDefault(), "..", "vector-lsp"));
 });
 
 test("Vector-LSP required runtime smoke fails nonzero semantics when executable is missing", async () => {
@@ -49,13 +52,17 @@ test("Vector-LSP required runtime smoke fails nonzero semantics when executable 
   try {
     await assert.rejects(
       () => runVectorLspRuntimeSmoke({ repoRoot, vectorRoot, requireReal: true }),
-      /building E:\\vector-lsp is forbidden/
+      /never builds an external repository/
     );
     assert.equal(existsSync(path.join(repoRoot, ".runtime-smoke", "vector-lsp-smoke-result.json")), false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+function repoRootForDefault() {
+  return path.join(tmpdir(), "txteditor-repo");
+}
 
 test("Vector-LSP required runtime smoke fails before staging when contrib is missing", async () => {
   const repoRoot = mkdtempSync(path.join(tmpdir(), "txteditor-vlsp-smoke-"));

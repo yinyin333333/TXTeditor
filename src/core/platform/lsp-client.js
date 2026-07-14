@@ -4,10 +4,13 @@ function withGeneration(payload, generation) {
   return generation == null ? payload : { ...payload, generation };
 }
 
-export async function lspStart(workspacePath, generation) {
+export async function lspStart(workspacePath, generation, contextMode = "workspace", referenceRootPath = "") {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
-  return api.invoke("lsp_start", withGeneration({ workspacePath }, generation));
+  const payload = { workspacePath };
+  if (contextMode === "sibling") payload.contextMode = contextMode;
+  if (referenceRootPath) payload.referenceRootPath = referenceRootPath;
+  return api.invoke("lsp_start", withGeneration(payload, generation));
 }
 
 export async function lspOpenFile(uri, version, text, generation) {

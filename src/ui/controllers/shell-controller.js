@@ -21,6 +21,7 @@ export function createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  ensureDocumentSession = async () => {},
   saveSelectionState = () => {},
   recordUiPerf,
   perfNow,
@@ -174,6 +175,7 @@ export function createShellController({
     updateGridDiagnostics();
     renderChrome();
     scrollProblemsToActiveFile();
+    ensureDocumentSession(activeDoc()).catch(showError);
     scheduleHoverPrewarm("tab-switch");
     els.host?.focus?.();
   }

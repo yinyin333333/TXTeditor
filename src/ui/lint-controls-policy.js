@@ -11,6 +11,7 @@ export function lintControlsModel({
   lintEnabled = false,
   profiles = [],
   activeProfile = "RotW",
+  activeReferenceVersion = "",
   rulesOpen = false
 } = {}) {
   const lintButton = lintToggleControl(lintEnabled);
@@ -28,6 +29,16 @@ export function lintControlsModel({
           selected: profile === activeProfile
         }))
       },
+      referenceSelect: {
+        id: "lintReferenceVersionSelect",
+        className: "profile-select",
+        title: "Bundled reference data version",
+        options: ["", "3.2", "3.1", "2.4", "1.13c"].map((version) => ({
+          value: version,
+          label: version || "Profile",
+          selected: version === activeReferenceVersion
+        }))
+      },
       rulesButton: {
         id: "toggle-lint-rules",
         label: "Rules",
@@ -41,6 +52,7 @@ export function lintControlsModel({
     mode: "vector-lsp",
     lintButton,
     profileSelect: null,
+    referenceSelect: null,
     rulesButton: null,
     settingsButton: {
       id: "open-settings",

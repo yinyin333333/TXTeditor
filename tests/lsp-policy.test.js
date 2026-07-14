@@ -9,14 +9,18 @@ import {
 } from "../src/core/lsp-document-state.js";
 import {
   lspChangedRowsToIncrementalChanges,
+  lspDocumentMatchesSessionScope,
   lspHoverReady,
   lspOpenDocumentPolicy,
   lspUpdateDocumentPolicy,
+  lspWorkspaceSessionPolicy,
   normalizeLspDocumentChange
 } from "../src/core/lsp-session-policy.js";
 import {
   docToUri,
   fileNameFromUri,
+  lspSiblingParentPath,
+  lspStandaloneParentPath,
   pathFromUri,
   uriToFileKey
 } from "../src/core/lsp-uri-policy.js";
@@ -89,6 +93,7 @@ import {
 } from "../src/ui/hover-policy.js";
 import { createLspHoverController } from "../src/ui/controllers/lsp-hover-controller.js";
 import { createLspController, mapLspDiagnosticToDisplay } from "../src/ui/controllers/lsp-controller.js";
+import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { appSettingsVisualControls } from "../src/ui/app-settings-policy.js";
 import { lintEnginePanelActive } from "../src/ui/problems-policy.js";
 import {
@@ -152,6 +157,328 @@ test("JS LSP URI policy encodes and decodes path edge cases", () => {
   assert.equal(pathFromUri("file://SERVER/Share/Data%20File.txt"), "//server/Share/Data File.txt");
   assert.equal(uriToFileKey("file://SERVER/Share/Data%20File.txt", lintPathKey), "//server/share/data file.txt");
   assert.equal(docToUri({ path: "" }), null);
+  assert.equal(lspSiblingParentPath("E:\\Mods\\TXT\\magicprefix.txt"), "E:\\Mods\\TXT");
+  assert.equal(lspSiblingParentPath("E:\\magicprefix.txt"), "E:\\");
+  assert.equal(lspSiblingParentPath("/mods/txt/magicprefix.txt"), "/mods/txt");
+  assert.equal(lspSiblingParentPath("magicprefix.txt"), null);
+  assert.equal(lspStandaloneParentPath("E:\\Mods\\TXT\\magicprefix.txt", "E:\\Workspace"), "E:\\Mods\\TXT");
+  assert.equal(lspStandaloneParentPath("E:\\Workspace\\global\\excel\\skills.txt", "e:/workspace/"), null);
+});
+
+test("sibling and full workspace contexts never reuse the same Vector session", () => {
+  assert.equal(lspWorkspaceSessionPolicy({
+    started: true,
+    activeWorkspacePath: "E:\\Mods\\TXT",
+    requestedWorkspacePath: "e:/mods/txt/",
+    activeContextMode: "sibling",
+    requestedContextMode: "sibling"
+  }).action, "sync");
+  assert.equal(lspWorkspaceSessionPolicy({
+    started: true,
+    activeWorkspacePath: "E:\\Mods\\TXT",
+    requestedWorkspacePath: "E:\\Mods\\TXT",
+    activeContextMode: "sibling",
+    requestedContextMode: "workspace"
+  }).action, "restart");
+  assert.equal(lspWorkspaceSessionPolicy({
+    started: true,
+    activeWorkspacePath: "E:\\Mods\\TXT",
+    requestedWorkspacePath: "E:\\Mods\\TXT",
+    activeContextMode: "sibling",
+    requestedContextMode: "sibling",
+    activeReferenceRootPath: "E:\\ReferenceA",
+    requestedReferenceRootPath: "E:\\ReferenceB"
+  }).action, "restart");
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Reference\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\Mods\\TXT",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Reference"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\OtherMod\\ItemTypes.txt",
+    workspacePath: "E:\\Mods\\TXT",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Reference"
+  }), false);
+});
+
+test("Vector session scope keeps workspace and standalone mod parents isolated", () => {
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Workspace\\global\\excel\\MagicPrefix.txt",
+    workspacePath: "",
+    contextMode: "workspace"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\MagicPrefix.txt",
+    workspacePath: "E:\\",
+    contextMode: "workspace"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Workspace\\global\\excel\\MagicPrefix.txt",
+    workspacePath: "E:\\Workspace",
+    contextMode: "workspace"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\OtherMod\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\Workspace",
+    contextMode: "workspace"
+  }), false);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\OtherMod\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\OtherMod\\global\\excel",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Workspace"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\ThirdMod\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\OtherMod\\global\\excel",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Workspace"
+  }), false);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Workspace\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\OtherMod\\global\\excel",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Workspace"
+  }), true);
+});
+
+test("closing active standalone tab rebinds the revealed document to its different parent generation", async () => {
+  const originalWindow = globalThis.window;
+  const first = TableDocument.fromText("magicprefix.txt", "name\titype1\na\tstaff", {
+    path: "E:\\Mods\\A\\magicprefix.txt"
+  });
+  const second = TableDocument.fromText("magicsuffix.txt", "name\tetype1\nb\tring", {
+    path: "E:\\Mods\\B\\magicsuffix.txt"
+  });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_start" || command === "lsp_open_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      }
+    }
+  };
+  const state = {
+    docs: [first, second],
+    active: 1,
+    workspace: null,
+    lint: { engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: false, generation: 0, readiness: "stopped", openFileCount: 0 },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false
+  };
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 1,
+      showToast: () => {},
+      showError: (error) => { throw error; },
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics: () => {},
+      renderChrome: () => {},
+      addDocument: async () => {},
+      applyFreezeToDoc: () => {},
+      updateActiveProblemHighlight: () => {},
+      lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.startWorkspace("E:\\Mods\\B", { contextMode: "sibling" });
+    assert.deepEqual(calls, [
+      ["lsp_start", { workspacePath: "E:\\Mods\\B", contextMode: "sibling", generation: 1 }],
+      ["lsp_open_file", { uri: docToUri(second), version: 1, text: second.toText(), generation: 1 }]
+    ]);
+
+    const documentController = createDocumentController({
+      state,
+      els: {
+        host: { focus() {} },
+        closeDialog: { classList: { add() {}, remove() {} } },
+        closeDialogText: { textContent: "" },
+        fileInput: { click() {} }
+      },
+      grid: { commitEdit() {}, draw() {}, setDocument() {} },
+      emptyDoc: TableDocument.fromText("empty.txt", ""),
+      activeDoc: () => state.docs[state.active],
+      saveSelectionState() {},
+      applyFreezeToDoc() {},
+      renderChrome() {},
+      showError: (error) => { throw error; },
+      reportWindowCloseFailure() {},
+      lspOpenDoc: controller.openDoc,
+      reportLspOpenFailure: controller.reportOpenFailure,
+      lspCloseDoc: controller.closeDoc,
+      reportLspCloseFailure: controller.reportCloseFailure,
+      lspStartWorkspace: controller.startWorkspace,
+      ensureDocumentSession: controller.ensureStandaloneSession,
+      scheduleHoverPrewarm() {},
+      resetUndoManagerForDocument() {},
+      resetLegacyWorkspaceIndex() {},
+      scheduleLegacyLintForOpen() {},
+      scheduleLegacyLintFull() {},
+      cancelLegacyLintJobs() {},
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      updateGridDiagnostics() {},
+      scrollProblemsToActiveFile() {}
+    });
+
+    await documentController.closeTab(1);
+    assert.deepEqual(calls.slice(2), [
+      ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2 }],
+      ["lsp_open_file", { uri: docToUri(first), version: 1, text: first.toText(), generation: 2 }]
+    ]);
+    assert.deepEqual(state.docs, [first]);
+    assert.equal(state.active, 0);
+    assert.equal(state.lsp.workspacePath, "E:\\Mods\\A");
+    assert.equal(state.lsp.generation, 2);
+    assert.equal(lspDocumentState(first).sessionGeneration, 2);
+  } finally {
+    resetLspDocumentState(first);
+    resetLspDocumentState(second);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("closing active standalone tab reuses the existing sibling session for the same parent", async () => {
+  const originalWindow = globalThis.window;
+  const first = TableDocument.fromText("magicprefix.txt", "name\titype1\na\tstaff", {
+    path: "E:\\Mods\\Same\\magicprefix.txt"
+  });
+  const second = TableDocument.fromText("magicsuffix.txt", "name\tetype1\nb\tring", {
+    path: "E:\\Mods\\Same\\magicsuffix.txt"
+  });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_get_diagnostics_batch") return args.requests.map(() => []);
+          if (["lsp_start", "lsp_open_file", "lsp_close_file"].includes(command)) return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      }
+    }
+  };
+  const state = {
+    docs: [first, second],
+    active: 1,
+    workspace: null,
+    lint: { engine: LINT_ENGINE_VECTOR, diagnostics: [], status: "" },
+    lsp: { started: false, generation: 0, readiness: "stopped", openFileCount: 0 },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false
+  };
+  let closePromise;
+  try {
+    const controller = createLspController({
+      state,
+      els: { logList: null, host: { focus() {} } },
+      grid: {
+        clearLspHovers() {},
+        visibleRowIndexes: () => [],
+        visibleColumnIndexes: () => [],
+        setDocument() {},
+        scrollCellIntoView() {},
+        draw() {}
+      },
+      activeDoc: () => state.docs[state.active],
+      isVectorLintEngine: () => true,
+      effectiveVectorLspHoverEnabled: () => false,
+      recordLintEngineEvent: () => {},
+      perfNow: () => 1,
+      showToast: () => {},
+      showError: (error) => { throw error; },
+      setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+      updateGridDiagnostics: () => {},
+      renderChrome: () => {},
+      addDocument: async () => {},
+      applyFreezeToDoc: () => {},
+      updateActiveProblemHighlight: () => {},
+      lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
+    });
+
+    await controller.startWorkspace("E:\\Mods\\Same", { contextMode: "sibling" });
+
+    const documentController = createDocumentController({
+      state,
+      els: {
+        host: { focus() {} },
+        closeDialog: { classList: { add() {}, remove() {} } },
+        closeDialogText: { textContent: "" },
+        fileInput: { click() {} }
+      },
+      grid: { commitEdit() {}, draw() {}, setDocument() {} },
+      emptyDoc: TableDocument.fromText("empty.txt", ""),
+      activeDoc: () => state.docs[state.active],
+      saveSelectionState() {},
+      applyFreezeToDoc() {},
+      renderChrome() {},
+      showError: (error) => { throw error; },
+      reportWindowCloseFailure() {},
+      lspOpenDoc: controller.openDoc,
+      reportLspOpenFailure: controller.reportOpenFailure,
+      lspCloseDoc: (doc) => {
+        closePromise = controller.closeDoc(doc);
+        return closePromise;
+      },
+      reportLspCloseFailure: controller.reportCloseFailure,
+      lspStartWorkspace: controller.startWorkspace,
+      ensureDocumentSession: controller.ensureStandaloneSession,
+      scheduleHoverPrewarm() {},
+      resetUndoManagerForDocument() {},
+      resetLegacyWorkspaceIndex() {},
+      scheduleLegacyLintForOpen() {},
+      scheduleLegacyLintFull() {},
+      cancelLegacyLintJobs() {},
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      updateGridDiagnostics() {},
+      scrollProblemsToActiveFile() {}
+    });
+
+    await documentController.closeTab(1);
+    await closePromise;
+
+    assert.equal(calls.filter(([command]) => command === "lsp_start").length, 1);
+    assert.equal(calls.filter(([command]) => command === "lsp_open_file").length, 2);
+    assert.deepEqual(calls.filter(([command]) => command === "lsp_close_file"), [[
+      "lsp_close_file",
+      { uri: docToUri(second), generation: 1 }
+    ]]);
+    assert.deepEqual(state.docs, [first]);
+    assert.equal(state.active, 0);
+    assert.equal(state.lsp.workspacePath, "E:\\Mods\\Same");
+    assert.equal(state.lsp.generation, 1);
+    assert.equal(lspDocumentState(first).sessionGeneration, 1);
+  } finally {
+    resetLspDocumentState(first);
+    resetLspDocumentState(second);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("incremental LSP row text preserves sparse appended columns", () => {
@@ -744,6 +1071,75 @@ test("Vector-LSP diagnostic tooltip omits precise range excerpts", () => {
   );
 });
 
+test("Vector-LSP Problems tooltip preserves plain gameplay and fix explanations", () => {
+  const missileMessage = "Unknown missile value 'ulvl'. The game treats it as 0, so this part of the calculation has no effect.";
+  const consumeMessage = "Unknown stat name 'item_addsksrc _tab'. This Consume bonus is not applied; other Consume slots still work. Use the exact Stat name from itemstatcost.txt.";
+  const propertyMessage = "Unknown stat name 'item_strengthpercent_perlevel'. This property has no effect. Use the exact Stat name from itemstatcost.txt.";
+
+  assert.equal(diagnosticTooltipText({
+    severity: "error",
+    message: missileMessage,
+    data: {
+      kind: "invalid-argument",
+      scope: "Missile scope BBE",
+      namespace: "MissCalc.code",
+      binaryFallback: "integer constant 0",
+      compileEffect: "remaining formula continues"
+    }
+  }), missileMessage);
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message: consumeMessage,
+    data: {
+      kind: "unresolved-reference",
+      scope: "monpet-consumestat",
+      storedValue: 65535,
+      runtimeEffect: "Consume skips only this slot"
+    }
+  }), consumeMessage);
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message: propertyMessage,
+    data: {
+      kind: "unresolved-reference",
+      scope: "properties-stat",
+      storedValue: 65535,
+      runtimeEffect: "The active property slot applies no stat"
+    }
+  }), propertyMessage);
+});
+
+test("Vector-LSP tooltip does not repeat guidance already present in the message", () => {
+  const decimal = "Decimal values are not supported here. The game reads '-6.25' as '-6' and ignores '.25'. Use an integer expression that matches your intent.";
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message: decimal,
+    data: {
+      kind: "decimal-policy",
+      hint: "Use an integer expression that matches your intent."
+    }
+  }), decimal);
+
+  const prefixStop = "Character ';' is not supported here. The game uses the valid part before it and ignores the rest. Rewrite the expression if the ignored part is intended to run.";
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message: prefixStop,
+    data: {
+      kind: "ignored-suffix",
+      hint: "Rewrite the expression if the ignored part is intended to run."
+    }
+  }), prefixStop);
+
+  assert.equal(diagnosticTooltipText({
+    severity: "error",
+    message: "Invalid calculation: Function 'min()' expects 2 arguments, got 1",
+    data: {
+      kind: "invalid-argument",
+      hint: "Use exactly 2 arguments."
+    }
+  }), "Invalid calculation: Function 'min()' expects 2 arguments, got 1\n\nWhat to do:\nUse exactly 2 arguments.");
+});
+
 test("Vector-LSP tooltip uses structured missing-token data for insertion hints", () => {
   const formula = "min(5,1";
   const diagnostic = {
@@ -1281,6 +1677,7 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
     lintEnabled: false,
     profiles: ["RotW", "2.4"],
     activeProfile: "2.4",
+    activeReferenceVersion: "3.1",
     rulesOpen: true
   });
   assert.match(html, /id="lintControls" class="lint-controls"/);
@@ -1297,6 +1694,14 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
   assert.deepEqual(legacyControls.profileSelect.options, [
     { value: "RotW", label: "RotW", selected: false },
     { value: "2.4", label: "2.4", selected: true }
+  ]);
+  assert.equal(legacyControls.referenceSelect.id, "lintReferenceVersionSelect");
+  assert.deepEqual(legacyControls.referenceSelect.options, [
+    { value: "", label: "Profile", selected: false },
+    { value: "3.2", label: "3.2", selected: false },
+    { value: "3.1", label: "3.1", selected: true },
+    { value: "2.4", label: "2.4", selected: false },
+    { value: "1.13c", label: "1.13c", selected: false }
   ]);
   assert.deepEqual(legacyControls.rulesButton, { id: "toggle-lint-rules", label: "Rules", active: true });
   assert.equal(legacyControls.settingsButton, null);

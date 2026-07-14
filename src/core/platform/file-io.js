@@ -37,7 +37,17 @@ export async function openWorkspaceNative() {
   const api = await tauriApi();
   const selected = await api.invoke("open_folder_dialog");
   if (!selected) return null;
-  return api.invoke("list_workspace_files", { path: selected });
+  return listWorkspaceNative(selected, api.invoke);
+}
+
+export async function listWorkspaceNative(path, invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  return invoke("list_workspace_files", { path });
+}
+
+export async function listSiblingTextFilesNative(path, invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  return invoke("list_sibling_txt_files", { path });
 }
 
 export async function openNativePaths(paths, DocumentType, invokeFn = null) {

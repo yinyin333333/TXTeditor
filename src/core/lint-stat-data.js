@@ -77,7 +77,7 @@ export const STAT_PARAMETER_TUPLES = new Map([
       ...numberedFields("min", " (h)", 6)
     ],
     [
-      "max1", "max2", "max3", "max5", "max5", "max6",
+      "max1", "max2", "max3", "max4", "max5", "max6",
       ...numberedFields("max", " (n)", 6),
       ...numberedFields("max", " (h)", 6)
     ]

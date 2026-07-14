@@ -82,6 +82,25 @@ export function createInitialAppState({ storage = localStorage } = {}) {
           signature: "",
           profile: "",
           index: null
+        },
+        workspaceRefreshRequired: false,
+        siblingDocs: [],
+        siblingLoad: {
+          status: "not-started",
+          files: [],
+          roots: [],
+          error: "",
+          signature: ""
+        },
+        referenceDataset: {
+          status: "not-started",
+          selectedVersion: "",
+          gameVersion: "",
+          schemaVariant: "",
+          digest: "",
+          documents: [],
+          error: "",
+          loadMs: 0
         }
       }
     },
@@ -89,6 +108,8 @@ export function createInitialAppState({ storage = localStorage } = {}) {
       started: false,
       workspacePath: "",
       workspaceKey: "",
+      contextMode: "workspace",
+      referenceRootPath: "",
       generation: 0,
       readiness: "stopped",
       openFileCount: 0

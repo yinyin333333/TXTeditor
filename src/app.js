@@ -232,7 +232,7 @@ const settingsController = createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
-  syncOpenDocsToVectorLsp,
+  ensureDocumentSession: (options) => lspController.ensureStandaloneSession(activeDoc(), options),
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
@@ -263,6 +263,7 @@ const documentController = createDocumentController({
   reportLspCloseFailure,
   lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
   lspStartWorkspace,
+  ensureDocumentSession: lspController.ensureStandaloneSession,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
   resetLegacyWorkspaceIndex,
@@ -389,6 +390,7 @@ shellController = createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
+  ensureDocumentSession: lspController.ensureStandaloneSession,
   saveSelectionState,
   recordUiPerf,
   perfNow,
@@ -566,10 +568,6 @@ function reportWindowCloseFailure(error, context) {
 
 async function lspStartWorkspace(workspacePath, options) {
   return lspController.startWorkspace(workspacePath, options);
-}
-
-async function syncOpenDocsToVectorLsp() {
-  return lspController.syncOpenDocs();
 }
 
 async function lspOpenDoc(doc) {

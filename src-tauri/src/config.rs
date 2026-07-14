@@ -17,6 +17,8 @@ pub(crate) struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) schema_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reference_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) plugin_path: Option<String>,
     #[serde(default)]
     pub(crate) debug_logging: bool,
@@ -29,6 +31,7 @@ impl Default for AppConfig {
             schema_path: None,
             lint_mode: Some("basic".to_string()),
             schema_version: Some("3.2".to_string()),
+            reference_version: None,
             plugin_path: None,
             debug_logging: false,
         }
@@ -113,6 +116,7 @@ mod tests {
             schema_path: None,
             lint_mode: Some("legacy".to_string()),
             schema_version: Some("3.2".to_string()),
+            reference_version: None,
             plugin_path: None,
             debug_logging: true,
         };

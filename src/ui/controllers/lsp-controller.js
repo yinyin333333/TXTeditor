@@ -18,6 +18,7 @@ import { diagnosticsForDocument } from "../../core/lint-engine.js";
 import { tableFileState } from "../../core/table-file-state.js";
 import {
   docToUri,
+  lspStandaloneParentPath,
   pathFromUri,
   uriToFileKey as uriToFileKeyWithPolicy
 } from "../../core/lsp-uri-policy.js";
@@ -28,10 +29,13 @@ import {
   resetLspDocumentState
 } from "../../core/lsp-document-state.js";
 import {
+  lspContextMode,
   lspChangedRowsToIncrementalChanges,
+  lspDocumentMatchesSessionScope,
   lspHoverReady,
   lspOpenDocumentPolicy,
   lspUpdateDocumentPolicy,
+  lspWorkspaceKey,
   lspWorkspaceSessionPolicy
 } from "../../core/lsp-session-policy.js";
 import {
@@ -47,130 +51,13 @@ import {
   reportLspUpdateFailure
 } from "../../core/lsp-update-status.js";
 import { reportBackgroundTaskFailure } from "../../core/background-task-status.js";
+import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
+export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 const HOVER_READY_FALLBACK_MS = 1200;
 const DEFERRED_FULL_UPDATE_DELAY_MS = 250;
 const MAX_LOG_ENTRIES = 500;
-export function mapLspDiagnosticToDisplay(diagnostic, {
-  uri = "",
-  fileKey = "",
-  fileName = "",
-  filePath = "",
-  index = 0,
-  doc = null
-} = {}) {
-  const rowIndex = numberOr(diagnostic?.row, 0);
-  const columnIndex = numberOr(diagnostic?.col ?? diagnostic?.column, 0);
-  const cellValue = knownCellValue(doc, rowIndex, columnIndex);
-  const data = diagnostic?.data ?? null;
-  const code = diagnostic?.code == null ? "" : String(diagnostic.code);
-  const range = displayDiagnosticRange(diagnostic, cellValue, data);
-  return {
-    id: `lsp:${uri}:${rowIndex}:${columnIndex}:${index}`,
-    fileKey,
-    fileName,
-    filePath,
-    rowIndex,
-    columnIndex,
-    severity: diagnostic?.severity ?? "warning",
-    message: diagnostic?.message ?? "",
-    ruleId: code,
-    code,
-    data,
-    locationLabel: `Row ${rowIndex + 1}, Col ${columnIndex + 1}`,
-    ...range
-  };
-}
-function knownCellValue(doc, rowIndex, columnIndex) {
-  if (!doc || typeof doc.getCell !== "function") return null;
-  if (!Number.isInteger(rowIndex) || !Number.isInteger(columnIndex)) return null;
-  if (rowIndex < 0 || columnIndex < 0) return null;
-  if (rowIndex >= Number(doc.rowCount) || columnIndex >= Number(doc.columnCount)) return null;
-  return doc.getCell(rowIndex, columnIndex);
-}
-function displayDiagnosticRange(diagnostic, cellValue, data = null) {
-  const startCharacter = optionalNumber(diagnostic?.startCharacter);
-  const endCharacter = optionalNumber(diagnostic?.endCharacter);
-  const cellStartCharacter = optionalNumber(diagnostic?.cellStartCharacter);
-  const cellEndCharacter = optionalNumber(diagnostic?.cellEndCharacter);
-  const insertionPoint = optionalNumber(data?.insertionPoint);
-  const fallback = {
-    startCharacter,
-    endCharacter,
-    cellStartCharacter,
-    cellEndCharacter,
-    insertionPoint,
-    localStart: null,
-    localEnd: null,
-    localInsertionPoint: null,
-    isInsertionPoint: false,
-    hasPreciseRange: false
-  };
-  if (cellValue == null || [startCharacter, endCharacter, cellStartCharacter, cellEndCharacter].some((value) => value == null)) {
-    return fallback;
-  }
-  const cellLength = String(cellValue).length;
-  const rawLocalStart = startCharacter - cellStartCharacter;
-  const rawLocalEnd = endCharacter - cellStartCharacter;
-  const rangeWithinCell = startCharacter >= cellStartCharacter
-    && startCharacter <= cellEndCharacter
-    && endCharacter >= cellStartCharacter
-    && endCharacter <= cellEndCharacter
-    && endCharacter >= startCharacter;
-  const localRangeWithinKnownCell = rangeWithinCell
-    && rawLocalStart >= 0
-    && rawLocalStart <= cellLength
-    && rawLocalEnd >= 0
-    && rawLocalEnd <= cellLength
-    && rawLocalEnd >= rawLocalStart;
-  const localStart = localRangeWithinKnownCell ? rawLocalStart : null;
-  const localEnd = localRangeWithinKnownCell ? rawLocalEnd : null;
-  const structuredInsertionPoint = isStructuredInsertionPointData(data);
-  const fallbackInsertionPoint = localInsertionPointFromData(insertionPoint, {
-    cellStartCharacter,
-    cellLength
-  });
-  const localInsertionPoint = structuredInsertionPoint && localRangeWithinKnownCell
-    ? localStart
-    : fallbackInsertionPoint;
-  const zeroWidthRange = localRangeWithinKnownCell && startCharacter === endCharacter;
-  const isInsertionPoint = (structuredInsertionPoint && localInsertionPoint != null) || zeroWidthRange;
-  const fullCellRange = localRangeWithinKnownCell && localStart <= 0 && localEnd >= cellLength;
-  return {
-    ...fallback,
-    localStart,
-    localEnd,
-    localInsertionPoint,
-    isInsertionPoint,
-    hasPreciseRange: isInsertionPoint || (localRangeWithinKnownCell && !fullCellRange)
-  };
-}
-function optionalNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-function numberOr(value, fallback) {
-  const number = optionalNumber(value);
-  return number == null ? fallback : number;
-}
-function isStructuredInsertionPointData(data) {
-  return data?.kind === "missing-token" || data?.kind === "unexpected-eof";
-}
-function localInsertionPointFromData(insertionPoint, {
-  cellStartCharacter,
-  cellLength
-}) {
-  if (insertionPoint == null) return null;
-  if (insertionPoint >= 0 && insertionPoint <= cellLength) {
-    return insertionPoint;
-  }
-  const absoluteLocalInsertionPoint = insertionPoint - cellStartCharacter;
-  if (absoluteLocalInsertionPoint >= 0 && absoluteLocalInsertionPoint <= cellLength) {
-    return absoluteLocalInsertionPoint;
-  }
-  return null;
-}
 export function createLspController({
   state,
   els,
@@ -288,15 +175,33 @@ export function createLspController({
     hoverController.retryQueuedHover(`hover-ready:${reason}`);
     if (doc === activeDoc()) hoverController.scheduleHoverPrewarm(`hover-ready:${reason}`);
   }
-  async function startWorkspace(workspacePath, { forceRestart = false } = {}) {
+  function documentMatchesSessionScope(doc, workspacePath, contextMode, referenceRootPath = "") {
+    return lspDocumentMatchesSessionScope({
+      documentPath: doc?.path,
+      hasUri: Boolean(docToUri(doc)),
+      workspacePath,
+      contextMode,
+      referenceRootPath
+    });
+  }
+  async function startWorkspace(workspacePath, {
+    forceRestart = false,
+    contextMode = "workspace",
+    referenceRootPath = ""
+  } = {}) {
     if (!isVectorLintEngine()) {
       recordLintEngineEvent("vector-start-skipped", { workspacePath });
       return;
     }
+    const requestedContextMode = lspContextMode(contextMode);
     const sessionPolicy = lspWorkspaceSessionPolicy({
       started: state.lsp.started,
       activeWorkspacePath: state.lsp.workspacePath,
       requestedWorkspacePath: workspacePath,
+      activeContextMode: state.lsp.contextMode,
+      requestedContextMode,
+      activeReferenceRootPath: state.lsp.referenceRootPath,
+      requestedReferenceRootPath: referenceRootPath,
       forceRestart
     });
     if (sessionPolicy.action === "sync") {
@@ -320,16 +225,20 @@ export function createLspController({
     updateGridDiagnostics();
     renderChrome();
     try {
-      const result = await lspStart(workspacePath, generation);
+      const result = await lspStart(workspacePath, generation, requestedContextMode, referenceRootPath);
       if (state.lsp.generation !== generation) return;
       if (stoppedGenerations.has(generation)) return;
       if (result && result.installed === false) return;
       state.lsp.started = true;
       state.lsp.workspacePath = workspacePath;
       state.lsp.workspaceKey = sessionPolicy.requestedKey;
+      state.lsp.contextMode = requestedContextMode;
+      state.lsp.referenceRootPath = referenceRootPath;
       state.lsp.readiness = readyGenerations.has(generation) ? "ready" : "indexing";
       state.lsp.openFileCount = 0;
-      const docsWithPaths = state.docs.filter((d) => docToUri(d));
+      const docsWithPaths = state.docs.filter((doc) =>
+        documentMatchesSessionScope(doc, workspacePath, requestedContextMode, referenceRootPath)
+      );
       for (const doc of docsWithPaths) {
         if (state.lsp.generation !== generation || !state.lsp.started) return;
         await openDoc(doc, { deferRender: true }).catch((error) => reportOpenFailure(doc, error, "workspace-start"));
@@ -346,6 +255,8 @@ export function createLspController({
       state.lsp.started = false;
       state.lsp.workspacePath = "";
       state.lsp.workspaceKey = "";
+      state.lsp.contextMode = "workspace";
+      state.lsp.referenceRootPath = "";
       state.lsp.readiness = "stopped";
       state.lsp.openFileCount = 0;
       reportStartupFailure("Vector-LSP startup", error);
@@ -357,7 +268,14 @@ export function createLspController({
     const generation = state.lsp.generation;
     const diagnosticsRefreshes = [];
     let openFileCount = 0;
-    for (const doc of state.docs.filter((d) => docToUri(d))) {
+    for (const doc of state.docs.filter((candidate) =>
+      documentMatchesSessionScope(
+        candidate,
+        state.lsp.workspacePath,
+        state.lsp.contextMode,
+        state.lsp.referenceRootPath
+      )
+    )) {
       if (state.lsp.generation !== generation || !isVectorLintEngine() || !state.lsp.started) return;
       ensureLspDocumentVersion(doc);
       const uri = docToUri(doc);
@@ -460,6 +378,18 @@ export function createLspController({
     });
     docState.openPromise = trackedPromise;
     return trackedPromise;
+  }
+  async function ensureStandaloneSession(doc = activeDoc(), { forceRestart = false } = {}) {
+    if (!isVectorLintEngine() || !isTauriRuntime()) return;
+    const referenceRootPath = state.workspace?.path ?? "";
+    const parent = lspStandaloneParentPath(doc?.path, referenceRootPath);
+    if (parent) {
+      const options = { contextMode: "sibling", forceRestart };
+      if (referenceRootPath) options.referenceRootPath = referenceRootPath;
+      await startWorkspace(parent, options);
+      return;
+    }
+    if (referenceRootPath) await startWorkspace(referenceRootPath, { forceRestart });
   }
   function reportOpenFailure(doc, error, context) {
     const uri = docToUri(doc);
@@ -615,7 +545,6 @@ export function createLspController({
     pendingCloses.set(closeKey, trackedPromise);
     return trackedPromise;
   }
-
   async function rebindSavedDoc(doc, previousUri, { deferRender = false, expectedGeneration = null } = {}) {
     const nextUri = docToUri(doc);
     if (previousUri === nextUri) return;
@@ -849,6 +778,7 @@ export function createLspController({
     goToDefinition,
     handleDiagnosticsChanged,
     handleUpdateError,
+    ensureStandaloneSession,
     invalidateHover: hoverController.invalidateHover,
     openDoc,
     pathFromUri,

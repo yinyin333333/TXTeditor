@@ -595,6 +595,36 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
   assert.match(state.lint.status, /Large file mode/);
 });
 
+test("opening a standalone native TXT starts a sibling-only Vector session at its parent", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => {} } } };
+  const doc = TableDocument.fromText("magicprefix.txt", "name\titype1\nmod\tstaff", {
+    path: "E:\\Mods\\Example\\TXT\\magicprefix.txt"
+  });
+  const starts = [];
+  const opens = [];
+  try {
+    const { controller } = testDocumentController([], {
+      autoFitInitialColumns: () => {},
+      layout: () => {}
+    }, {
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async (...args) => starts.push(args),
+      lspOpenDoc: (opened) => opens.push(opened)
+    });
+
+    await controller.addDocument(doc);
+
+    assert.deepEqual(starts, [["E:\\Mods\\Example\\TXT", { contextMode: "sibling" }]]);
+    assert.deepEqual(opens, []);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("opening another document saves the outgoing selection and scroll state", async () => {
   const active = TableDocument.fromText("active.txt", "id\nactive");
   const next = TableDocument.fromText("next.txt", "id\nnext");
@@ -730,6 +760,34 @@ test("closing another tab commits the active editor before switching documents",
   assert.deepEqual(writes, ["id\nclosing"]);
   assert.equal(activeDoc.toText(), "id\nactive-edit");
   assert.deepEqual(state.docs.map((doc) => doc.name), ["active.txt"]);
+});
+
+test("closing active standalone tab rebinds the revealed document through its parent session", async () => {
+  const first = TableDocument.fromText("first.txt", "id\nA", {
+    path: "E:\\Mods\\A\\first.txt",
+    dirty: false
+  });
+  const second = TableDocument.fromText("second.txt", "id\nB", {
+    path: "E:\\Mods\\B\\second.txt",
+    dirty: false
+  });
+  const closed = [];
+  const ensured = [];
+  const { controller, state } = testDocumentController([first, second], {}, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspCloseDoc: async (doc) => closed.push(doc),
+    ensureDocumentSession: async (doc) => ensured.push({ doc, active: state.docs[state.active] })
+  });
+  state.active = 1;
+
+  await controller.closeTab(1);
+
+  assert.deepEqual(state.docs, [first]);
+  assert.equal(state.active, 0);
+  assert.deepEqual(closed, [second]);
+  assert.deepEqual(ensured, [{ doc: first, active: first }]);
 });
 
 test("context menu command item registries preserve expected command groups", () => {
@@ -1419,9 +1477,10 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
-    lspCloseDoc: () => {},
+    lspCloseDoc: options.lspCloseDoc ?? (() => {}),
     reportLspCloseFailure: () => {},
-    lspStartWorkspace: () => {},
+    lspStartWorkspace: options.lspStartWorkspace ?? (() => {}),
+    ensureDocumentSession: options.ensureDocumentSession ?? (() => {}),
     scheduleHoverPrewarm: options.scheduleHoverPrewarm ?? (() => {}),
     resetUndoManagerForDocument: () => {},
     resetLegacyWorkspaceIndex: () => {},
