@@ -19,6 +19,8 @@ export function lspWorkspaceSessionPolicy({
   requestedContextMode = "workspace",
   activeReferenceRootPath = "",
   requestedReferenceRootPath = "",
+  activeIncludeSubfolders = true,
+  requestedIncludeSubfolders = true,
   forceRestart = false
 }) {
   const activeKey = lspWorkspaceKey(activeWorkspacePath);
@@ -29,7 +31,8 @@ export function lspWorkspaceSessionPolicy({
   const requestedReferenceRootKey = lspWorkspaceKey(requestedReferenceRootPath);
   if (!started) return { action: "start", activeKey, requestedKey };
   if (forceRestart || activeKey !== requestedKey || activeMode !== requestedMode
-    || activeReferenceRootKey !== requestedReferenceRootKey) {
+    || activeReferenceRootKey !== requestedReferenceRootKey
+    || Boolean(activeIncludeSubfolders) !== Boolean(requestedIncludeSubfolders)) {
     return { action: "restart", activeKey, requestedKey };
   }
   return { action: "sync", activeKey, requestedKey };
@@ -44,14 +47,17 @@ export function lspDocumentMatchesSessionScope({
   hasUri = true,
   workspacePath,
   contextMode,
-  referenceRootPath = ""
+  referenceRootPath = "",
+  includeSubfolders = true
 }) {
   if (!hasUri) return false;
   if (lspContextMode(contextMode) !== "sibling") {
     const documentKey = lspWorkspaceKey(documentPath);
     const workspaceKey = lspWorkspaceKey(workspacePath);
     if (!workspaceKey) return Boolean(documentKey);
-    return lspPathWithin(documentKey, workspaceKey);
+    if (!lspPathWithin(documentKey, workspaceKey)) return false;
+    if (includeSubfolders) return true;
+    return lspWorkspaceKey(lspSiblingParentPath(documentPath)) === workspaceKey;
   }
   const sameSiblingParent = lspWorkspaceKey(lspSiblingParentPath(documentPath)) === lspWorkspaceKey(workspacePath);
   const documentKey = lspWorkspaceKey(documentPath);

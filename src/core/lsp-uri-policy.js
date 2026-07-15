@@ -17,12 +17,14 @@ export function lspSiblingParentPath(pathValue) {
   return parent || null;
 }
 
-export function lspStandaloneParentPath(pathValue, workspacePath = "") {
+export function lspStandaloneParentPath(pathValue, workspacePath = "", { includeSubfolders = true } = {}) {
   const parent = lspSiblingParentPath(pathValue);
   if (!parent) return null;
   const fileKey = normalizedDirectoryIdentity(pathValue);
   const workspaceKey = normalizedDirectoryIdentity(workspacePath).replace(/\/$/, "");
-  if (workspaceKey && (fileKey === workspaceKey || fileKey.startsWith(`${workspaceKey}/`))) return null;
+  if (workspaceKey && (fileKey === workspaceKey || fileKey.startsWith(`${workspaceKey}/`))) {
+    if (includeSubfolders || normalizedDirectoryIdentity(parent).replace(/\/$/, "") === workspaceKey) return null;
+  }
   return parent;
 }
 

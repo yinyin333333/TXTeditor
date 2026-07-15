@@ -234,6 +234,7 @@ const settingsController = createSettingsController({
   updateGridDiagnostics,
   lspStartWorkspace,
   ensureDocumentSession: (options) => lspController.ensureStandaloneSession(activeDoc(), options),
+  resetLegacyWorkspaceIndex,
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,

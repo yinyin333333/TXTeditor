@@ -1,6 +1,7 @@
 import {
   getConfig,
   isTauriRuntime,
+  listWorkspaceNative,
   pickFilePath,
   pickFolderPath,
   saveConfig
@@ -59,6 +60,7 @@ export function createSettingsController({
   updateGridDiagnostics,
   lspStartWorkspace,
   ensureDocumentSession = async () => {},
+  resetLegacyWorkspaceIndex = () => {},
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
@@ -66,6 +68,7 @@ export function createSettingsController({
   escapeHtml
 }) {
   let legacyReferenceSelectionRequest = 0;
+  let workspaceScopeRequest = 0;
   let legacyReferenceSaveQueue = Promise.resolve();
   let configLoaded = Object.keys(state.config ?? {}).length > 0;
   let configSnapshot = { ...(state.config ?? {}) };
@@ -107,6 +110,36 @@ export function createSettingsController({
     localStorage.setItem("txteditor.mouseResizeLocked", state.mouseResizeLocked ? "on" : "off");
     grid.setMouseResizeLocked(state.mouseResizeLocked);
     renderChrome();
+  }
+
+  async function setExcludeWorkspaceSubfolders(excluded) {
+    const next = Boolean(excluded);
+    state.excludeWorkspaceSubfolders = next;
+    localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
+    const request = ++workspaceScopeRequest;
+    const workspace = state.workspace;
+    renderChrome();
+    if (!workspace?.path || !isTauriRuntime()) return true;
+
+    const includeSubfolders = !next;
+    const refreshed = await listWorkspaceNative(workspace.path, null, { includeSubfolders });
+    if (request !== workspaceScopeRequest || state.workspace !== workspace
+      || state.excludeWorkspaceSubfolders !== next) return false;
+    if (!refreshed || !Array.isArray(refreshed.files)) {
+      throw new Error("Workspace refresh returned an invalid file list.");
+    }
+    state.workspace = refreshed;
+    resetLegacyWorkspaceIndex();
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+    if (isVectorLintEngine()) {
+      await ensureDocumentSession({ forceRestart: true });
+    } else {
+      const schedule = legacyLintImmediateSchedule("workspace-subfolders-changed");
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
+    renderChrome();
+    return true;
   }
 
   function toggleVectorLspHover() {
@@ -261,6 +294,7 @@ export function createSettingsController({
     const visualControls = appSettingsVisualControls({
       colorizeColumns: state.colorizeColumns,
       mouseResizeLocked: state.mouseResizeLocked,
+      excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       vectorLspHover: state.vectorLspHover,
       legacyLintEngine: isLegacyLintEngine(),
       theme: state.theme,
@@ -291,6 +325,10 @@ export function createSettingsController({
           <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.mouseResize.id}"${visualControls.mouseResize.checked ? " checked" : ""} />
             ${visualControls.mouseResize.label}
+          </label>
+          <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
+            ${visualControls.workspaceSubfolders.label}
           </label>
           <div class="settings-label">Lint Engine</div>
           <div class="settings-segmented" role="group" aria-label="Lint Engine">
@@ -323,6 +361,7 @@ export function createSettingsController({
 
     const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
     const mouseResizeInput = backdrop.querySelector("#settingsMouseResizeLocked");
+    const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
     const fontInput = backdrop.querySelector("#settingsGridFont");
@@ -332,6 +371,7 @@ export function createSettingsController({
     const refresh = () => {
       colorizeInput.checked = state.colorizeColumns;
       mouseResizeInput.checked = state.mouseResizeLocked;
+      workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       hoverInput.checked = state.vectorLspHover;
       hoverInput.disabled = isLegacyLintEngine();
       hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
@@ -342,6 +382,11 @@ export function createSettingsController({
     };
     colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
     mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
+    workspaceSubfoldersInput.addEventListener("change", () => {
+      setExcludeWorkspaceSubfolders(workspaceSubfoldersInput.checked)
+        .then(refresh)
+        .catch((error) => showError(error));
+    });
     hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
     for (const button of lintEngineButtons) {
@@ -649,6 +694,7 @@ export function createSettingsController({
     saveLintSettings,
     setColorizeColumns,
     setMouseResizeLocked,
+    setExcludeWorkspaceSubfolders,
     setLegacyLintProfile,
     setLegacyLintReferenceVersion,
     setLegacyLintRuleEnabled,

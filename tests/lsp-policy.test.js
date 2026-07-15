@@ -163,6 +163,11 @@ test("JS LSP URI policy encodes and decodes path edge cases", () => {
   assert.equal(lspSiblingParentPath("magicprefix.txt"), null);
   assert.equal(lspStandaloneParentPath("E:\\Mods\\TXT\\magicprefix.txt", "E:\\Workspace"), "E:\\Mods\\TXT");
   assert.equal(lspStandaloneParentPath("E:\\Workspace\\global\\excel\\skills.txt", "e:/workspace/"), null);
+  assert.equal(lspStandaloneParentPath(
+    "E:\\Workspace\\global\\excel\\skills.txt",
+    "e:/workspace/",
+    { includeSubfolders: false }
+  ), "E:\\Workspace\\global\\excel");
 });
 
 test("sibling and full workspace contexts never reuse the same Vector session", () => {
@@ -182,6 +187,13 @@ test("sibling and full workspace contexts never reuse the same Vector session", 
   }).action, "restart");
   assert.equal(lspWorkspaceSessionPolicy({
     started: true,
+    activeWorkspacePath: "E:\\Workspace",
+    requestedWorkspacePath: "E:\\Workspace",
+    activeIncludeSubfolders: true,
+    requestedIncludeSubfolders: false
+  }).action, "restart");
+  assert.equal(lspWorkspaceSessionPolicy({
+    started: true,
     activeWorkspacePath: "E:\\Mods\\TXT",
     requestedWorkspacePath: "E:\\Mods\\TXT",
     activeContextMode: "sibling",
@@ -194,6 +206,18 @@ test("sibling and full workspace contexts never reuse the same Vector session", 
     workspacePath: "E:\\Mods\\TXT",
     contextMode: "sibling",
     referenceRootPath: "E:\\Reference"
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Workspace\\global\\excel\\MagicPrefix.txt",
+    workspacePath: "E:\\Workspace",
+    contextMode: "workspace",
+    includeSubfolders: false
+  }), false);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Workspace\\MagicPrefix.txt",
+    workspacePath: "E:\\Workspace",
+    contextMode: "workspace",
+    includeSubfolders: false
   }), true);
   assert.equal(lspDocumentMatchesSessionScope({
     documentPath: "E:\\OtherMod\\ItemTypes.txt",

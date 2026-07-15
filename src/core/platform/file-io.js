@@ -42,16 +42,18 @@ export async function openFilesNative(DocumentType) {
   return openNativePaths(paths, DocumentType, api.invoke);
 }
 
-export async function openWorkspaceNative() {
+export async function openWorkspaceNative({ includeSubfolders = true } = {}) {
   const api = await tauriApi();
   const selected = await api.invoke("open_folder_dialog");
   if (!selected) return null;
-  return listWorkspaceNative(selected, api.invoke);
+  return listWorkspaceNative(selected, api.invoke, { includeSubfolders });
 }
 
-export async function listWorkspaceNative(path, invokeFn = null) {
+export async function listWorkspaceNative(path, invokeFn = null, { includeSubfolders = true } = {}) {
   const invoke = invokeFn ?? (await tauriApi()).invoke;
-  return invoke("list_workspace_files", { path });
+  const payload = { path };
+  if (!includeSubfolders) payload.includeSubfolders = false;
+  return invoke("list_workspace_files", payload);
 }
 
 export async function listSiblingTextFilesNative(path, invokeFn = null) {

@@ -15,7 +15,6 @@ import {
 import { isTextLikePath } from "../../core/text-file-policy.js";
 import {
   legacyWorkspaceFileSignature,
-  legacyWorkspaceIndexCacheHit,
   legacyWorkspaceLoadCacheHit,
   mergeOpenLegacyWorkspaceDocs
 } from "../../core/lint-workspace-index.js";
@@ -26,6 +25,7 @@ import {
 import {
   isLegacyLintWorkspaceDocument,
   isDirectTxtSibling,
+  legacyDocumentDirectoryKey,
   legacySiblingContextParentKey,
   legacySiblingContextTargets
 } from "../../core/lint-sibling-context.js";
@@ -188,34 +188,8 @@ export function createLegacyLintController({
     return mergeOpenLegacyWorkspaceDocs(state.lint.legacy.workspaceDocs, state.docs);
   }
 
-  function workspaceIndexFor(docs, profile) {
-    const signature = indexSignature(docs, profile);
-    const cache = state.lint.legacy.workspaceIndexCache;
-    const cached = legacyWorkspaceIndexCacheHit(cache, signature, profile);
-    if (cached) return cached;
-    const started = perfNow();
-    const reference = referenceDatasetState();
-    const index = buildWorkspaceIndex(docs, profile, {
-      referenceDocuments: reference.status === "ready" ? reference.documents : [],
-      referenceVersion: reference.status === "ready" ? reference.selectedVersion : null,
-      workspaceFileNames: workspaceTxtFiles(),
-      workspaceDocuments: state.lint.legacy.workspaceDocs,
-      siblingDocuments: siblingDocs(),
-      siblingFileNames: siblingTxtFiles(),
-      openDocuments: state.docs
-    });
-    const ms = elapsedMs(started);
-    state.lint.legacy.workspaceIndexCache = { signature, profile, index };
-    return { index, ms, cached: false };
-  }
-
   function workspaceIndexesFor(docs, profile) {
-    const contexts = isolatedSiblingContexts(docs);
-    if (!contexts) {
-      const result = workspaceIndexFor(docs, profile);
-      return { indexes: [result.index], ms: result.ms, cached: result.cached };
-    }
-
+    const contexts = directoryLintContexts(docs);
     const signature = indexSignature(docs, profile);
     const cache = state.lint.legacy.workspaceIndexCache;
     if (
@@ -233,17 +207,15 @@ export function createLegacyLintController({
     const started = perfNow();
     const reference = referenceDatasetState();
     const contextIndexes = contexts.map((context) => {
-      const siblingDocuments = siblingDocs().filter((doc) => siblingRootKey(doc) === context.parentKey);
-      const siblingFileNames = siblingTxtFiles().filter((file) => siblingRootKey(file) === context.parentKey);
       return {
         parentKey: context.parentKey,
         index: buildWorkspaceIndex(context.documents, profile, {
           referenceDocuments: reference.status === "ready" ? reference.documents : [],
           referenceVersion: reference.status === "ready" ? reference.selectedVersion : null,
-          workspaceFileNames: workspaceTxtFiles(),
-          workspaceDocuments: state.lint.legacy.workspaceDocs,
-          siblingDocuments,
-          siblingFileNames,
+          workspaceFileNames: context.workspaceFileNames,
+          workspaceDocuments: context.workspaceDocuments,
+          siblingDocuments: context.siblingDocuments,
+          siblingFileNames: context.siblingFileNames,
           openDocuments: context.openDocuments,
           referenceOpenDocuments: context.referenceOpenDocuments
         })
@@ -263,43 +235,55 @@ export function createLegacyLintController({
     };
   }
 
-  function isolatedSiblingContexts(docs) {
+  function directoryLintContexts(docs) {
     const workspacePath = state.workspace?.path ?? "";
-    const openByParent = new Map();
-    const isolatedDocumentKeys = new Set();
-    for (const doc of state.docs) {
-      const parentKey = legacySiblingContextParentKey(doc, workspacePath);
-      if (!parentKey) continue;
-      if (!openByParent.has(parentKey)) openByParent.set(parentKey, []);
-      openByParent.get(parentKey).push(doc);
-      isolatedDocumentKeys.add(documentKey(doc));
-    }
-    const sharedDocuments = docs.filter((doc) => !isolatedDocumentKeys.has(documentKey(doc)));
-    const sharedOpenDocuments = state.docs.filter((doc) => !isolatedDocumentKeys.has(documentKey(doc)));
-    const workspaceOpenDocuments = state.docs.filter((doc) => isLegacyLintWorkspaceDocument(doc, workspacePath));
-    // Retain the established one-index path only when that index contains one
-    // standalone parent and nothing else. A workspace (or another shared
-    // document context) must not inherit that parent's sibling tier.
-    if (openByParent.size === 0 || (openByParent.size === 1 && sharedDocuments.length === 0)) return null;
+    const scopeOptions = { includeSubfolders: !state.excludeWorkspaceSubfolders };
+    const groups = new Map();
+    const groupFor = (parentKey) => {
+      const key = parentKey || "";
+      if (!groups.has(key)) groups.set(key, { parentKey: key, documents: [], openDocuments: [] });
+      return groups.get(key);
+    };
+    for (const doc of docs) groupFor(legacyDocumentDirectoryKey(doc)).documents.push(doc);
+    for (const doc of state.docs) groupFor(legacyDocumentDirectoryKey(doc)).openDocuments.push(doc);
 
-    const contexts = [];
-    if (sharedDocuments.length) {
-      contexts.push({
-        parentKey: "",
-        documents: sharedDocuments,
-        openDocuments: sharedOpenDocuments,
-        referenceOpenDocuments: sharedOpenDocuments
+    const allWorkspaceFiles = workspaceTxtFiles();
+    const allWorkspaceDocuments = state.lint.legacy.workspaceDocs;
+    const workspaceOpenDocuments = state.docs.filter((doc) =>
+      isLegacyLintWorkspaceDocument(doc, workspacePath, scopeOptions)
+    );
+    return [...groups.values()]
+      .filter((context) => context.documents.length)
+      .sort((left, right) => left.parentKey.localeCompare(right.parentKey))
+      .map((context) => {
+        const localWorkspaceDocuments = allWorkspaceDocuments.filter((doc) =>
+          legacyDocumentDirectoryKey(doc) === context.parentKey
+        );
+        const localWorkspaceFiles = allWorkspaceFiles.filter((file) =>
+          legacyDocumentDirectoryKey(file) === context.parentKey
+        );
+        const isWorkspaceScope = localWorkspaceDocuments.length > 0
+          || localWorkspaceFiles.length > 0
+          || context.openDocuments.some((doc) =>
+            isLegacyLintWorkspaceDocument(doc, workspacePath, scopeOptions)
+          );
+        const contextSiblingDocuments = siblingDocs().filter((doc) =>
+          siblingRootKey(doc) === context.parentKey
+        );
+        const contextSiblingFiles = siblingTxtFiles().filter((file) =>
+          siblingRootKey(file) === context.parentKey
+        );
+        return {
+          ...context,
+          workspaceDocuments: isWorkspaceScope ? localWorkspaceDocuments : allWorkspaceDocuments,
+          workspaceFileNames: isWorkspaceScope ? localWorkspaceFiles : allWorkspaceFiles,
+          siblingDocuments: isWorkspaceScope ? [] : contextSiblingDocuments,
+          siblingFileNames: isWorkspaceScope ? [] : contextSiblingFiles,
+          referenceOpenDocuments: isWorkspaceScope
+            ? context.openDocuments
+            : [...workspaceOpenDocuments, ...context.openDocuments]
+        };
       });
-    }
-    for (const [parentKey, openDocuments] of openByParent) {
-      contexts.push({
-        parentKey,
-        documents: openDocuments,
-        openDocuments,
-        referenceOpenDocuments: [...workspaceOpenDocuments, ...openDocuments]
-      });
-    }
-    return contexts;
   }
 
   function indexSignature(docs, profile) {
@@ -506,7 +490,9 @@ export function createLegacyLintController({
   }
 
   async function ensureSiblingIndexed(version) {
-    const targets = legacySiblingContextTargets(state.docs, state.workspace?.path ?? "");
+    const targets = legacySiblingContextTargets(state.docs, state.workspace?.path ?? "", {
+      includeSubfolders: !state.excludeWorkspaceSubfolders
+    });
     if (!targets.length) {
       state.lint.legacy.siblingDocs = [];
       state.lint.legacy.siblingLoad = emptySiblingLoad({ status: "ready" });
@@ -626,7 +612,9 @@ export function createLegacyLintController({
     if (!state.lint.legacy.workspaceRefreshRequired || !state.workspace?.path) return;
     const workspace = state.workspace;
     try {
-      const refreshed = await refreshWorkspace(workspace.path);
+      const refreshed = await refreshWorkspace(workspace.path, null, {
+        includeSubfolders: !state.excludeWorkspaceSubfolders
+      });
       if (!legacyLintDisplayActive() || version !== state.lint.legacy.version || state.workspace !== workspace) return;
       if (!refreshed || !Array.isArray(refreshed.files)) throw new Error("Workspace refresh returned an invalid file list.");
       state.workspace = refreshed;

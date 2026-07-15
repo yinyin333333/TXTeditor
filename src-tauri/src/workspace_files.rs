@@ -5,9 +5,16 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 #[tauri::command]
-pub(crate) fn list_workspace_files(path: String) -> Result<WorkspacePayload, String> {
+pub(crate) fn list_workspace_files(
+    path: String,
+    include_subfolders: Option<bool>,
+) -> Result<WorkspacePayload, String> {
     let mut files = Vec::new();
-    collect_text_files(Path::new(&path), &mut files, 0)?;
+    collect_text_files_with_subfolders(
+        Path::new(&path),
+        &mut files,
+        include_subfolders.unwrap_or(true),
+    )?;
     files.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(WorkspacePayload { path, files })
 }
@@ -44,10 +51,19 @@ pub(crate) fn list_sibling_txt_files(path: String) -> Result<WorkspacePayload, S
     })
 }
 
+#[cfg(test)]
 pub(crate) fn collect_text_files(
     path: &Path,
     files: &mut Vec<WorkspaceFile>,
     _depth: usize,
+) -> Result<(), String> {
+    collect_text_files_with_subfolders(path, files, true)
+}
+
+fn collect_text_files_with_subfolders(
+    path: &Path,
+    files: &mut Vec<WorkspaceFile>,
+    include_subfolders: bool,
 ) -> Result<(), String> {
     let root = fs::canonicalize(path).map_err(|err| err.to_string())?;
     let mut visited_directories = HashSet::new();
@@ -58,6 +74,7 @@ pub(crate) fn collect_text_files(
         files,
         &mut visited_directories,
         &mut visited_files,
+        include_subfolders,
     )
 }
 
@@ -67,6 +84,7 @@ fn collect_text_files_inner(
     files: &mut Vec<WorkspaceFile>,
     visited_directories: &mut HashSet<PathBuf>,
     visited_files: &mut HashSet<PathBuf>,
+    include_subfolders: bool,
 ) -> Result<(), String> {
     let canonical_directory = fs::canonicalize(path).map_err(|err| err.to_string())?;
     if !canonical_directory.starts_with(root)
@@ -81,9 +99,16 @@ fn collect_text_files_inner(
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
         let entry_path = entry.path();
-        if entry_path.is_dir() {
-            collect_text_files_inner(root, &entry_path, files, visited_directories, visited_files)?;
-        } else if is_text_like(&entry_path) {
+        if entry_path.is_dir() && include_subfolders {
+            collect_text_files_inner(
+                root,
+                &entry_path,
+                files,
+                visited_directories,
+                visited_files,
+                include_subfolders,
+            )?;
+        } else if entry_path.is_file() && is_text_like(&entry_path) {
             let canonical_file = fs::canonicalize(&entry_path).map_err(|err| err.to_string())?;
             if canonical_file.starts_with(root) && visited_files.insert(canonical_file) {
                 files.push(workspace_file_from_entry_path(
@@ -250,7 +275,7 @@ mod tests {
         fs::write(root.join("ignored.md"), "ignored").unwrap();
         let root_string = root.to_string_lossy().to_string();
 
-        let payload = list_workspace_files(root_string.clone()).unwrap();
+        let payload = list_workspace_files(root_string.clone(), None).unwrap();
         let names: Vec<String> = payload.files.iter().map(|file| file.name.clone()).collect();
 
         assert_eq!(payload.path, root_string);
@@ -281,6 +306,33 @@ mod tests {
         );
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_workspace_files_can_exclude_subfolders() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "txteditor-list-flat-workspace-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("direct.txt"), "direct").unwrap();
+        fs::write(root.join("nested").join("nested.txt"), "nested").unwrap();
+
+        let payload =
+            list_workspace_files(root.to_string_lossy().to_string(), Some(false)).unwrap();
+        let names = payload
+            .files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>();
+
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(names, vec!["direct.txt"]);
     }
 
     #[test]
@@ -337,7 +389,7 @@ mod tests {
         }
         let root_string = root.to_string_lossy().to_string();
 
-        let payload = list_workspace_files(root_string).unwrap();
+        let payload = list_workspace_files(root_string, None).unwrap();
         let names = payload
             .files
             .iter()

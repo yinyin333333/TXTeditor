@@ -1113,6 +1113,11 @@ test("Settings modal exposes immediate visual settings without save cancel apply
     gridFont: "custom"
   });
   assert.deepEqual(controls.colorize, { id: "settingsColorizeColumns", label: "Colorize columns", checked: true });
+  assert.deepEqual(controls.workspaceSubfolders, {
+    id: "settingsExcludeWorkspaceSubfolders",
+    label: "Exclude subfolders when opening a folder",
+    checked: false
+  });
   assert.equal(controls.vectorHover.id, "settingsVectorLspHover");
   assert.equal(controls.vectorHover.label, "Vector-LSP Hover");
   assert.equal(controls.vectorHover.disabled, true);

@@ -702,6 +702,7 @@ pub(crate) async fn lsp_start(
     generation: u64,
     context_mode: Option<String>,
     reference_root_path: Option<String>,
+    include_subfolders: Option<bool>,
     state: tauri::State<'_, LspManager>,
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
@@ -712,6 +713,7 @@ pub(crate) async fn lsp_start(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(path_to_uri);
+    let include_subfolders = include_subfolders.unwrap_or(true);
     if generation == 0 {
         return Err("LSP generation must be positive".to_string());
     }
@@ -788,7 +790,9 @@ pub(crate) async fn lsp_start(
                 "initializationOptions": {
                     "sessionGeneration": generation,
                     "referenceContextMode": reference_context_mode,
-                    "referenceRootUri": reference_root_uri
+                    "referenceRootUri": reference_root_uri,
+                    "includeSubfolders": include_subfolders,
+                    "workspaceDirectoryScopes": true
                 },
                 "capabilities": { "textDocument": { "publishDiagnostics": {} } }
             }

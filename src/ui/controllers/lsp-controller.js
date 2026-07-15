@@ -175,19 +175,27 @@ export function createLspController({
     hoverController.retryQueuedHover(`hover-ready:${reason}`);
     if (doc === activeDoc()) hoverController.scheduleHoverPrewarm(`hover-ready:${reason}`);
   }
-  function documentMatchesSessionScope(doc, workspacePath, contextMode, referenceRootPath = "") {
+  function documentMatchesSessionScope(
+    doc,
+    workspacePath,
+    contextMode,
+    referenceRootPath = "",
+    includeSubfolders = state.lsp.includeSubfolders
+  ) {
     return lspDocumentMatchesSessionScope({
       documentPath: doc?.path,
       hasUri: Boolean(docToUri(doc)),
       workspacePath,
       contextMode,
-      referenceRootPath
+      referenceRootPath,
+      includeSubfolders
     });
   }
   async function startWorkspace(workspacePath, {
     forceRestart = false,
     contextMode = "workspace",
-    referenceRootPath = ""
+    referenceRootPath = "",
+    includeSubfolders = !state.excludeWorkspaceSubfolders
   } = {}) {
     if (!isVectorLintEngine()) {
       recordLintEngineEvent("vector-start-skipped", { workspacePath });
@@ -202,6 +210,8 @@ export function createLspController({
       requestedContextMode,
       activeReferenceRootPath: state.lsp.referenceRootPath,
       requestedReferenceRootPath: referenceRootPath,
+      activeIncludeSubfolders: state.lsp.includeSubfolders,
+      requestedIncludeSubfolders: includeSubfolders,
       forceRestart
     });
     if (sessionPolicy.action === "sync") {
@@ -225,7 +235,13 @@ export function createLspController({
     updateGridDiagnostics();
     renderChrome();
     try {
-      const result = await lspStart(workspacePath, generation, requestedContextMode, referenceRootPath);
+      const result = await lspStart(
+        workspacePath,
+        generation,
+        requestedContextMode,
+        referenceRootPath,
+        includeSubfolders
+      );
       if (state.lsp.generation !== generation) return;
       if (stoppedGenerations.has(generation)) return;
       if (result && result.installed === false) return;
@@ -234,10 +250,17 @@ export function createLspController({
       state.lsp.workspaceKey = sessionPolicy.requestedKey;
       state.lsp.contextMode = requestedContextMode;
       state.lsp.referenceRootPath = referenceRootPath;
+      state.lsp.includeSubfolders = Boolean(includeSubfolders);
       state.lsp.readiness = readyGenerations.has(generation) ? "ready" : "indexing";
       state.lsp.openFileCount = 0;
       const docsWithPaths = state.docs.filter((doc) =>
-        documentMatchesSessionScope(doc, workspacePath, requestedContextMode, referenceRootPath)
+        documentMatchesSessionScope(
+          doc,
+          workspacePath,
+          requestedContextMode,
+          referenceRootPath,
+          includeSubfolders
+        )
       );
       for (const doc of docsWithPaths) {
         if (state.lsp.generation !== generation || !state.lsp.started) return;
@@ -257,6 +280,7 @@ export function createLspController({
       state.lsp.workspaceKey = "";
       state.lsp.contextMode = "workspace";
       state.lsp.referenceRootPath = "";
+      state.lsp.includeSubfolders = true;
       state.lsp.readiness = "stopped";
       state.lsp.openFileCount = 0;
       reportStartupFailure("Vector-LSP startup", error);
@@ -273,7 +297,8 @@ export function createLspController({
         candidate,
         state.lsp.workspacePath,
         state.lsp.contextMode,
-        state.lsp.referenceRootPath
+        state.lsp.referenceRootPath,
+        state.lsp.includeSubfolders
       )
     )) {
       if (state.lsp.generation !== generation || !isVectorLintEngine() || !state.lsp.started) return;
@@ -382,7 +407,9 @@ export function createLspController({
   async function ensureStandaloneSession(doc = activeDoc(), { forceRestart = false } = {}) {
     if (!isVectorLintEngine() || !isTauriRuntime()) return;
     const referenceRootPath = state.workspace?.path ?? "";
-    const parent = lspStandaloneParentPath(doc?.path, referenceRootPath);
+    const parent = lspStandaloneParentPath(doc?.path, referenceRootPath, {
+      includeSubfolders: !state.excludeWorkspaceSubfolders
+    });
     if (parent) {
       const options = { contextMode: "sibling", forceRestart };
       if (referenceRootPath) options.referenceRootPath = referenceRootPath;

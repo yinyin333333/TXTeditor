@@ -664,16 +664,109 @@ test("Legacy controller isolates an explicit workspace from one outside sibling 
 
     assert.deepEqual(published[0].filter((entry) => entry.ruleId === "Basic/LinkedExcel"), []);
     const contexts = state.lint.legacy.workspaceIndexCache.contextIndexes;
-    assert.deepEqual(contexts.map((entry) => entry.parentKey), ["", "e:/mods/outside/txt"]);
-    assert.equal(contexts[0].index.referenceSourceByName.get("itemtypes.txt").kind, "workspace");
-    assert.equal(contexts[1].index.referenceSourceByName.get("itemtypes.txt").kind, "sibling");
-    assert.deepEqual([...contexts[0].index.itemTypes], ["aaaa"]);
-    assert.deepEqual([...contexts[1].index.itemTypes], ["bbbb"]);
+    assert.deepEqual(contexts.map((entry) => entry.parentKey), [
+      "e:/mods/outside/txt",
+      "e:/workspace/txt"
+    ]);
+    const workspaceContext = contexts.find((entry) => entry.parentKey === "e:/workspace/txt");
+    const outsideContext = contexts.find((entry) => entry.parentKey === "e:/mods/outside/txt");
+    assert.equal(workspaceContext.index.referenceSourceByName.get("itemtypes.txt").kind, "workspace");
+    assert.equal(outsideContext.index.referenceSourceByName.get("itemtypes.txt").kind, "sibling");
+    assert.deepEqual([...workspaceContext.index.itemTypes], ["aaaa"]);
+    assert.deepEqual([...outsideContext.index.itemTypes], ["bbbb"]);
     assert.deepEqual(
-      contexts[0].index.tables.map((table) => table.fileName),
+      workspaceContext.index.tables.map((table) => table.fileName),
       ["itemtypes.txt", "magicsuffix.txt"]
     );
-    assert.deepEqual(contexts[1].index.tables.map((table) => table.fileName), ["magicprefix.txt"]);
+    assert.deepEqual(outsideContext.index.tables.map((table) => table.fileName), ["magicprefix.txt"]);
+  } finally {
+    controller.cancelJobs();
+  }
+});
+
+test("Legacy controller keeps recursive workspace directories as independent lint scopes", async () => {
+  const root = "E:/Workspace/Excel";
+  const base = `${root}/base`;
+  const files = [
+    { path: `${root}/ItemTypes.txt`, name: "ItemTypes.txt", modified_ms: 1, size: 10 },
+    { path: `${root}/MagicPrefix.txt`, name: "MagicPrefix.txt", modified_ms: 1, size: 32 },
+    { path: `${base}/ItemTypes.txt`, name: "ItemTypes.txt", modified_ms: 1, size: 10 },
+    { path: `${base}/MagicPrefix.txt`, name: "MagicPrefix.txt", modified_ms: 1, size: 32 }
+  ];
+  const contents = new Map([
+    [`${root}/ItemTypes.txt`, "Code\nroot\n"],
+    [`${root}/MagicPrefix.txt`, "Name\titype1\nRoot Prefix\troot\n"],
+    [`${base}/ItemTypes.txt`, "Code\nbase\n"],
+    [`${base}/MagicPrefix.txt`, "Name\titype1\nBase Prefix\tbase\n"]
+  ]);
+  const published = [];
+  const state = {
+    docs: [],
+    workspace: { path: root, files },
+    config: { referenceVersion: "3.2" },
+    lint: {
+      legacy: {
+        settings: createDefaultLintSettings(),
+        timer: 0,
+        pendingRun: null,
+        version: 0,
+        running: false,
+        status: "",
+        lastRunAt: 0,
+        workspaceDocs: [],
+        workspaceLoad: { status: "not-started", files: [], error: "", signature: "" },
+        workspaceIndexCache: { signature: "", profile: "", index: null },
+        workspaceRefreshRequired: false
+      }
+    }
+  };
+  const controller = createLegacyLintController({
+    state,
+    renderChrome: () => {},
+    setLintDiagnostics: (diagnostics) => published.push(diagnostics),
+    updateGridDiagnostics: () => {},
+    legacyLintDisplayActive: () => true,
+    docHasDiagnostics: () => false,
+    recordLintEngineEvent: () => {},
+    perfNow: () => Date.now(),
+    elapsedMs: (started) => Date.now() - started,
+    lintDocKey: (value) => value.path || value.name,
+    openPathsBulk: async (paths) => paths.map((path) => ({
+      path,
+      name: path.split("/").pop(),
+      parseMs: 0,
+      doc: doc(path.split("/").pop(), contents.get(path), path)
+    })),
+    loadReferenceDataset: async () => ({
+      schemaVariant: "3.2",
+      gameVersion: "3.2",
+      canonicalSha256: "verified-32",
+      files: []
+    })
+  });
+
+  try {
+    controller.scheduleFull("recursive-directory-scopes", 0);
+    await waitFor(() => published.length === 1);
+    assert.deepEqual(published[0].filter((entry) => entry.ruleId === "Basic/LinkedExcel"), []);
+
+    const contexts = state.lint.legacy.workspaceIndexCache.contextIndexes;
+    assert.deepEqual(contexts.map((entry) => entry.parentKey), [
+      "e:/workspace/excel",
+      "e:/workspace/excel/base"
+    ]);
+    assert.deepEqual([...contexts[0].index.itemTypes], ["root"]);
+    assert.deepEqual([...contexts[1].index.itemTypes], ["base"]);
+
+    const baseMagic = state.lint.legacy.workspaceDocs.find((entry) => entry.path === `${base}/MagicPrefix.txt`);
+    baseMagic.setCell(1, 1, "root");
+    controller.markDocumentChanged(baseMagic);
+    controller.scheduleFull("cross-directory-reference", 0);
+    await waitFor(() => published.length === 2);
+    const linked = published[1].filter((entry) => entry.ruleId === "Basic/LinkedExcel");
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].fileKey, "e:/workspace/excel/base/magicprefix.txt");
+    assert.match(linked[0].message, /root/);
   } finally {
     controller.cancelJobs();
   }
@@ -754,14 +847,18 @@ test("outside Legacy context sees an open workspace shadow without diagnosing it
 
     assert.deepEqual(published[0].filter((entry) => entry.ruleId === "Basic/LinkedExcel"), []);
     const contexts = state.lint.legacy.workspaceIndexCache.contextIndexes;
-    assert.deepEqual(contexts.map((entry) => entry.parentKey), ["", "e:/mods/outside/txt"]);
-    assert.equal(contexts[1].index.referenceSourceByName.get("itemtypes.txt").kind, "open");
+    assert.deepEqual(contexts.map((entry) => entry.parentKey), [
+      "e:/mods/outside/txt",
+      "e:/workspace/txt"
+    ]);
+    const outsideContext = contexts.find((entry) => entry.parentKey === "e:/mods/outside/txt");
+    assert.equal(outsideContext.index.referenceSourceByName.get("itemtypes.txt").kind, "open");
     assert.equal(
-      contexts[1].index.referenceSourceByName.get("itemtypes.txt").path,
+      outsideContext.index.referenceSourceByName.get("itemtypes.txt").path,
       workspaceItemTypesPath
     );
-    assert.deepEqual([...contexts[1].index.itemTypes], ["bbbb"]);
-    assert.deepEqual(contexts[1].index.tables.map((table) => table.fileName), ["magicprefix.txt"]);
+    assert.deepEqual([...outsideContext.index.itemTypes], ["bbbb"]);
+    assert.deepEqual(outsideContext.index.tables.map((table) => table.fileName), ["magicprefix.txt"]);
   } finally {
     controller.cancelJobs();
   }

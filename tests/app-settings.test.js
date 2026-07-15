@@ -23,7 +23,8 @@ function makeSettingsController({
   lintEnabled = true,
   saveConfigError = null,
   workspace = null,
-  legacy = false
+  legacy = false,
+  listWorkspaceHandler = null
 } = {}) {
   const { document, window } = installFakeAppStartupDom();
   const calls = [];
@@ -37,6 +38,18 @@ function makeSettingsController({
     }
     if (command === "open_folder_dialog") return "E:\\PickedFolder";
     if (command === "pick_file_path") return "E:\\Tools\\vector-lsp.exe";
+    if (command === "list_workspace_files") {
+      if (listWorkspaceHandler) return listWorkspaceHandler(args);
+      return {
+        path: args.path,
+        files: args.includeSubfolders === false
+          ? [{ path: `${args.path}\\direct.txt`, name: "direct.txt" }]
+          : [
+            { path: `${args.path}\\direct.txt`, name: "direct.txt" },
+            { path: `${args.path}\\base\\nested.txt`, name: "nested.txt" }
+          ]
+      };
+    }
     return undefined;
   };
   window.__TAURI__ = { core: { invoke }, event: { listen: async () => () => {} } };
@@ -45,6 +58,7 @@ function makeSettingsController({
     theme: "dark",
     colorizeColumns: true,
     mouseResizeLocked: false,
+    excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
     dockLayout: DEFAULT_DOCK_LAYOUT,
@@ -66,7 +80,8 @@ function makeSettingsController({
       }
     },
     lsp: {
-      started: lspStarted
+      started: lspStarted,
+      includeSubfolders: true
     },
     config: { ...config }
   };
@@ -99,6 +114,7 @@ function makeSettingsController({
       calls.push("lsp-start");
     },
     ensureDocumentSession: async (options) => calls.push(["ensure-document-session", options]),
+    resetLegacyWorkspaceIndex: () => calls.push("reset-legacy-workspace-index"),
     recordLintEngineEvent: (name) => calls.push(["lint-event", name]),
     renderChrome: () => calls.push("render"),
     reportBackgroundFailure: (label) => calls.push(["background-failure", label]),
@@ -124,6 +140,7 @@ test("App Settings modal renders visual controls in the controller behavior path
 
   assert.equal(document.body.querySelector("#settingsColorizeColumns")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsMouseResizeLocked")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']")?.tagName, "BUTTON");
@@ -132,6 +149,67 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("workspace subfolder exclusion persists, relists Explorer, and restarts Vector-LSP", async () => {
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  };
+  const { controller, calls, lspStarts, state } = makeSettingsController({ workspace });
+  assert.equal(createInitialAppState({ storage: localStorage }).state.excludeWorkspaceSubfolders, false);
+
+  assert.equal(await controller.setExcludeWorkspaceSubfolders(true), true);
+
+  assert.equal(state.excludeWorkspaceSubfolders, true);
+  assert.equal(localStorage.getItem("txteditor.excludeWorkspaceSubfolders"), "on");
+  assert.deepEqual(state.workspace.files.map((file) => file.name), ["direct.txt"]);
+  assert.equal(calls.includes("reset-legacy-workspace-index"), true);
+  assert.deepEqual(lspStarts, []);
+  assert.equal(calls.some((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"
+    && entry[1]?.forceRestart === true), true);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.excludeWorkspaceSubfolders, true);
+});
+
+test("rapid workspace subfolder changes apply only the latest listing", async () => {
+  const pending = [];
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [{ path: "E:\\Workspace\\old.txt", name: "old.txt" }]
+  };
+  const { controller, calls, state } = makeSettingsController({
+    workspace,
+    listWorkspaceHandler: (args) => new Promise((resolve) => pending.push({ args, resolve }))
+  });
+
+  const exclude = controller.setExcludeWorkspaceSubfolders(true);
+  const include = controller.setExcludeWorkspaceSubfolders(false);
+  for (let attempt = 0; attempt < 10 && pending.length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(pending.length, 2);
+  pending[1].resolve({
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  });
+  assert.equal(await include, true);
+  pending[0].resolve({
+    path: "E:\\Workspace",
+    files: [{ path: "E:\\Workspace\\stale.txt", name: "stale.txt" }]
+  });
+  assert.equal(await exclude, false);
+
+  assert.equal(state.excludeWorkspaceSubfolders, false);
+  assert.deepEqual(state.workspace.files.map((file) => file.name), ["direct.txt", "nested.txt"]);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session").length, 1);
 });
 
 test("mouse resize lock defaults off, applies immediately, and is restored from storage", () => {

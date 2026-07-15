@@ -1,33 +1,42 @@
 import { normalizePath } from "./lint-paths.js";
 
-export function legacySiblingContextTargets(openDocuments = [], workspacePath = "") {
+export function legacySiblingContextTargets(openDocuments = [], workspacePath = "", options = {}) {
   const targetsByParent = new Map();
   for (const doc of openDocuments) {
     const filePath = String(doc?.path ?? "").trim();
-    const parentKey = legacySiblingContextParentKey(doc, workspacePath);
+    const parentKey = legacySiblingContextParentKey(doc, workspacePath, options);
     if (!parentKey || targetsByParent.has(parentKey)) continue;
     targetsByParent.set(parentKey, { filePath, parentKey });
   }
   return [...targetsByParent.values()];
 }
 
-export function legacySiblingContextParentKey(doc, workspacePath = "") {
+export function legacySiblingContextParentKey(doc, workspacePath = "", { includeSubfolders = true } = {}) {
   const filePath = String(doc?.path ?? "").trim();
   if (!isAbsoluteTxtPath(filePath)) return "";
   const fileKey = normalizePath(filePath);
   const workspaceKey = normalizedDirectoryKey(workspacePath);
-  if (workspaceKey && isWithinDirectory(fileKey, workspaceKey)) return "";
+  if (workspaceKey && isWithinDirectory(fileKey, workspaceKey)
+    && (includeSubfolders || parentDirectoryKey(fileKey) === workspaceKey)) return "";
   return parentDirectoryKey(fileKey);
 }
 
-export function isLegacyLintWorkspaceDocument(doc, workspacePath = "") {
+export function isLegacyLintWorkspaceDocument(doc, workspacePath = "", { includeSubfolders = true } = {}) {
   const filePath = String(doc?.path ?? "").trim();
   const workspaceKey = normalizedDirectoryKey(workspacePath);
+  const fileKey = normalizePath(filePath);
   return Boolean(
     workspaceKey
     && isAbsoluteTxtPath(filePath)
-    && isWithinDirectory(normalizePath(filePath), workspaceKey)
+    && isWithinDirectory(fileKey, workspaceKey)
+    && (includeSubfolders || parentDirectoryKey(fileKey) === workspaceKey)
   );
+}
+
+export function legacyDocumentDirectoryKey(value) {
+  const filePath = String(value?.path ?? value?.filePath ?? value?.name ?? value?.fileName ?? "").trim();
+  const fileKey = normalizePath(filePath);
+  return parentDirectoryKey(fileKey);
 }
 
 export function isDirectTxtSibling(file, openDocumentKeys = new Set()) {

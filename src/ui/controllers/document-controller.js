@@ -136,7 +136,9 @@ export function createDocumentController({
     if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
       const referenceRootPath = state.workspace?.path ?? "";
       const siblingParent = isTauriRuntime()
-        ? lspStandaloneParentPath(doc.path, referenceRootPath)
+        ? lspStandaloneParentPath(doc.path, referenceRootPath, {
+          includeSubfolders: !state.excludeWorkspaceSubfolders
+        })
         : null;
       if (siblingParent) {
         try {
@@ -207,11 +209,12 @@ export function createDocumentController({
         showError("Open Folder is available in the desktop app.");
         return;
       }
-      const workspace = await openWorkspaceNative();
+      const includeSubfolders = !state.excludeWorkspaceSubfolders;
+      const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
       state.workspace = workspace;
       resetLegacyWorkspaceIndex();
-      if (isVectorLintEngine()) lspStartWorkspace(workspace.path).catch(showError);
+      if (isVectorLintEngine()) lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
       else {
         const schedule = legacyLintImmediateSchedule("workspace-opened");
         scheduleLegacyLintFull(schedule.reason, schedule.delay);
