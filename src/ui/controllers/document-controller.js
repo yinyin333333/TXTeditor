@@ -336,8 +336,10 @@ export function createDocumentController({
         }
       }
     }
-    if (isVectorLintEngine()) lspCloseDoc(doc).catch((error) => reportLspCloseFailure(doc, error, "tab-close"));
-    else cancelLegacyLintJobs({ clearDiagnostics: false });
+    const lspClosePromise = isVectorLintEngine()
+      ? lspCloseDoc(doc).catch((error) => reportLspCloseFailure(doc, error, "tab-close"))
+      : null;
+    if (!lspClosePromise) cancelLegacyLintJobs({ clearDiagnostics: false });
     const documentCountBeforeClose = state.docs.length;
     state.docs.splice(index, 1);
     if (!state.docs.length) {
@@ -356,6 +358,7 @@ export function createDocumentController({
     renderChrome();
     const nextActiveDoc = activeDoc();
     if (isVectorLintEngine() && nextActiveDoc && nextActiveDoc !== previouslyActiveDoc) {
+      await lspClosePromise;
       try {
         await ensureDocumentSession(nextActiveDoc);
       } catch (error) {

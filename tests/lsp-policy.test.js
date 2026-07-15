@@ -258,7 +258,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
       core: {
         invoke: async (command, args) => {
           calls.push([command, args]);
-          if (command === "lsp_start" || command === "lsp_open_file") return;
+          if (command === "lsp_start" || command === "lsp_open_file" || command === "lsp_close_file") return;
           throw new Error(`unexpected invoke: ${command}`);
         }
       }
@@ -344,6 +344,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
 
     await documentController.closeTab(1);
     assert.deepEqual(calls.slice(2), [
+      ["lsp_close_file", { uri: docToUri(second), generation: 1 }],
       ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2 }],
       ["lsp_open_file", { uri: docToUri(first), version: 1, text: first.toText(), generation: 2 }]
     ]);

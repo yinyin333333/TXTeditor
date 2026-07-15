@@ -790,6 +790,40 @@ test("closing active standalone tab rebinds the revealed document through its pa
   assert.deepEqual(ensured, [{ doc: first, active: first }]);
 });
 
+test("closing an active Vector tab waits for didClose before rebinding the revealed document", async () => {
+  const first = TableDocument.fromText("first.txt", "id\nA", {
+    path: "E:\\Mods\\A\\first.txt",
+    dirty: false
+  });
+  const second = TableDocument.fromText("second.txt", "id\nB", {
+    path: "E:\\Mods\\B\\second.txt",
+    dirty: false
+  });
+  const events = [];
+  let releaseClose;
+  const closeBlocked = new Promise((resolve) => { releaseClose = resolve; });
+  const { controller, state } = testDocumentController([first, second], {}, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspCloseDoc: async () => {
+      events.push("close-start");
+      await closeBlocked;
+      events.push("close-end");
+    },
+    ensureDocumentSession: async () => events.push("ensure")
+  });
+  state.active = 1;
+
+  const closing = controller.closeTab(1);
+  await Promise.resolve();
+  assert.deepEqual(events, ["close-start"]);
+
+  releaseClose();
+  await closing;
+  assert.deepEqual(events, ["close-start", "close-end", "ensure"]);
+});
+
 test("context menu command item registries preserve expected command groups", () => {
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
