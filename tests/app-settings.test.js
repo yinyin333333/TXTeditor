@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createDefaultLintSettings } from "../src/core/lint-engine.js";
 import { LINT_ENGINE_VECTOR } from "../src/core/lint-controller-policy.js";
@@ -291,7 +292,13 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
       pluginPath: "E:\\Plugins",
       schemaPath: "E:\\Schema",
       vectorLspPath: "E:\\Tools\\vector-lsp.exe",
-      debugLogging: true
+      debugLogging: true,
+      jsonDiagnostics: true,
+      jsonDiagnosticRules: {
+        duplicateIds: { action: "error" },
+        stringFormat: { action: "ignore" },
+        keyUsage: { action: "warn", idStart: 51566 }
+      }
     }
   });
 
@@ -313,6 +320,37 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
   assert.equal(document.body.querySelector("[data-settings-choice='save']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-choice='restart-lsp']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-choice='cancel']")?.tagName, "BUTTON");
+  assert.equal(document.body.querySelector("#settingsJsonDiagnostics")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsJsonDiagnostics")?.checked, true);
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction")?.value, "warn");
+  assert.equal(document.body.querySelector("#settingsJsonStringFormatAction")?.value, "ignore");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageAction")?.value, "warn");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.value, "51566");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, false);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), false);
+  assert.doesNotMatch(backdrop.innerHTML, /<option value="error"/);
+  assert.match(backdrop.innerHTML, /modal-actions settings-lint-actions/);
+  assert.match(
+    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"),
+    /\.settings-lint-actions\s*\{[^}]*margin-top:\s*18px/s
+  );
+
+  const keyUsageAction = document.body.querySelector("#settingsJsonKeyUsageAction");
+  keyUsageAction.value = "ignore";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), true);
+  keyUsageAction.value = "warn";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, false);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), false);
+
+  const jsonDiagnostics = document.body.querySelector("#settingsJsonDiagnostics");
+  jsonDiagnostics.checked = false;
+  jsonDiagnostics.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), true);
 
   document.body.querySelector("[data-settings-choice='cancel']").click();
   await pending;
@@ -327,6 +365,17 @@ test("standalone Vector Lint Options save and Restart LSP force-rebind the activ
 
   const savePending = controller.showSettings();
   assert.ok(await waitForSelector(document, ".settings-modal"));
+  const jsonDiagnostics = document.body.querySelector("#settingsJsonDiagnostics");
+  assert.equal(jsonDiagnostics.checked, false);
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction").disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageAction").value, "ignore");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions").classList.contains("hidden"), true);
+  jsonDiagnostics.checked = true;
+  jsonDiagnostics.dispatchEvent({ type: "change", bubbles: true });
+  document.body.querySelector("#settingsJsonDuplicateIdsAction").value = "warn";
+  document.body.querySelector("#settingsJsonStringFormatAction").value = "ignore";
+  document.body.querySelector("#settingsJsonKeyUsageAction").value = "warn";
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "56000.5";
   document.body.querySelector("#settingsSchemaVersion").value = "3.1";
   document.body.querySelector("#settingsReferenceVersion").value = "3.1";
   document.body.querySelector("[data-settings-choice='save']").click();
@@ -334,6 +383,12 @@ test("standalone Vector Lint Options save and Restart LSP force-rebind the activ
 
   assert.equal(state.config.schemaVersion, "3.1");
   assert.equal(state.config.referenceVersion, "3.1");
+  assert.equal(state.config.jsonDiagnostics, true);
+  assert.deepEqual(state.config.jsonDiagnosticRules, {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  });
   assert.deepEqual(state.lint.diagnostics, []);
   assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
     ["ensure-document-session", { forceRestart: true }]
@@ -441,13 +496,98 @@ test("Lint Options Escape behaves like Cancel without saving or restarting LSP",
   assert.equal(document.listeners.get("keydown")?.length, 0);
 });
 
+test("rapid Lint Options Save clicks persist JSON diagnostics and restart one latest session", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    diagnostics: [{ id: "stale-json" }],
+    config: { schemaVersion: "3.2", jsonDiagnostics: false }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsJsonDiagnostics").checked = true;
+  const saveButton = document.body.querySelector("[data-settings-choice='save']");
+
+  saveButton.click();
+  saveButton.click();
+  await pending;
+
+  assert.equal(state.config.jsonDiagnostics, true);
+  assert.deepEqual(state.config.jsonDiagnosticRules, {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "warn" },
+    keyUsage: { action: "ignore", idStart: 40000 }
+  });
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 1);
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("Lint Options rejects an invalid Key Usage ID threshold without saving or restarting", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    config: { schemaVersion: "3.2", jsonDiagnostics: true }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  const keyUsageAction = document.body.querySelector("#settingsJsonKeyUsageAction");
+  keyUsageAction.value = "warn";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "";
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(state.config, { schemaVersion: "3.2", jsonDiagnostics: true });
+  assert.equal(document.body.querySelector(".settings-modal") !== null, true);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "error").length, 1);
+  assert.equal(document.body.querySelector("[data-settings-choice='save']").disabled, false);
+
+  document.body.querySelector("[data-settings-choice='cancel']").click();
+  await pending;
+});
+
+test("Lint Options can disable JSON diagnostics without validating an inactive Key Usage threshold", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    config: {
+      schemaVersion: "3.2",
+      jsonDiagnostics: true,
+      jsonDiagnosticRules: {
+        duplicateIds: { action: "warn" },
+        stringFormat: { action: "warn" },
+        keyUsage: { action: "warn", idStart: 51566 }
+      }
+    }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "";
+  document.body.querySelector("#settingsJsonDiagnostics").checked = false;
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await pending;
+
+  assert.equal(state.config.jsonDiagnostics, false);
+  assert.equal(state.config.jsonDiagnosticRules.keyUsage.idStart, 51566);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "error").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 1);
+});
+
 test("V-TXT-14 keeps config, diagnostics, modal, and LSP session unchanged when config write fails", async () => {
   const originalConfig = {
     lintMode: "advanced",
     pluginPath: "E:\\Plugins",
     schemaPath: "E:\\Schema",
     vectorLspPath: "E:\\Tools\\vector-lsp.exe",
-    debugLogging: true
+    debugLogging: true,
+    jsonDiagnostics: false
   };
   const originalDiagnostics = [{ id: "existing-diagnostic" }];
   const { controller, document, calls, state } = makeSettingsController({
@@ -464,6 +604,7 @@ test("V-TXT-14 keeps config, diagnostics, modal, and LSP session unchanged when 
   });
   assert.ok(await waitForSelector(document, ".settings-modal"));
   document.body.querySelector("#settingsPluginPath").value = "E:\\NewPlugins";
+  document.body.querySelector("#settingsJsonDiagnostics").checked = true;
   const saveButton = document.body.querySelector("[data-settings-choice='save']");
   const cancelButton = document.body.querySelector("[data-settings-choice='cancel']");
 

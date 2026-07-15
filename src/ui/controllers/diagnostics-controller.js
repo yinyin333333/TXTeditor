@@ -175,7 +175,7 @@ export function createDiagnosticsController({
 
   async function goToDiagnostic(id) {
     const diagnostic = state.lint.diagnostics.find((item) => item.id === id);
-    if (!diagnostic) return;
+    if (!diagnostic || diagnostic.navigationDisabled) return;
     let index = state.docs.findIndex((doc) => lintDocKey(doc) === diagnostic.fileKey);
     if (index < 0 && state.lint.engine === LINT_ENGINE_LEGACY) {
       const workspaceDoc = state.lint.legacy.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);

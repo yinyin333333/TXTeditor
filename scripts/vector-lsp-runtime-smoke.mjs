@@ -12,6 +12,10 @@ const REFERENCE_DATASETS = [
   ["3.1", "3.1", "92198", 91, 5_077_001, "8479a35241ad05196fc99c2219d8bd934ee3fc7820e0c0f5553fed07847d0152"],
   ["3.2", "3.2", "92777a", 91, 5_144_477, "7149352429c5d5ff3e641adb75ce6ff683ce4db6c390651c928f336f8dcddc75"]
 ];
+const JSON_STRING_LOCALES = [
+  "enUS", "zhTW", "deDE", "esES", "frFR", "itIT", "koKR", "plPL", "esMX", "jaJP",
+  "ptBR", "ruRU", "zhCN"
+];
 
 export const NO_VECTOR_LSP_EXE_MESSAGE = "REAL VECTOR-LSP SMOKE NOT RUN: no existing vector-lsp executable found. Pass --vector-lsp-exe or --vector-lsp-root (or set VECTOR_LSP_ROOT); the smoke never builds an external repository.";
 
@@ -105,6 +109,14 @@ function verifyTooltipMessageSmoke() {
     throw new Error(`TXTEditor diagnostic tooltip wording changed: ${JSON.stringify(samples)}`);
   }
   return samples;
+}
+
+function jsonStringEntry(id, key) {
+  return {
+    id,
+    Key: key,
+    ...Object.fromEntries(JSON_STRING_LOCALES.map((locale) => [locale, ""]))
+  };
 }
 
 export function verifyReferenceBundle(contribRoot) {
@@ -203,6 +215,10 @@ export function prepareStaging({
 }
 
 function writeSmokeWorkspace(workspaceDir) {
+  const excelDir = path.join(workspaceDir, "data", "global", "excel");
+  const stringsDir = path.join(workspaceDir, "data", "local", "lng", "strings");
+  fs.mkdirSync(excelDir, { recursive: true });
+  fs.mkdirSync(stringsDir, { recursive: true });
   fs.writeFileSync(
     path.join(workspaceDir, "config.json"),
     `${JSON.stringify({
@@ -241,7 +257,7 @@ function writeSmokeWorkspace(workspaceDir) {
     "missile\tpSrvHitFunc\tsHitPar2\tcHitPar2\nsmoke-hit-summon\t6\tNU\t1\n",
     "utf8"
   );
-  fs.writeFileSync(path.join(workspaceDir, "upper.TXT"), "id\nupper\n", "utf8");
+  fs.writeFileSync(path.join(excelDir, "upper.TXT"), "id\nupper\n", "utf8");
   fs.writeFileSync(path.join(workspaceDir, "table.tbl"), "id\ntable\n", "utf8");
   fs.writeFileSync(path.join(workspaceDir, "data.csv"), "id\ndata\n", "utf8");
   const deep = path.join(workspaceDir, "d1", "d2", "d3", "d4", "d5", "d6");
@@ -320,8 +336,33 @@ async function withTimeout(promise, ms, label) {
   }
 }
 
+async function requestNonNullHover(client, params, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    const hover = await withTimeout(
+      client.request("textDocument/hover", params),
+      remaining,
+      label
+    );
+    if (hover != null) return hover;
+    // A document notification can publish its diagnostics before another
+    // in-flight workspace validation finishes. vector-lsp intentionally
+    // rejects a hover captured against that superseded snapshot, so retry
+    // the read until the latest workspace identity becomes stable.
+    await wait(Math.min(25, Math.max(0, deadline - Date.now())));
+  }
+}
+
 class LspClient {
-  constructor({ exePath, workspaceDir, schemaVariant = "3.2" }) {
+  constructor({
+    exePath,
+    workspaceDir,
+    schemaVariant = "3.2",
+    jsonDiagnostics = false,
+    jsonDiagnosticRules = {}
+  }) {
     this.exePath = exePath;
     this.workspaceDir = workspaceDir;
     this.schemaVariant = schemaVariant;
@@ -329,17 +370,36 @@ class LspClient {
     this.buffer = Buffer.alloc(0);
     this.messages = [];
     this.waiters = [];
+    this.dynamicRegistrations = [];
+    this.jsonDiagnostics = jsonDiagnostics;
+    this.jsonDiagnosticRules = jsonDiagnosticRules;
     this.stderr = "";
   }
 
   start() {
+    const jsonRuleEnvironment = this.jsonDiagnostics ? {
+      ...(this.jsonDiagnosticRules.duplicateIds == null
+        ? {}
+        : { VLSP_JSON_DUPLICATE_IDS_ACTION: String(this.jsonDiagnosticRules.duplicateIds) }),
+      ...(this.jsonDiagnosticRules.stringFormat == null
+        ? {}
+        : { VLSP_JSON_STRING_FORMAT_ACTION: String(this.jsonDiagnosticRules.stringFormat) }),
+      ...(this.jsonDiagnosticRules.keyUsage == null
+        ? {}
+        : { VLSP_JSON_KEY_USAGE_ACTION: String(this.jsonDiagnosticRules.keyUsage) }),
+      ...(this.jsonDiagnosticRules.keyUsageIdStart == null
+        ? {}
+        : { VLSP_JSON_KEY_USAGE_ID_START: String(this.jsonDiagnosticRules.keyUsageIdStart) })
+    } : {};
     this.child = spawn(this.exePath, ["--editor-mode"], {
       cwd: this.workspaceDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
         VLSP_SCHEMA_VARIANT: this.schemaVariant,
-        VLSP_ENCODING: "auto"
+        VLSP_ENCODING: "auto",
+        VLSP_JSON_DIAGNOSTICS: this.jsonDiagnostics ? "true" : "false",
+        ...jsonRuleEnvironment
       },
       windowsHide: true
     });
@@ -357,6 +417,10 @@ class LspClient {
       if (!frame) break;
       this.buffer = frame.rest;
       this.messages.push(frame.message);
+      if (frame.message.method === "client/registerCapability" && frame.message.id != null) {
+        this.dynamicRegistrations.push(...(frame.message.params?.registrations ?? []));
+        this.send({ jsonrpc: "2.0", id: frame.message.id, result: null });
+      }
       for (const waiter of [...this.waiters]) {
         if (waiter.predicate(frame.message)) {
           this.waiters = this.waiters.filter((candidate) => candidate !== waiter);
@@ -419,30 +483,85 @@ class LspClient {
 }
 
 async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
-  const client = new LspClient({ exePath, workspaceDir: paths.workspaceDir, schemaVariant });
+  const client = new LspClient({
+    exePath,
+    workspaceDir: paths.workspaceDir,
+    schemaVariant,
+    jsonDiagnostics: true,
+    jsonDiagnosticRules: {
+      duplicateIds: "warn",
+      stringFormat: "ignore",
+      keyUsage: "warn",
+      keyUsageIdStart: 40_000.5
+    }
+  });
   client.start();
   const skillsPath = path.join(paths.workspaceDir, "skills.txt");
   const skilldescPath = path.join(paths.workspaceDir, "skilldesc.txt");
   const propertiesPath = path.join(paths.workspaceDir, "properties.txt");
   const monpetPath = path.join(paths.workspaceDir, "monpet.txt");
   const missilesPath = path.join(paths.workspaceDir, "missiles.txt");
+  const upperPath = path.join(paths.workspaceDir, "data", "global", "excel", "upper.TXT");
   const skillsUri = encodeFileUriPath(skillsPath);
   const skilldescUri = encodeFileUriPath(skilldescPath);
   const propertiesUri = encodeFileUriPath(propertiesPath);
   const monpetUri = encodeFileUriPath(monpetPath);
   const missilesUri = encodeFileUriPath(missilesPath);
+  const upperUri = encodeFileUriPath(upperPath);
+  const jsonPath = path.join(paths.workspaceDir, "data", "local", "lng", "strings", "item-names.json");
+  const jsonUri = encodeFileUriPath(jsonPath);
+  const duplicateJsonText = `${JSON.stringify([
+    { id: 40_000.5, Key: "SmokeJsonDuplicate" },
+    { id: 40_000.5, Key: "SmokeJsonDuplicate" },
+    jsonStringEntry(40_001, "SmokeJsonUnused")
+  ], null, 2)}\n`;
+  const validJsonText = `${JSON.stringify([
+    jsonStringEntry(1001, "SmokeJsonOne"),
+    jsonStringEntry(1002, "SmokeJsonTwo")
+  ], null, 2)}\n`;
+  const duplicateJsonDiagnostics = (message) => (message.params?.diagnostics ?? []).filter((diagnostic) => (
+    diagnostic.code === "Json/DuplicateIds"
+  ));
+  const keyUsageJsonDiagnostics = (message) => (message.params?.diagnostics ?? []).filter((diagnostic) => (
+    diagnostic.code === "Json/KeyUsage"
+  ));
+  const waitForJsonDiagnostics = (startIndex, predicate, label) => withTimeout(
+    client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === jsonUri
+      && Array.isArray(message.params?.diagnostics)
+      && predicate(message)
+    ), startIndex),
+    timeoutMs,
+    label
+  );
+  const notifyJsonChange = (type) => client.notify("workspace/didChangeWatchedFiles", {
+    changes: [{ uri: jsonUri, type }]
+  });
   const skillsText = fs.readFileSync(skillsPath, "utf8");
   const skilldescText = new TextDecoder("windows-1252", { fatal: true })
     .decode(fs.readFileSync(skilldescPath));
   const propertiesText = fs.readFileSync(propertiesPath, "utf8");
   const monpetText = fs.readFileSync(monpetPath, "utf8");
   const missilesText = fs.readFileSync(missilesPath, "utf8");
+  const upperText = fs.readFileSync(upperPath, "utf8");
+  // Open Folder must establish the physical JSON scope from primary disk TXT
+  // files before any textDocument/didOpen notification exists.
+  fs.writeFileSync(jsonPath, duplicateJsonText, "utf8");
   try {
     await withTimeout(client.request("initialize", {
       processId: process.pid,
       rootUri: encodeFileUriPath(paths.workspaceDir),
       initializationOptions: { sessionGeneration: 42 },
-      capabilities: { textDocument: { publishDiagnostics: {} } }
+      capabilities: {
+        workspace: {
+          didChangeWatchedFiles: {
+            dynamicRegistration: true,
+            relativePatternSupport: true
+          }
+        },
+        textDocument: { publishDiagnostics: {} }
+      }
     }), timeoutMs, "initialize");
     client.notify("initialized", {});
     const effectiveConfig = await withTimeout(client.waitFor((message) => (
@@ -453,6 +572,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     if (!effectiveConfigMessage.includes("editorMode=true")
       || !effectiveConfigMessage.includes("transport=stdio")
       || !effectiveConfigMessage.includes("singleShot=false")
+      || !effectiveConfigMessage.includes("jsonDiagnostics=true")
       || !effectiveConfigMessage.includes(`variant:${schemaVariant}`)) {
       throw new Error(`editor mode effective config changed: ${effectiveConfigMessage}`);
     }
@@ -472,6 +592,160 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     )), timeoutMs, "workspace ready");
     if (readyMessage.params?.sessionGeneration !== 42) {
       throw new Error(`ready notification lost session generation: ${JSON.stringify(readyMessage.params)}`);
+    }
+    if (!client.dynamicRegistrations.some((registration) => (
+      registration.method === "workspace/didChangeWatchedFiles"
+      && registration.registerOptions?.watchers?.some((watcher) => (
+        String(watcher.globPattern?.pattern ?? "").includes("[tT][xX][tT]")
+      ))
+    ))) {
+      throw new Error(`workspace watched-files registration missing: ${JSON.stringify(client.dynamicRegistrations)}`);
+    }
+    const jsonFilePattern = "*.[jJ][sS][oO][nN]";
+    await withTimeout(client.waitFor((message) => (
+      message.method === "client/registerCapability"
+      && message.params?.registrations?.some((registration) => (
+        registration.method === "workspace/didChangeWatchedFiles"
+        && String(registration.id ?? "").includes("-json-")
+        && registration.registerOptions?.watchers?.some((watcher) => (
+          watcher.globPattern?.pattern === jsonFilePattern
+        ))
+      ))
+    )), timeoutMs, "local JSON watched-files registration");
+    const jsonWatchRegistrations = client.dynamicRegistrations.filter((registration) => (
+      registration.method === "workspace/didChangeWatchedFiles"
+      && String(registration.id ?? "").includes("-json-")
+    ));
+    const jsonWatchers = jsonWatchRegistrations.flatMap((registration) => (
+      registration.registerOptions?.watchers ?? []
+    ));
+    const normalizedWatcherBase = (watcher) => (
+      String(watcher.globPattern?.baseUri ?? "").replace(/\/$/, "")
+    );
+    const expectedStringsUri = encodeFileUriPath(
+      path.join(paths.workspaceDir, "data", "local", "lng", "strings")
+    ).replace(/\/$/, "");
+    const expectedLngUri = encodeFileUriPath(
+      path.join(paths.workspaceDir, "data", "local", "lng")
+    ).replace(/\/$/, "");
+    const expectedGlobalUri = encodeFileUriPath(
+      path.join(paths.workspaceDir, "data", "global")
+    ).replace(/\/$/, "");
+    const stringsFileWatcher = jsonWatchers.find((watcher) => (
+      normalizedWatcherBase(watcher) === expectedStringsUri
+      && watcher.globPattern?.pattern === jsonFilePattern
+    ));
+    const stringsGuardWatcher = jsonWatchers.find((watcher) => (
+      normalizedWatcherBase(watcher) === expectedLngUri
+      && watcher.globPattern?.pattern === "strings"
+      && watcher.kind === 5
+    ));
+    const layoutsGuardWatcher = jsonWatchers.find((watcher) => (
+      normalizedWatcherBase(watcher) === expectedGlobalUri
+      && watcher.globPattern?.pattern === "ui"
+      && watcher.kind === 5
+    ));
+    const recursiveJsonWatchers = jsonWatchers.filter((watcher) => {
+      const pattern = String(watcher.globPattern?.pattern ?? "");
+      return pattern.includes("**") || pattern.includes("/") || pattern.includes("\\");
+    });
+    if (!stringsFileWatcher || !stringsGuardWatcher || !layoutsGuardWatcher
+      || recursiveJsonWatchers.length > 0) {
+      throw new Error(`targeted/nonrecursive JSON watched-files registration changed: ${JSON.stringify(jsonWatchRegistrations)}`);
+    }
+
+    const workspaceOnlyJson = await withTimeout(client.waitFor((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === jsonUri
+      && duplicateJsonDiagnostics(message).length === 2
+    )), timeoutMs, "Open Folder JSON diagnostics before didOpen");
+    if (workspaceOnlyJson.params.diagnostics.length !== 3
+      || keyUsageJsonDiagnostics(workspaceOnlyJson).length !== 1) {
+      throw new Error(`Open Folder JSON diagnostics changed: ${JSON.stringify(workspaceOnlyJson.params)}`);
+    }
+
+    const workspaceJsonDeleteStart = client.messages.length;
+    fs.rmSync(jsonPath, { force: true });
+    notifyJsonChange(3);
+    await waitForJsonDiagnostics(
+      workspaceJsonDeleteStart,
+      (message) => message.params.diagnostics.length === 0,
+      "Open Folder JSON cleanup before didOpen"
+    );
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri: upperUri, languageId: "plaintext", version: 1, text: upperText }
+    });
+
+    const jsonCreateStart = client.messages.length;
+    fs.writeFileSync(jsonPath, duplicateJsonText, "utf8");
+    notifyJsonChange(1);
+    const jsonCreated = await waitForJsonDiagnostics(
+      jsonCreateStart,
+      (message) => duplicateJsonDiagnostics(message).length === 2,
+      "watched JSON diagnostics after create"
+    );
+    const createdMessages = duplicateJsonDiagnostics(jsonCreated).map((diagnostic) => diagnostic.message);
+    if (jsonCreated.params.diagnostics.length !== 3
+      || duplicateJsonDiagnostics(jsonCreated).some((diagnostic) => diagnostic.severity !== 2)
+      || keyUsageJsonDiagnostics(jsonCreated).length !== 1
+      || keyUsageJsonDiagnostics(jsonCreated)[0]?.severity !== 2
+      || !keyUsageJsonDiagnostics(jsonCreated)[0]?.message.includes("id: 40001")
+      || !createdMessages.some((message) => message.includes("duplicate id 40000.5"))
+      || !createdMessages.some((message) => message.includes("duplicate Key 'SmokeJsonDuplicate'"))) {
+      throw new Error(`watched JSON duplicate diagnostics changed: ${JSON.stringify(jsonCreated.params)}`);
+    }
+
+    const jsonFixStart = client.messages.length;
+    fs.writeFileSync(jsonPath, validJsonText, "utf8");
+    notifyJsonChange(2);
+    const jsonFixed = await waitForJsonDiagnostics(
+      jsonFixStart,
+      (message) => message.params.diagnostics.length === 0,
+      "watched JSON diagnostics after fix"
+    );
+
+    const jsonReintroduceStart = client.messages.length;
+    fs.writeFileSync(jsonPath, duplicateJsonText, "utf8");
+    notifyJsonChange(2);
+    const jsonReintroduced = await waitForJsonDiagnostics(
+      jsonReintroduceStart,
+      (message) => duplicateJsonDiagnostics(message).length === 2,
+      "watched JSON diagnostics after error reintroduction"
+    );
+
+    const jsonDeleteStart = client.messages.length;
+    fs.rmSync(jsonPath, { force: true });
+    notifyJsonChange(3);
+    const jsonDeleted = await waitForJsonDiagnostics(
+      jsonDeleteStart,
+      (message) => message.params.diagnostics.length === 0,
+      "watched JSON diagnostics after delete"
+    );
+
+    const jsonRestoreStart = client.messages.length;
+    fs.writeFileSync(jsonPath, duplicateJsonText, "utf8");
+    notifyJsonChange(1);
+    const jsonRestored = await waitForJsonDiagnostics(
+      jsonRestoreStart,
+      (message) => duplicateJsonDiagnostics(message).length === 2,
+      "watched JSON diagnostics after restore"
+    );
+
+    const jsonFinalDeleteStart = client.messages.length;
+    fs.rmSync(jsonPath, { force: true });
+    notifyJsonChange(3);
+    const jsonFinalDelete = await waitForJsonDiagnostics(
+      jsonFinalDeleteStart,
+      (message) => message.params.diagnostics.length === 0,
+      "watched JSON diagnostics after final delete"
+    );
+    const unexpectedJsonPublishes = client.messages.filter((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && String(message.params?.uri ?? "").toLowerCase().endsWith(".json")
+      && message.params.uri !== jsonUri
+    ));
+    if (unexpectedJsonPublishes.length) {
+      throw new Error(`reference/bundled JSON diagnostics were published: ${JSON.stringify(unexpectedJsonPublishes)}`);
     }
     const perfMessage = await withTimeout(client.waitFor((message) => (
       message.method === "window/logMessage"
@@ -582,10 +856,10 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       || diagnosticTooltipText(openMissilesDiagnostics[0]) !== hitSummonMessage) {
       throw new Error(`HitSummon Problems tooltip changed: ${JSON.stringify(openMissilesDiagnostics)}`);
     }
-    const hitSummonHover = await withTimeout(client.request("textDocument/hover", {
+    const hitSummonHover = await requestNonNullHover(client, {
       textDocument: { uri: missilesUri },
       position: { line: 1, character: hitSummonStart + 1 }
-    }), timeoutMs, "HitSummon mode hover");
+    }, timeoutMs, "HitSummon mode hover");
     const hitSummonHoverText = String(hitSummonHover?.contents?.value ?? hitSummonHover?.contents ?? "");
     if (!hitSummonHoverText.includes("HitSummon monster mode")
       || !hitSummonHoverText.includes("0=DT, 1=NU")
@@ -747,6 +1021,20 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       initialize: "pass",
       editorModeConfig: effectiveConfigMessage,
       indexedFiles: 9,
+      watchedFileRegistrations: client.dynamicRegistrations.length,
+      watchedJsonRegistrations: jsonWatchRegistrations.length,
+      watchedJsonRecursivePatterns: recursiveJsonWatchers.length,
+      workspaceOnlyJsonDiagnostics: workspaceOnlyJson.params.diagnostics.length,
+      watchedJsonCreateDiagnostics: duplicateJsonDiagnostics(jsonCreated).length,
+      watchedJsonDuplicateSeverity: duplicateJsonDiagnostics(jsonCreated)[0]?.severity,
+      watchedJsonKeyUsageDiagnostics: keyUsageJsonDiagnostics(jsonCreated).length,
+      watchedJsonKeyUsageSeverity: keyUsageJsonDiagnostics(jsonCreated)[0]?.severity,
+      watchedJsonFixDiagnostics: jsonFixed.params.diagnostics.length,
+      watchedJsonReintroducedDiagnostics: duplicateJsonDiagnostics(jsonReintroduced).length,
+      watchedJsonDeleteDiagnostics: jsonDeleted.params.diagnostics.length,
+      watchedJsonRestoreDiagnostics: duplicateJsonDiagnostics(jsonRestored).length,
+      watchedJsonFinalDeleteDiagnostics: jsonFinalDelete.params.diagnostics.length,
+      watchedJsonFallbackPublishes: unexpectedJsonPublishes.length,
       readyGeneration: readyMessage.params.sessionGeneration,
       serverPerf,
       startupDiagnostics: startupDiagnostics.params.diagnostics.length,
@@ -777,6 +1065,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       stderr: client.stderr.trim()
     };
   } finally {
+    fs.rmSync(jsonPath, { force: true });
     await client.stop();
   }
 }
@@ -833,7 +1122,15 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
         referenceContextMode: "sibling",
         referenceRootUri: encodeFileUriPath(paths.referenceRootDir)
       },
-      capabilities: { textDocument: { publishDiagnostics: {} } }
+      capabilities: {
+        workspace: {
+          didChangeWatchedFiles: {
+            dynamicRegistration: true,
+            relativePatternSupport: true
+          }
+        },
+        textDocument: { publishDiagnostics: {} }
+      }
     }), timeoutMs, "sibling initialize");
     client.notify("initialized", {});
     await withTimeout(client.waitFor((message) => (
@@ -845,6 +1142,11 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
     )), timeoutMs, "sibling workspace ready");
     if (ready.params?.sessionGeneration !== 84) {
       throw new Error(`sibling ready notification lost generation: ${JSON.stringify(ready.params)}`);
+    }
+    if (client.dynamicRegistrations.filter((registration) => (
+      registration.method === "workspace/didChangeWatchedFiles"
+    )).length < 2) {
+      throw new Error(`sibling/reference watched-files registrations missing: ${JSON.stringify(client.dynamicRegistrations)}`);
     }
 
     const hiddenPublishes = client.messages.filter((message) => (
@@ -1055,6 +1357,7 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
     return {
       initialize: "pass",
       readyGeneration: ready.params.sessionGeneration,
+      watchedFileRegistrations: client.dynamicRegistrations.length,
       hiddenReferencePublishes: hiddenPublishes.length,
       siblingMod4ccDiagnostics: referenceDiagnostics(initialMagic).length,
       staffFixed4Diagnostics: referenceDiagnostics(initialMagic).length,

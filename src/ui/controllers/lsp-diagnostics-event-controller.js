@@ -19,7 +19,7 @@ export function sameProblemsPresentation(left = [], right = []) {
   if (left.length !== right.length) return false;
   const fields = [
     "id", "fileKey", "fileName", "rowIndex", "columnIndex",
-    "severity", "message", "ruleId", "profile"
+    "severity", "message", "ruleId", "profile", "navigationDisabled"
   ];
   return left.every((diagnostic, index) => fields.every(
     (field) => (diagnostic?.[field] ?? null) === (right[index]?.[field] ?? null)

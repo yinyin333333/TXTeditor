@@ -1,5 +1,8 @@
-use crate::config::{AppConfig, AppConfigState};
+use crate::config::{AppConfig, AppConfigState, JsonDiagnosticRules};
 use crate::file_io::decode_text;
+use crate::lsp_file_watcher::{
+    WatchChangeSink, WatchErrorSink, WatchRegistry, WATCHED_FILES_METHOD,
+};
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
     strip_markdown_for_tooltip, uri_to_path, LspContentChange, LspDiagnostic,
@@ -22,11 +25,14 @@ type PendingRequests = Mutex<HashMap<u64, PendingResponse>>;
 
 struct LspProcess {
     generation: u64,
+    workspace_root: PathBuf,
     outbound: Mutex<OutboundState>,
     next_id: AtomicU64,
     pending: PendingRequests,
     diagnostics: Mutex<HashMap<String, DiagnosticSnapshot>>,
     next_diagnostic_sequence: AtomicU64,
+    watchers_active: AtomicBool,
+    watchers: Mutex<WatchRegistry>,
 }
 
 #[derive(Clone)]
@@ -183,6 +189,8 @@ struct EditorLaunchSpec {
     schema_path: Option<PathBuf>,
     plugin_path: Option<PathBuf>,
     debug_logging: bool,
+    json_diagnostics: bool,
+    json_diagnostic_rules: JsonDiagnosticRules,
 }
 
 impl EditorLaunchSpec {
@@ -242,6 +250,8 @@ impl EditorLaunchSpec {
             schema_path,
             plugin_path,
             debug_logging: config.debug_logging,
+            json_diagnostics: config.json_diagnostics,
+            json_diagnostic_rules: config.json_diagnostic_rules,
         })
     }
 
@@ -257,7 +267,7 @@ impl EditorLaunchSpec {
             })
             .unwrap_or_else(|| "none".to_string());
         format!(
-            "vector-lsp editor launch: executable={} mode={} schema={} reference={} encoding=auto transport=stdio singleShot=false pluginPath={}",
+            "vector-lsp editor launch: executable={} mode={} schema={} reference={} encoding=auto transport=stdio singleShot=false pluginPath={} jsonDiagnostics={} jsonRules=duplicateIds:{},stringFormat:{},keyUsage:{}@{}",
             self.binary.display(),
             self.lint_mode,
             schema,
@@ -265,7 +275,21 @@ impl EditorLaunchSpec {
             self.plugin_path
                 .as_ref()
                 .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "none".to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            self.json_diagnostics,
+            self.json_diagnostic_rules
+                .duplicate_ids
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules
+                .string_format
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules
+                .key_usage
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules.key_usage.id_start
         )
     }
 }
@@ -297,6 +321,11 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
         "VLSP_WORKSPACE_PATH",
         "VLSP_ENCODING",
         "VLSP_DEBUG_LOGGING",
+        "VLSP_JSON_DIAGNOSTICS",
+        "VLSP_JSON_DUPLICATE_IDS_ACTION",
+        "VLSP_JSON_STRING_FORMAT_ACTION",
+        "VLSP_JSON_KEY_USAGE_ACTION",
+        "VLSP_JSON_KEY_USAGE_ID_START",
     ];
     command.arg("--editor-mode");
     for name in SANITIZED_ENVIRONMENT {
@@ -318,12 +347,38 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
     if spec.debug_logging {
         command.env("VLSP_DEBUG_LOGGING", "1");
     }
+    if spec.json_diagnostics {
+        command.env("VLSP_JSON_DIAGNOSTICS", "true");
+        command.env(
+            "VLSP_JSON_DUPLICATE_IDS_ACTION",
+            spec.json_diagnostic_rules
+                .duplicate_ids
+                .action
+                .as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_STRING_FORMAT_ACTION",
+            spec.json_diagnostic_rules
+                .string_format
+                .action
+                .as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_KEY_USAGE_ACTION",
+            spec.json_diagnostic_rules.key_usage.action.as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_KEY_USAGE_ID_START",
+            spec.json_diagnostic_rules.key_usage.id_start.to_string(),
+        );
+    }
 }
 
 fn stop_active_session(manager: &mut ManagerState, reason: &str) -> usize {
     let Some(mut active) = manager.active.take() else {
         return 0;
     };
+    deactivate_lsp_process(&active.process);
     drain_pending_requests(&active.process.pending, reason);
     kill_and_wait_child(&mut active.child);
     1
@@ -386,6 +441,11 @@ fn drain_pending_requests(pending: &PendingRequests, reason: &str) -> usize {
         let _ = sender.send(Err(reason.to_string()));
     }
     count
+}
+
+fn deactivate_lsp_process(proc: &LspProcess) {
+    proc.watchers_active.store(false, Ordering::SeqCst);
+    proc.watchers.lock().unwrap().clear();
 }
 
 fn is_response_to_request(msg: &Value, request_id: u64) -> bool {
@@ -482,6 +542,101 @@ fn json_rpc_error_message(error: &Value) -> String {
     }
 }
 
+fn watched_file_sinks(
+    proc: &Arc<LspProcess>,
+    app: &tauri::AppHandle,
+) -> (WatchChangeSink, WatchErrorSink) {
+    let weak_process = Arc::downgrade(proc);
+    let changes: WatchChangeSink = Arc::new(move |changes| {
+        let Some(proc) = weak_process.upgrade() else {
+            return;
+        };
+        if !proc.watchers_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut outbound = proc.outbound.lock().unwrap();
+        if !proc.watchers_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let _ = send_lsp_msg(
+            &mut outbound.stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": WATCHED_FILES_METHOD,
+                "params": { "changes": changes }
+            }),
+        );
+    });
+
+    let weak_process = Arc::downgrade(proc);
+    let app = app.clone();
+    let errors: WatchErrorSink = Arc::new(move |message| {
+        let Some(proc) = weak_process.upgrade() else {
+            return;
+        };
+        if proc.watchers_active.load(Ordering::SeqCst) {
+            let _ = app.emit("lsp-log", message);
+        }
+    });
+    (changes, errors)
+}
+
+fn send_server_request_response(
+    proc: &LspProcess,
+    id: Value,
+    result: Result<(), (i64, String)>,
+) -> Result<(), String> {
+    let response = server_request_response(id, result);
+    let mut outbound = proc.outbound.lock().unwrap();
+    send_lsp_msg(&mut outbound.stdin, &response)
+}
+
+fn server_request_response(id: Value, result: Result<(), (i64, String)>) -> Value {
+    match result {
+        Ok(()) => json!({ "jsonrpc": "2.0", "id": id, "result": null }),
+        Err((code, message)) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message }
+        }),
+    }
+}
+
+fn handle_server_request(
+    proc: &Arc<LspProcess>,
+    msg: &Value,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    let id = msg
+        .get("id")
+        .filter(|id| id.is_u64() || id.is_i64() || id.is_string())
+        .cloned()
+        .ok_or_else(|| "LSP server request had an invalid id".to_string())?;
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+    let result = match method {
+        "client/registerCapability" => {
+            let (changes, errors) = watched_file_sinks(proc, app);
+            proc.watchers
+                .lock()
+                .unwrap()
+                .register(&params, &proc.workspace_root, changes, errors)
+                .map_err(|message| (-32602, message))
+        }
+        "client/unregisterCapability" => proc
+            .watchers
+            .lock()
+            .unwrap()
+            .unregister(&params)
+            .map_err(|message| (-32602, message)),
+        _ => Err((-32601, format!("Unsupported LSP server request: {method}"))),
+    };
+    send_server_request_response(proc, id, result)
+}
+
 fn run_lsp_reader(
     mut reader: BufReader<ChildStdout>,
     proc: Arc<LspProcess>,
@@ -498,6 +653,18 @@ fn run_lsp_reader(
                 if let Some(tx) = sender {
                     let _ = tx.send(json_rpc_response_result(&msg));
                 }
+            }
+            continue;
+        }
+        if msg.get("id").is_some() && msg.get("method").is_some() {
+            if let Err(error) = handle_server_request(&proc, &msg, &app) {
+                finish_lsp_reader(
+                    &core,
+                    &proc,
+                    &format!("server request response failed: {error}"),
+                    &app,
+                );
+                return;
             }
             continue;
         }
@@ -740,11 +907,13 @@ fn install_candidate_locked(
 ) -> CandidateInstall {
     if is_latest_request(core, candidate.generation) {
         if let Some(mut replaced) = manager.active.replace(candidate) {
+            deactivate_lsp_process(&replaced.process);
             drain_pending_requests(&replaced.process.pending, "LSP session replaced");
             kill_and_wait_child(&mut replaced.child);
         }
         CandidateInstall::Installed
     } else {
+        deactivate_lsp_process(&candidate.process);
         drain_pending_requests(&candidate.process.pending, "LSP start superseded");
         kill_and_wait_child(&mut candidate.child);
         CandidateInstall::Superseded
@@ -930,7 +1099,15 @@ pub(crate) async fn lsp_start(
                     "includeSubfolders": include_subfolders,
                     "workspaceDirectoryScopes": true
                 },
-                "capabilities": { "textDocument": { "publishDiagnostics": {} } }
+                "capabilities": {
+                    "workspace": {
+                        "didChangeWatchedFiles": {
+                            "dynamicRegistration": true,
+                            "relativePatternSupport": true
+                        }
+                    },
+                    "textDocument": { "publishDiagnostics": {} }
+                }
             }
         }),
     ) {
@@ -977,6 +1154,7 @@ pub(crate) async fn lsp_start(
 
     let proc = Arc::new(LspProcess {
         generation,
+        workspace_root: PathBuf::from(&workspace_path),
         outbound: Mutex::new(OutboundState {
             stdin,
             documents: HashMap::new(),
@@ -985,6 +1163,8 @@ pub(crate) async fn lsp_start(
         pending: Mutex::new(HashMap::new()),
         diagnostics: Mutex::new(HashMap::new()),
         next_diagnostic_sequence: AtomicU64::new(0),
+        watchers_active: AtomicBool::new(true),
+        watchers: Mutex::new(WatchRegistry::new()),
     });
 
     match install_tracked_candidate(
@@ -1387,6 +1567,7 @@ mod tests {
         (
             Arc::new(LspProcess {
                 generation,
+                workspace_root: std::env::temp_dir(),
                 outbound: Mutex::new(OutboundState {
                     stdin,
                     documents: HashMap::new(),
@@ -1395,6 +1576,8 @@ mod tests {
                 pending: Mutex::new(HashMap::new()),
                 diagnostics: Mutex::new(HashMap::new()),
                 next_diagnostic_sequence: AtomicU64::new(0),
+                watchers_active: AtomicBool::new(true),
+                watchers: Mutex::new(WatchRegistry::new()),
             }),
             child,
         )
@@ -1913,10 +2096,17 @@ mod tests {
             schema_path: None,
             plugin_path: None,
             debug_logging: false,
+            json_diagnostics: false,
+            json_diagnostic_rules: JsonDiagnosticRules::default(),
         };
         let mut command = Command::new(&spec.binary);
         command.env("VLSP_SINGLE_SHOT", "true");
         command.env("VLSP_IO_TYPE", "tcp");
+        command.env("VLSP_JSON_DIAGNOSTICS", "true");
+        command.env("VLSP_JSON_DUPLICATE_IDS_ACTION", "error");
+        command.env("VLSP_JSON_STRING_FORMAT_ACTION", "error");
+        command.env("VLSP_JSON_KEY_USAGE_ACTION", "error");
+        command.env("VLSP_JSON_KEY_USAGE_ID_START", "1");
 
         configure_editor_command(&mut command, &spec);
 
@@ -1949,6 +2139,74 @@ mod tests {
         assert_eq!(
             environment.get("VLSP_REFERENCE_VARIANT"),
             Some(&Some("3.2".to_string()))
+        );
+        assert_eq!(environment.get("VLSP_JSON_DIAGNOSTICS"), Some(&None));
+        for name in [
+            "VLSP_JSON_DUPLICATE_IDS_ACTION",
+            "VLSP_JSON_STRING_FORMAT_ACTION",
+            "VLSP_JSON_KEY_USAGE_ACTION",
+            "VLSP_JSON_KEY_USAGE_ID_START",
+        ] {
+            assert_eq!(environment.get(name), Some(&None), "{name}");
+        }
+    }
+
+    #[test]
+    fn editor_command_enables_json_diagnostics_only_when_configured() {
+        let rules = JsonDiagnosticRules {
+            duplicate_ids: crate::config::JsonDiagnosticRule {
+                action: crate::config::JsonDiagnosticAction::Warn,
+            },
+            string_format: crate::config::JsonDiagnosticRule {
+                action: crate::config::JsonDiagnosticAction::Ignore,
+            },
+            key_usage: crate::config::JsonKeyUsageRule {
+                action: crate::config::JsonDiagnosticAction::Warn,
+                id_start: 51_566.5,
+            },
+        };
+        let spec = EditorLaunchSpec {
+            binary: std::env::current_exe().unwrap(),
+            lint_mode: "basic".to_string(),
+            schema_version: Some("3.2".to_string()),
+            reference_version: Some("3.2".to_string()),
+            schema_path: None,
+            plugin_path: None,
+            debug_logging: false,
+            json_diagnostics: true,
+            json_diagnostic_rules: rules,
+        };
+        let mut command = Command::new(&spec.binary);
+        configure_editor_command(&mut command, &spec);
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            environment.get("VLSP_JSON_DIAGNOSTICS"),
+            Some(&Some("true".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_DUPLICATE_IDS_ACTION"),
+            Some(&Some("warn".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_STRING_FORMAT_ACTION"),
+            Some(&Some("ignore".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_KEY_USAGE_ACTION"),
+            Some(&Some("warn".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_KEY_USAGE_ID_START"),
+            Some(&Some("51566.5".to_string()))
         );
     }
 
@@ -2003,6 +2261,21 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("-32603"));
         assert!(error.contains("hover failed"));
+    }
+
+    #[test]
+    fn server_request_responses_preserve_numeric_and_string_ids() {
+        let ok = server_request_response(json!(27), Ok(()));
+        assert_eq!(ok["id"], 27);
+        assert!(ok["result"].is_null());
+
+        let error = server_request_response(
+            json!("watch-registration"),
+            Err((-32602, "invalid watcher".to_string())),
+        );
+        assert_eq!(error["id"], "watch-registration");
+        assert_eq!(error["error"]["code"], -32602);
+        assert_eq!(error["error"]["message"], "invalid watcher");
     }
 
     #[test]

@@ -12,6 +12,7 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
   const data = diagnostic?.data ?? null;
   const code = diagnostic?.code == null ? "" : String(diagnostic.code);
   const range = displayDiagnosticRange(diagnostic, cellValue, data);
+  const navigationDisabled = !doc && isJsonResource(filePath || fileName);
   return {
     id: `lsp:${uri}:${rowIndex}:${columnIndex}:${index}`,
     fileKey,
@@ -24,9 +25,14 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
     ruleId: code,
     code,
     data,
+    navigationDisabled,
     locationLabel: `Row ${rowIndex + 1}, Col ${columnIndex + 1}`,
     ...range
   };
+}
+
+function isJsonResource(value) {
+  return /\.json$/i.test(String(value ?? "").trim());
 }
 
 function knownCellValue(doc, rowIndex, columnIndex) {

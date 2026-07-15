@@ -117,6 +117,9 @@ test("Vector-LSP runtime staging copies the executable and mandatory contrib set
     assert.equal(existsSync(path.join(paths.stagingDir, "vector-lsp.exe")), true);
     assert.equal(existsSync(path.join(paths.stagingDir, "contrib", "schemas", "schema.json")), true);
     assert.equal(existsSync(path.join(paths.workspaceDir, "skills.txt")), true);
+    assert.equal(existsSync(path.join(paths.workspaceDir, "data", "global", "excel", "upper.TXT")), true);
+    assert.equal(existsSync(path.join(paths.workspaceDir, "data", "local", "lng", "strings")), true);
+    assert.equal(existsSync(path.join(paths.workspaceDir, "data", "local", "lng", "strings", "item-names.json")), false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

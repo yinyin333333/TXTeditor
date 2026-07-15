@@ -30,6 +30,43 @@ export function shouldCloseSettingsKey(key) {
   return key === "Escape";
 }
 
+const JSON_RULE_ACTIONS = [
+  ["ignore", "Off"],
+  ["warn", "Warning"]
+];
+const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
+
+function normalizeJsonRuleAction(value, fallback = "warn") {
+  if (value === "error") return "warn";
+  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
+}
+
+function normalizeJsonDiagnosticRules(value) {
+  return {
+    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
+    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
+    keyUsage: {
+      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
+      idStart: Number.isFinite(value?.keyUsage?.idStart)
+        ? value.keyUsage.idStart
+        : DEFAULT_JSON_KEY_USAGE_ID_START
+    }
+  };
+}
+
+function jsonRuleActionOptions(selected) {
+  return JSON_RULE_ACTIONS.map(([value, label]) =>
+    `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function parseJsonKeyUsageIdStart(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function bindEscapeToClose(close) {
   const onKeydown = (event) => {
     if (!shouldCloseSettingsKey(event.key)) return;
@@ -443,6 +480,7 @@ export function createSettingsController({
     ].map(([value, label]) =>
       `<option value="${escapeHtml(value)}"${referenceVersion === value ? " selected" : ""}>${escapeHtml(label)}</option>`
     ).join("");
+    const jsonRules = normalizeJsonDiagnosticRules(config.jsonDiagnosticRules);
 
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -485,11 +523,49 @@ export function createSettingsController({
         <div class="settings-hint">One version is used for the whole lint session. Advanced mode requires an explicit version; leave this disabled only when no baseline fallback is wanted.</div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
+            <input type="checkbox" id="settingsJsonDiagnostics" aria-controls="settingsJsonDiagnosticRules"${config.jsonDiagnostics ? " checked" : ""} />
+            Enable localization JSON diagnostics
+          </label>
+          <div class="settings-hint">Checks only JSON files present in this mod. Layout JSON is used only as Key Usage evidence.</div>
+          <div class="settings-json-rules" id="settingsJsonDiagnosticRules">
+            <div class="settings-json-rule">
+              <label for="settingsJsonDuplicateIdsAction">
+                <span>Duplicate IDs / keys</span>
+                <span class="settings-json-rule-code">Json/DuplicateIds</span>
+              </label>
+              <select class="modal-input" id="settingsJsonDuplicateIdsAction">${jsonRuleActionOptions(jsonRules.duplicateIds.action)}</select>
+            </div>
+            <div class="settings-json-rule">
+              <label for="settingsJsonStringFormatAction">
+                <span>Required string fields</span>
+                <span class="settings-json-rule-code">Json/StringFormat</span>
+              </label>
+              <select class="modal-input" id="settingsJsonStringFormatAction">${jsonRuleActionOptions(jsonRules.stringFormat.action)}</select>
+            </div>
+            <div class="settings-json-rule">
+              <label for="settingsJsonKeyUsageAction">
+                <span>Unused localization keys</span>
+                <span class="settings-json-rule-code">Json/KeyUsage</span>
+              </label>
+              <select class="modal-input" id="settingsJsonKeyUsageAction">${jsonRuleActionOptions(jsonRules.keyUsage.action)}</select>
+            </div>
+            <div class="settings-json-key-usage-options${config.jsonDiagnostics && jsonRules.keyUsage.action !== "ignore" ? "" : " hidden"}" id="settingsJsonKeyUsageOptions">
+              <div class="settings-json-id-start">
+                <label for="settingsJsonKeyUsageIdStart">Only check IDs greater than</label>
+                <input class="modal-input" type="number" id="settingsJsonKeyUsageIdStart"
+                  step="any" value="${jsonRules.keyUsage.idStart}" />
+              </div>
+              <div class="settings-hint">With ${jsonRules.keyUsage.idStart}, ID ${jsonRules.keyUsage.idStart} is excluded and larger IDs are checked.</div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-debug-row">
+          <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsDebugLogging"${config.debugLogging ? " checked" : ""} />
             Enable debug logging (shows in Log panel)
           </label>
         </div>
-        <div class="modal-actions">
+        <div class="modal-actions settings-lint-actions">
           <button data-settings-choice="save">Save</button>
           <button data-settings-choice="cancel">Cancel</button>
           ${state.lsp.started ? `<button data-settings-choice="restart-lsp" style="margin-left:auto">Restart LSP</button>` : ""}
@@ -505,6 +581,33 @@ export function createSettingsController({
     const pluginInput = backdrop.querySelector("#settingsPluginPath");
     const versionSelect = backdrop.querySelector("#settingsSchemaVersion");
     const referenceVersionSelect = backdrop.querySelector("#settingsReferenceVersion");
+    const jsonDiagnosticsEl = backdrop.querySelector("#settingsJsonDiagnostics");
+    const jsonDuplicateIdsActionEl = backdrop.querySelector("#settingsJsonDuplicateIdsAction");
+    const jsonStringFormatActionEl = backdrop.querySelector("#settingsJsonStringFormatAction");
+    const jsonKeyUsageActionEl = backdrop.querySelector("#settingsJsonKeyUsageAction");
+    const jsonKeyUsageOptionsEl = backdrop.querySelector("#settingsJsonKeyUsageOptions");
+    const jsonKeyUsageIdStartEl = backdrop.querySelector("#settingsJsonKeyUsageIdStart");
+    const jsonActionControls = [
+      jsonDuplicateIdsActionEl,
+      jsonStringFormatActionEl,
+      jsonKeyUsageActionEl
+    ].filter(Boolean);
+
+    if (jsonDuplicateIdsActionEl) jsonDuplicateIdsActionEl.value = jsonRules.duplicateIds.action;
+    if (jsonStringFormatActionEl) jsonStringFormatActionEl.value = jsonRules.stringFormat.action;
+    if (jsonKeyUsageActionEl) jsonKeyUsageActionEl.value = jsonRules.keyUsage.action;
+    const syncJsonRuleControls = () => {
+      const masterDisabled = !(jsonDiagnosticsEl?.checked ?? false);
+      for (const control of jsonActionControls) control.disabled = masterDisabled;
+      const keyUsageDisabled = masterDisabled || jsonKeyUsageActionEl?.value === "ignore";
+      jsonKeyUsageOptionsEl?.classList.toggle("hidden", keyUsageDisabled);
+      if (jsonKeyUsageIdStartEl) {
+        jsonKeyUsageIdStartEl.disabled = keyUsageDisabled;
+      }
+    };
+    jsonDiagnosticsEl?.addEventListener("change", syncJsonRuleControls);
+    jsonKeyUsageActionEl?.addEventListener("change", syncJsonRuleControls);
+    syncJsonRuleControls();
 
     tabs.forEach((tab) => tab.addEventListener("click", () => {
       const isBasic = tab.dataset.settingsTab === "basic";
@@ -559,6 +662,18 @@ export function createSettingsController({
           if (saveButton) saveButton.disabled = true;
           const selectedMode = backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? "basic";
           const debugLoggingEl = backdrop.querySelector("#settingsDebugLogging");
+          const jsonDiagnosticsEnabled = jsonDiagnosticsEl?.checked ?? false;
+          const jsonKeyUsageAction = normalizeJsonRuleAction(jsonKeyUsageActionEl?.value);
+          const parsedJsonKeyUsageIdStart = parseJsonKeyUsageIdStart(jsonKeyUsageIdStartEl?.value);
+          const jsonKeyUsageNeedsThreshold = jsonDiagnosticsEnabled && jsonKeyUsageAction !== "ignore";
+          if (jsonKeyUsageNeedsThreshold && parsedJsonKeyUsageIdStart === null) {
+            showError("Key Usage ID threshold must be a finite number.");
+            jsonKeyUsageIdStartEl?.focus();
+            saving = false;
+            if (saveButton) saveButton.disabled = false;
+            return;
+          }
+          const jsonKeyUsageIdStart = parsedJsonKeyUsageIdStart ?? jsonRules.keyUsage.idStart;
           const updated = {
             ...config,
             lintMode: selectedMode,
@@ -567,7 +682,16 @@ export function createSettingsController({
             pluginPath: pluginInput?.value.trim() || undefined,
             schemaPath: schemaInput?.value.trim() || undefined,
             vectorLspPath: lspInput?.value.trim() || undefined,
-            debugLogging: debugLoggingEl?.checked ?? false
+            debugLogging: debugLoggingEl?.checked ?? false,
+            jsonDiagnostics: jsonDiagnosticsEnabled,
+            jsonDiagnosticRules: {
+              duplicateIds: { action: normalizeJsonRuleAction(jsonDuplicateIdsActionEl?.value) },
+              stringFormat: { action: normalizeJsonRuleAction(jsonStringFormatActionEl?.value) },
+              keyUsage: {
+                action: jsonKeyUsageAction,
+                idStart: jsonKeyUsageIdStart
+              }
+            }
           };
           try {
             await saveConfig(updated);

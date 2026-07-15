@@ -1622,6 +1622,8 @@ details:not([open]) .problem-file-header::before {
 
 .settings-modal {
   width: min(520px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
 }
 
 .shortcut-modal {
@@ -1808,6 +1810,69 @@ details:not([open]) .problem-file-header::before {
   gap: 8px;
   font-size: 13px;
   cursor: pointer;
+}
+
+.settings-json-rules {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 16px 24px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-1);
+}
+
+.settings-json-rule,
+.settings-json-id-start {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-json-key-usage-options {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-json-key-usage-options.hidden {
+  display: none;
+}
+
+.settings-json-rule label {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.settings-json-rule-code {
+  color: var(--muted);
+  font-family: var(--grid-font);
+  font-size: 11px;
+}
+
+.settings-json-rule .modal-input,
+.settings-json-id-start .modal-input {
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-json-id-start label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-json-rules .settings-hint {
+  margin: 0;
+}
+
+.settings-json-rules :disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.settings-lint-actions {
+  margin-top: 18px;
 }
 
 .settings-browse-btn {

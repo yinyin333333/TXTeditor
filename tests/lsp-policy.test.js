@@ -1017,6 +1017,28 @@ test("Vector-LSP display diagnostics do not invent precise local ranges without 
   assert.equal(diagnostic.locationLabel, "Row 5, Col 3");
 });
 
+test("unopened localization JSON diagnostics remain visible but are not editor navigation targets", () => {
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 8,
+    col: 0,
+    severity: "warning",
+    message: "Duplicate string id",
+    code: "Json/DuplicateIds"
+  }, {
+    uri: "file:///E:/Mod/data/local/lng/strings/skills.json",
+    fileKey: "e:/mod/data/local/lng/strings/skills.json",
+    fileName: "skills.json",
+    filePath: "E:\\Mod\\data\\local\\lng\\strings\\skills.json",
+    index: 0,
+    doc: null
+  });
+
+  assert.equal(diagnostic.fileName, "skills.json");
+  assert.equal(diagnostic.message, "Duplicate string id");
+  assert.equal(diagnostic.ruleId, "Json/DuplicateIds");
+  assert.equal(diagnostic.navigationDisabled, true);
+});
+
 test("Vector-LSP display diagnostics distinguish known empty cells from unknown cells", () => {
   const doc = TableDocument.fromText("skills.txt", "id\tcalc\n1\t", { path: "E:\\Data\\skills.txt" });
   const data = {

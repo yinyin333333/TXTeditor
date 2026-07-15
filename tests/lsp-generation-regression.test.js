@@ -191,6 +191,77 @@ test("diagnostics event and getter result are discarded when their generation is
   }
 });
 
+test("current unversioned diagnostics for an unopened mod JSON URI reach Problems without opening a document", async () => {
+  const originalWindow = globalThis.window;
+  const txt = TableDocument.fromText("skills.txt", "id\n1", {
+    path: "E:\\Mod\\data\\global\\excel\\skills.txt",
+    dirty: false
+  });
+  const jsonUri = "file:///E:/Mod/data/local/lng/strings/skills.json";
+  const state = createState([txt]);
+  Object.assign(state.lsp, {
+    started: true,
+    workspacePath: "E:\\Mod\\data\\global\\excel",
+    workspaceKey: "e:/mod/data/global/excel",
+    generation: 7,
+    readiness: "ready"
+  });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          assert.equal(command, "lsp_get_diagnostics_batch");
+          return [{
+            generation: 7,
+            uri: jsonUri,
+            version: null,
+            sequence: 31,
+            diagnostics: [{
+              row: 3,
+              col: 0,
+              severity: "warning",
+              message: "Duplicate string id",
+              code: "Json/DuplicateIds"
+            }]
+          }];
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createController(state);
+    await controller.handleDiagnosticsChanged({
+      uri: jsonUri,
+      generation: 7,
+      version: null,
+      sequence: 31
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(state.docs.length, 1);
+    assert.equal(state.docs[0], txt);
+    assert.deepEqual(state.lint.diagnostics.map((diagnostic) => ({
+      fileName: diagnostic.fileName,
+      message: diagnostic.message,
+      ruleId: diagnostic.ruleId,
+      navigationDisabled: diagnostic.navigationDisabled
+    })), [{
+      fileName: "skills.json",
+      message: "Duplicate string id",
+      ruleId: "Json/DuplicateIds",
+      navigationDisabled: true
+    }]);
+  } finally {
+    resetLspDocumentState(txt);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("stopped event resets only the matching generation and ignores stale EOF", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("skills.txt", "id\nNEW", { path: "E:\\B\\skills.txt", dirty: false });

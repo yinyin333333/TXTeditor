@@ -78,6 +78,7 @@ import {
 } from "../src/ui/panel-state-policy.js";
 import {
   lintDiagnosticsStateAfterUpdate,
+  problemsPanelHtml,
   problemsPanelRenderDecision,
   problemsPanelRenderKey,
   shouldRenderProblemsPanel
@@ -1158,6 +1159,23 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
   }), ["legacy", "on", "stopped", "ready", "", "rules-open", "RotW", 7, "a.txt\u001fb.txt"].join("\u001e"));
   assert.equal(problemsPanelRenderDecision({ currentKey: "same", nextKey: "same" }), "cached");
   assert.equal(problemsPanelRenderDecision({ currentKey: "old", nextKey: "new" }), "render");
+  const jsonProblems = problemsPanelHtml({
+    lintEnabled: true,
+    vectorEngine: true,
+    lspStarted: true,
+    diagnostics: [{
+      id: "json:1",
+      fileName: "skills.json",
+      rowIndex: 0,
+      columnIndex: 0,
+      severity: "warning",
+      message: "Duplicate id",
+      ruleId: "Json/DuplicateIds",
+      navigationDisabled: true
+    }]
+  });
+  assert.match(jsonProblems, /skills\.json/);
+  assert.match(jsonProblems, /data-diagnostic-id="json:1" disabled aria-disabled="true"/);
 });
 
 test("Find Next includes the current cell once when the query changes", () => {
