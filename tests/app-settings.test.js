@@ -212,6 +212,36 @@ test("rapid workspace subfolder changes apply only the latest listing", async ()
     && entry[0] === "ensure-document-session").length, 1);
 });
 
+test("workspace subfolder exclusion is not committed when the Explorer relist fails", async () => {
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  };
+  const { controller, calls, state } = makeSettingsController({
+    workspace,
+    listWorkspaceHandler: async () => {
+      throw new Error("workspace relist failed");
+    }
+  });
+  localStorage.setItem("txteditor.excludeWorkspaceSubfolders", "off");
+  const previousStored = localStorage.getItem("txteditor.excludeWorkspaceSubfolders");
+
+  await assert.rejects(
+    controller.setExcludeWorkspaceSubfolders(true),
+    /workspace relist failed/
+  );
+
+  assert.equal(state.excludeWorkspaceSubfolders, false);
+  assert.equal(localStorage.getItem("txteditor.excludeWorkspaceSubfolders"), previousStored);
+  assert.equal(state.workspace, workspace);
+  assert.equal(calls.includes("reset-legacy-workspace-index"), false);
+  assert.equal(calls.some((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), false);
+});
+
 test("mouse resize lock defaults off, applies immediately, and is restored from storage", () => {
   const { controller, document, calls, state } = makeSettingsController();
   assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, false);
@@ -348,9 +378,12 @@ test("Legacy reference changes force a fresh Vector session while lint reactivat
     workspace: { path: "E:\\Workspace" }
   });
   workspaceSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
-  assert.equal(workspaceSwitch.calls.includes("lsp-start"), true);
-  assert.deepEqual(workspaceSwitch.lspStarts, [["E:\\Workspace", { forceRestart: true }]]);
-  assert.equal(workspaceSwitch.calls.some((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), false);
+  assert.equal(workspaceSwitch.calls.includes("lsp-start"), false);
+  assert.deepEqual(workspaceSwitch.lspStarts, []);
+  assert.deepEqual(workspaceSwitch.calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
 });
 
 test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {

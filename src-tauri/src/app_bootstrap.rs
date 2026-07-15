@@ -1,11 +1,16 @@
 use crate::config::{load_app_config_from, AppConfigState};
+use crate::lsp_service::LspManager;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 #[tauri::command]
-pub(crate) fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
+pub(crate) fn close_window(
+    window: tauri::WebviewWindow,
+    lsp_manager: tauri::State<'_, LspManager>,
+) -> Result<(), String> {
+    lsp_manager.shutdown();
     window.destroy().map_err(|e| e.to_string())
 }
 

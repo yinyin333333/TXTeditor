@@ -114,20 +114,23 @@ export function createSettingsController({
 
   async function setExcludeWorkspaceSubfolders(excluded) {
     const next = Boolean(excluded);
-    state.excludeWorkspaceSubfolders = next;
-    localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
     const request = ++workspaceScopeRequest;
     const workspace = state.workspace;
-    renderChrome();
-    if (!workspace?.path || !isTauriRuntime()) return true;
+    if (!workspace?.path || !isTauriRuntime()) {
+      state.excludeWorkspaceSubfolders = next;
+      localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
+      renderChrome();
+      return true;
+    }
 
     const includeSubfolders = !next;
     const refreshed = await listWorkspaceNative(workspace.path, null, { includeSubfolders });
-    if (request !== workspaceScopeRequest || state.workspace !== workspace
-      || state.excludeWorkspaceSubfolders !== next) return false;
+    if (request !== workspaceScopeRequest || state.workspace !== workspace) return false;
     if (!refreshed || !Array.isArray(refreshed.files)) {
       throw new Error("Workspace refresh returned an invalid file list.");
     }
+    state.excludeWorkspaceSubfolders = next;
+    localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
     state.workspace = refreshed;
     resetLegacyWorkspaceIndex();
     setLintDiagnostics([]);
@@ -169,8 +172,6 @@ export function createSettingsController({
     if (isLegacyLintEngine()) {
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (state.workspace?.path) {
-      lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
     } else {
       ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
@@ -186,12 +187,8 @@ export function createSettingsController({
     } else if (isLegacyLintEngine() && state.problemsVisible) {
       const schedule = legacyLintImmediateSchedule("lint-enabled");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (isVectorLintEngine()) {
-      if (state.workspace?.path) {
-        if (!state.lsp.started) lspStartWorkspace(state.workspace.path).catch(showError);
-      } else {
-        ensureDocumentSession({}).catch(showError);
-      }
+    } else if (isVectorLintEngine() && !state.lsp.started) {
+      ensureDocumentSession({}).catch(showError);
     }
     saveLintSettings();
     renderChrome();
@@ -384,8 +381,13 @@ export function createSettingsController({
     mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
     workspaceSubfoldersInput.addEventListener("change", () => {
       setExcludeWorkspaceSubfolders(workspaceSubfoldersInput.checked)
-        .then(refresh)
-        .catch((error) => showError(error));
+        .then((applied) => {
+          if (applied) refresh();
+        })
+        .catch((error) => {
+          refresh();
+          showError(error);
+        });
     });
     hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
@@ -584,21 +586,13 @@ export function createSettingsController({
           } else {
             setLintDiagnostics([]);
             updateGridDiagnostics();
-            if (state.workspace?.path) {
-              lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
-            } else {
-              ensureDocumentSession({ forceRestart: true }).catch(showError);
-            }
+            ensureDocumentSession({ forceRestart: true }).catch(showError);
           }
         }
         if (choice === "cancel") finish();
         if (choice === "restart-lsp") {
           finish();
-          if (state.workspace?.path) {
-            lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
-          } else {
-            ensureDocumentSession({ forceRestart: true }).catch(showError);
-          }
+          ensureDocumentSession({ forceRestart: true }).catch(showError);
         }
       });
     });

@@ -59,10 +59,14 @@ export function lspDocumentMatchesSessionScope({
     if (includeSubfolders) return true;
     return lspWorkspaceKey(lspSiblingParentPath(documentPath)) === workspaceKey;
   }
-  const sameSiblingParent = lspWorkspaceKey(lspSiblingParentPath(documentPath)) === lspWorkspaceKey(workspacePath);
+  const documentParentKey = lspWorkspaceKey(lspSiblingParentPath(documentPath));
+  const sameSiblingParent = documentParentKey === lspWorkspaceKey(workspacePath);
   const documentKey = lspWorkspaceKey(documentPath);
   const referenceKey = lspWorkspaceKey(referenceRootPath);
-  return sameSiblingParent || lspPathWithin(documentKey, referenceKey);
+  const inReferenceScope = includeSubfolders
+    ? lspPathWithin(documentKey, referenceKey)
+    : Boolean(referenceKey && documentParentKey === referenceKey);
+  return sameSiblingParent || inReferenceScope;
 }
 
 function lspPathWithin(pathKey, rootKey) {

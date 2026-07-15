@@ -8,10 +8,12 @@ mod native_paths;
 mod reference_data;
 mod workspace_files;
 
+use tauri::Manager;
+
 // Tauri command wiring lives here; implementation details stay in focused modules.
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(lsp_service::LspManager::new())
@@ -41,6 +43,11 @@ pub fn run() {
             lsp_service::lsp_definition,
             app_bootstrap::close_window,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running txteditor");
+        .build(tauri::generate_context!())
+        .expect("error while building txteditor");
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<lsp_service::LspManager>().shutdown();
+        }
+    });
 }

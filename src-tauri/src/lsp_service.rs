@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -57,11 +57,13 @@ struct ActiveSession {
 #[derive(Default)]
 struct ManagerState {
     active: Option<ActiveSession>,
+    starting: HashMap<u64, Child>,
 }
 
 struct LspManagerCore {
     state: Mutex<ManagerState>,
     latest_requested_generation: AtomicU64,
+    shutdown_requested: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -115,22 +117,24 @@ impl LspManager {
             core: Arc::new(LspManagerCore {
                 state: Mutex::new(ManagerState::default()),
                 latest_requested_generation: AtomicU64::new(0),
+                shutdown_requested: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Stop every child owned by this editor instance. This must be invoked from
+    /// the native run-event path because Tauri exits with `process::exit`, which
+    /// does not guarantee that managed-state destructors run.
+    pub(crate) fn shutdown(&self) -> usize {
+        shutdown_lsp_manager(&self.core)
     }
 }
 
 impl Drop for LspManager {
     fn drop(&mut self) {
-        self.core
-            .latest_requested_generation
-            .fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut state) = self.core.state.lock() {
-            if let Some(mut active) = state.active.take() {
-                drain_pending_requests(&active.process.pending, "LSP manager stopped");
-                kill_and_wait_child(&mut active.child);
-            }
-        }
+        // Fallback for tests and non-Tauri owners. The native app also calls
+        // shutdown explicitly before the event loop exits.
+        let _ = self.shutdown();
     }
 }
 
@@ -316,8 +320,52 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
     }
 }
 
+fn stop_active_session(manager: &mut ManagerState, reason: &str) -> usize {
+    let Some(mut active) = manager.active.take() else {
+        return 0;
+    };
+    drain_pending_requests(&active.process.pending, reason);
+    kill_and_wait_child(&mut active.child);
+    1
+}
+
+fn stop_starting_sessions(
+    manager: &mut ManagerState,
+    mut should_stop: impl FnMut(u64) -> bool,
+) -> usize {
+    let mut generations = manager
+        .starting
+        .keys()
+        .copied()
+        .filter(|generation| should_stop(*generation))
+        .collect::<Vec<_>>();
+    generations.sort_unstable();
+    let mut stopped = 0;
+    for generation in generations {
+        if let Some(mut child) = manager.starting.remove(&generation) {
+            kill_and_wait_child(&mut child);
+            stopped += 1;
+        }
+    }
+    stopped
+}
+
+fn shutdown_lsp_manager(core: &LspManagerCore) -> usize {
+    core.shutdown_requested.store(true, Ordering::SeqCst);
+    core.latest_requested_generation
+        .store(u64::MAX, Ordering::SeqCst);
+    let mut manager = core
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stopped = stop_active_session(&mut manager, "LSP manager stopped");
+    stopped += stop_starting_sessions(&mut manager, |_| true);
+    stopped
+}
+
 fn is_latest_request(core: &LspManagerCore, generation: u64) -> bool {
-    core.latest_requested_generation.load(Ordering::SeqCst) == generation
+    !core.shutdown_requested.load(Ordering::SeqCst)
+        && core.latest_requested_generation.load(Ordering::SeqCst) == generation
 }
 
 fn is_current_process(core: &LspManagerCore, proc: &Arc<LspProcess>) -> bool {
@@ -399,6 +447,18 @@ fn kill_and_wait_child(child: &mut std::process::Child) {
 
 fn cleanup_startup_failure(child: &mut std::process::Child, error: String) -> String {
     kill_and_wait_child(child);
+    error
+}
+
+fn cleanup_tracked_startup_failure(
+    core: &LspManagerCore,
+    generation: u64,
+    error: String,
+) -> String {
+    let mut manager = core.state.lock().unwrap();
+    if let Some(mut child) = manager.starting.remove(&generation) {
+        return cleanup_startup_failure(&mut child, error);
+    }
     error
 }
 
@@ -617,6 +677,7 @@ fn remove_open_document(proc: &LspProcess, outbound: &mut OutboundState, uri: &s
     proc.diagnostics.lock().unwrap().remove(uri);
 }
 
+#[cfg(test)]
 fn take_current_session(core: &LspManagerCore, proc: &Arc<LspProcess>) -> Option<ActiveSession> {
     let mut state = core.state.lock().unwrap();
     let current = state.active.as_ref().is_some_and(|active| {
@@ -632,10 +693,16 @@ fn finish_lsp_reader(
     app: &tauri::AppHandle,
 ) {
     drain_pending_requests(&proc.pending, "LSP reader stopped");
-    let Some(mut active) = take_current_session(core, proc) else {
-        return;
+    let stopped = {
+        let mut manager = core.state.lock().unwrap();
+        let current = manager.active.as_ref().is_some_and(|active| {
+            active.generation == proc.generation && Arc::ptr_eq(&active.process, proc)
+        });
+        current && stop_active_session(&mut manager, "LSP reader stopped") == 1
     };
-    kill_and_wait_child(&mut active.child);
+    if !stopped {
+        return;
+    }
     let _ = app.emit(
         "lsp-stopped",
         LspStopped {
@@ -661,19 +728,56 @@ fn get_lsp_proc(
 }
 
 enum CandidateInstall {
-    Installed { replaced: Option<ActiveSession> },
-    Superseded { candidate: ActiveSession },
+    Installed,
+    Superseded,
+    Cancelled,
 }
 
+fn install_candidate_locked(
+    core: &LspManagerCore,
+    manager: &mut ManagerState,
+    mut candidate: ActiveSession,
+) -> CandidateInstall {
+    if is_latest_request(core, candidate.generation) {
+        if let Some(mut replaced) = manager.active.replace(candidate) {
+            drain_pending_requests(&replaced.process.pending, "LSP session replaced");
+            kill_and_wait_child(&mut replaced.child);
+        }
+        CandidateInstall::Installed
+    } else {
+        drain_pending_requests(&candidate.process.pending, "LSP start superseded");
+        kill_and_wait_child(&mut candidate.child);
+        CandidateInstall::Superseded
+    }
+}
+
+#[cfg(test)]
 fn install_candidate(core: &LspManagerCore, candidate: ActiveSession) -> CandidateInstall {
     let mut manager = core.state.lock().unwrap();
-    if is_latest_request(core, candidate.generation) {
-        CandidateInstall::Installed {
-            replaced: manager.active.replace(candidate),
-        }
-    } else {
-        CandidateInstall::Superseded { candidate }
-    }
+    install_candidate_locked(core, &mut manager, candidate)
+}
+
+fn install_tracked_candidate(
+    core: &LspManagerCore,
+    generation: u64,
+    workspace_path: String,
+    process: Arc<LspProcess>,
+) -> CandidateInstall {
+    let mut manager = core.state.lock().unwrap();
+    let Some(child) = manager.starting.remove(&generation) else {
+        drain_pending_requests(&process.pending, "LSP start cancelled");
+        return CandidateInstall::Cancelled;
+    };
+    install_candidate_locked(
+        core,
+        &mut manager,
+        ActiveSession {
+            generation,
+            workspace_path,
+            process,
+            child,
+        },
+    )
 }
 
 fn require_newer_document_version(uri: &str, current: u32, incoming: u32) -> Result<(), String> {
@@ -717,6 +821,13 @@ pub(crate) async fn lsp_start(
     if generation == 0 {
         return Err("LSP generation must be positive".to_string());
     }
+    if state.core.shutdown_requested.load(Ordering::SeqCst) {
+        return Ok(LspStartResult {
+            generation,
+            workspace_path,
+            installed: false,
+        });
+    }
     let previous_latest = state
         .core
         .latest_requested_generation
@@ -728,21 +839,18 @@ pub(crate) async fn lsp_start(
             installed: false,
         });
     }
-    let old_active = {
+    {
         let mut manager = state.core.state.lock().unwrap();
         if manager
             .active
             .as_ref()
             .is_some_and(|active| active.generation < generation)
         {
-            manager.active.take()
-        } else {
-            None
+            stop_active_session(&mut manager, "LSP session restarted");
         }
-    };
-    if let Some(mut active) = old_active {
-        drain_pending_requests(&active.process.pending, "LSP session restarted");
-        kill_and_wait_child(&mut active.child);
+        stop_starting_sessions(&mut manager, |starting_generation| {
+            starting_generation < generation
+        });
     }
     if !is_latest_request(&state.core, generation) {
         return Ok(LspStartResult {
@@ -769,13 +877,41 @@ pub(crate) async fn lsp_start(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start vector-lsp: {e}"))?;
-
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    // Keep the child handle in ManagerState from the instant it is spawned.
+    // The native exit callback can then reap it even while initialize is pending.
+    let (mut stdin, stdout, stderr) = {
+        let mut manager = state.core.state.lock().unwrap();
+        if !is_latest_request(&state.core, generation)
+            || manager.starting.contains_key(&generation)
+            || manager
+                .active
+                .as_ref()
+                .is_some_and(|active| active.generation == generation)
+        {
+            return Ok(LspStartResult {
+                generation,
+                workspace_path,
+                installed: false,
+            });
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start vector-lsp: {e}"))?;
+        let Some(stdin) = child.stdin.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stdin pipe".to_string());
+        };
+        let Some(stdout) = child.stdout.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stdout pipe".to_string());
+        };
+        let Some(stderr) = child.stderr.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stderr pipe".to_string());
+        };
+        manager.starting.insert(generation, child);
+        (stdin, stdout, stderr)
+    };
 
     let root_uri = path_to_uri(&workspace_path);
     if let Err(error) = send_lsp_msg(
@@ -798,8 +934,9 @@ pub(crate) async fn lsp_start(
             }
         }),
     ) {
-        return Err(cleanup_startup_failure(
-            &mut child,
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
             format!("Failed to send LSP initialize request: {error}"),
         ));
     }
@@ -808,11 +945,19 @@ pub(crate) async fn lsp_start(
         match read_initial_lsp_message(BufReader::new(stdout), Duration::from_secs(10)) {
             Ok(result) => result,
             Err(error) => {
-                return Err(cleanup_startup_failure(&mut child, error));
+                return Err(cleanup_tracked_startup_failure(
+                    &state.core,
+                    generation,
+                    error,
+                ));
             }
         };
     if let Err(error) = validate_initialize_response(&initialize_response) {
-        return Err(cleanup_startup_failure(&mut child, error));
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
+            error,
+        ));
     }
 
     if let Err(error) = send_lsp_msg(
@@ -823,8 +968,9 @@ pub(crate) async fn lsp_start(
             "params": {}
         }),
     ) {
-        return Err(cleanup_startup_failure(
-            &mut child,
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
             format!("Failed to send LSP initialized notification: {error}"),
         ));
     }
@@ -841,24 +987,14 @@ pub(crate) async fn lsp_start(
         next_diagnostic_sequence: AtomicU64::new(0),
     });
 
-    let candidate = ActiveSession {
+    match install_tracked_candidate(
+        &state.core,
         generation,
-        workspace_path: workspace_path.clone(),
-        process: Arc::clone(&proc),
-        child,
-    };
-    match install_candidate(&state.core, candidate) {
-        CandidateInstall::Installed { replaced } => {
-            if let Some(mut active) = replaced {
-                drain_pending_requests(&active.process.pending, "LSP session replaced");
-                kill_and_wait_child(&mut active.child);
-            }
-        }
-        CandidateInstall::Superseded {
-            candidate: mut stale,
-        } => {
-            drain_pending_requests(&stale.process.pending, "LSP start superseded");
-            kill_and_wait_child(&mut stale.child);
+        workspace_path.clone(),
+        Arc::clone(&proc),
+    ) {
+        CandidateInstall::Installed => {}
+        CandidateInstall::Superseded | CandidateInstall::Cancelled => {
             return Ok(LspStartResult {
                 generation,
                 workspace_path,
@@ -1268,6 +1404,7 @@ mod tests {
         LspManagerCore {
             state: Mutex::new(ManagerState::default()),
             latest_requested_generation: AtomicU64::new(latest_generation),
+            shutdown_requested: AtomicBool::new(false),
         }
     }
 
@@ -1283,7 +1420,7 @@ mod tests {
         };
         assert!(matches!(
             install_candidate(&core, candidate_b),
-            CandidateInstall::Installed { replaced: None }
+            CandidateInstall::Installed
         ));
 
         let (process_a, child_a) = test_lsp_process(1);
@@ -1293,14 +1430,10 @@ mod tests {
             process: process_a,
             child: child_a,
         };
-        let CandidateInstall::Superseded {
-            candidate: mut stale,
-        } = install_candidate(&core, candidate_a)
-        else {
-            panic!("generation 1 must lose to generation 2");
-        };
-        kill_and_wait_child(&mut stale.child);
-        assert!(stale.child.try_wait().unwrap().is_some());
+        assert!(matches!(
+            install_candidate(&core, candidate_a),
+            CandidateInstall::Superseded
+        ));
         assert!(is_current_process(&core, &process_b));
         assert_eq!(
             core.state
@@ -1607,15 +1740,47 @@ mod tests {
     }
 
     #[test]
+    fn manager_shutdown_reaps_active_and_starting_children_and_is_idempotent() {
+        let manager = LspManager::new();
+        let (process, child) = test_lsp_process(1);
+        let (tx, mut rx) = oneshot::channel();
+        process.pending.lock().unwrap().insert(7, tx);
+        {
+            let mut state = manager.core.state.lock().unwrap();
+            state.active = Some(ActiveSession {
+                generation: 1,
+                workspace_path: "active".to_string(),
+                process,
+                child,
+            });
+            state.starting.insert(2, spawn_long_running_child());
+        }
+
+        assert_eq!(manager.shutdown(), 2);
+        assert!(manager.core.shutdown_requested.load(Ordering::SeqCst));
+        assert!(!is_latest_request(&manager.core, 1));
+        {
+            let state = manager.core.state.lock().unwrap();
+            assert!(state.active.is_none());
+            assert!(state.starting.is_empty());
+        }
+        assert_eq!(rx.try_recv().unwrap().unwrap_err(), "LSP manager stopped");
+        assert_eq!(manager.shutdown(), 0);
+    }
+
+    #[test]
     fn request_guard_accepts_only_latest_generation() {
         let core = LspManagerCore {
             state: Mutex::new(ManagerState::default()),
             latest_requested_generation: AtomicU64::new(4),
+            shutdown_requested: AtomicBool::new(false),
         };
         assert!(is_latest_request(&core, 4));
         assert!(!is_latest_request(&core, 3));
         core.latest_requested_generation.store(5, Ordering::SeqCst);
         assert!(!is_latest_request(&core, 4));
+        core.shutdown_requested.store(true, Ordering::SeqCst);
+        assert!(!is_latest_request(&core, 5));
     }
 
     #[test]

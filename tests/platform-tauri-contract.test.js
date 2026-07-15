@@ -251,6 +251,19 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
   assert.deepEqual([...new Set(rustCommands)], [...new Set(jsCommands)]);
 });
 
+test("native exit explicitly reaps active and starting Vector-LSP children", () => {
+  const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const bootstrap = readFileSync(new URL("../src-tauri/src/app_bootstrap.rs", import.meta.url), "utf8");
+  const service = readFileSync(new URL("../src-tauri/src/lsp_service.rs", import.meta.url), "utf8");
+
+  assert.match(lib, /tauri::RunEvent::Exit/);
+  assert.match(lib, /state::<lsp_service::LspManager>\(\)\.shutdown\(\)/);
+  assert.match(bootstrap, /lsp_manager\.shutdown\(\);[\s\S]*window\.destroy\(\)/);
+  assert.match(service, /starting: HashMap<u64, Child>/);
+  assert.match(service, /shutdown_requested: AtomicBool/);
+  assert.match(service, /fn shutdown_lsp_manager\(/);
+});
+
 test("Vector-LSP packaging contract keeps adjacent executable and contrib resources", () => {
   const rustLspService = readFileSync(new URL("../src-tauri/src/lsp_service.rs", import.meta.url), "utf8");
   const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");

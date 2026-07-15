@@ -208,6 +208,20 @@ test("sibling and full workspace contexts never reuse the same Vector session", 
     referenceRootPath: "E:\\Reference"
   }), true);
   assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Reference\\global\\excel\\ItemTypes.txt",
+    workspacePath: "E:\\Mods\\TXT",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Reference",
+    includeSubfolders: false
+  }), false);
+  assert.equal(lspDocumentMatchesSessionScope({
+    documentPath: "E:\\Reference\\ItemTypes.txt",
+    workspacePath: "E:\\Mods\\TXT",
+    contextMode: "sibling",
+    referenceRootPath: "E:\\Reference",
+    includeSubfolders: false
+  }), true);
+  assert.equal(lspDocumentMatchesSessionScope({
     documentPath: "E:\\Workspace\\global\\excel\\MagicPrefix.txt",
     workspacePath: "E:\\Workspace",
     contextMode: "workspace",
