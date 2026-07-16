@@ -13,6 +13,7 @@ export class JsonDocument {
     this.activeDiagnosticId = null;
     this.externalChange = null;
     this.lastObservedDiskText = this.text;
+    this.lastObservedDiskEncoding = this.encoding;
     this.lastWrittenText = this.text;
     this.lastWrittenEncoding = this.encoding;
     this.pendingWriteText = null;
@@ -46,7 +47,10 @@ export class JsonDocument {
   markSaved(revision, { text = this.text, encoding = this.encoding } = {}) {
     this.lastWrittenText = String(text ?? "");
     this.lastWrittenEncoding = encoding || this.encoding;
-    this.lastObservedDiskText = this.lastWrittenText;
+    this.observeDiskState({
+      text: this.lastWrittenText,
+      encoding: this.lastWrittenEncoding
+    });
     this.pendingWriteText = null;
     this.pendingWriteEncoding = null;
     if (this.revision === revision) {
@@ -74,12 +78,23 @@ export class JsonDocument {
     this.editorState = null;
     this.activeDiagnosticId = null;
     this.externalChange = null;
-    this.lastObservedDiskText = this.text;
     this.lastWrittenText = this.text;
     this.lastWrittenEncoding = this.encoding;
+    this.observeDiskState({ text: this.text, encoding: this.encoding });
     this.pendingWriteText = null;
     this.pendingWriteEncoding = null;
     this.refreshTextMetadata();
+  }
+
+  observeDiskState({ text = null, encoding = this.encoding } = {}) {
+    if (text != null) this.lastObservedDiskText = String(text);
+    this.lastObservedDiskEncoding = encoding || this.encoding;
+  }
+
+  matchesObservedDiskState({ text = null, encoding = this.encoding } = {}) {
+    return text != null
+      && String(text) === this.lastObservedDiskText
+      && (encoding || this.encoding) === this.lastObservedDiskEncoding;
   }
 
   noteExternalChange(payload) {
@@ -87,7 +102,7 @@ export class JsonDocument {
   }
 
   keepLocalAfterExternalChange(payload = this.externalChange) {
-    if (payload?.text != null) this.lastObservedDiskText = String(payload.text);
+    if (payload) this.observeDiskState(payload);
     this.externalChange = null;
     this.dirty = true;
   }

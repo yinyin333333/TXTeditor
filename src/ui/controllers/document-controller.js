@@ -473,18 +473,19 @@ export function createDocumentController({
   async function processExternalPayload(doc, payload) {
     const text = String(payload.text ?? "");
     const encoding = payload.encoding || doc.encoding;
+    if (doc.matchesObservedDiskState({ text, encoding })) return;
     if (text === doc.pendingWriteText && encoding === doc.pendingWriteEncoding) {
       doc.pendingWriteText = null;
       doc.pendingWriteEncoding = null;
-      doc.lastObservedDiskText = text;
+      doc.observeDiskState({ text, encoding });
       return;
     }
     if (text === doc.lastWrittenText && encoding === doc.lastWrittenEncoding) {
-      doc.lastObservedDiskText = text;
+      doc.observeDiskState({ text, encoding });
       return;
     }
     if (text === doc.text && encoding === doc.encoding) {
-      doc.lastObservedDiskText = text;
+      doc.observeDiskState({ text, encoding });
       return;
     }
     if (!doc.dirty) {

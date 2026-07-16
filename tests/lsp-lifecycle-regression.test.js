@@ -430,6 +430,72 @@ test("localization JSON edits use versioned didOpen, incremental didChange, and 
   }
 });
 
+test("same-URI JSON save retries a stale live buffer with a full LSP sync", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[{\"id\":41001}]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const uri = docToUri(doc);
+  const state = createState(doc);
+  state.workspace = {
+    path: "E:\\mod",
+    files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+  };
+  state.lsp = {
+    started: true,
+    generation: 78,
+    readiness: "ready",
+    openFileCount: 1,
+    workspacePath: "E:\\mod",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true
+  };
+  resetLspDocumentState(doc, { version: 1 });
+  Object.assign(lspDocumentState(doc), {
+    opened: true,
+    openedUri: uri,
+    openedVersion: 1,
+    syncedRevision: 0,
+    sessionGeneration: 78,
+    requiresFullSync: true
+  });
+  doc.applyEditorText("[{\"id\":41002}]");
+
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_update_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    await controller.rebindSavedDoc(doc, uri);
+
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_update_file"]);
+    assert.equal(calls[0][1].uri, uri);
+    assert.equal(calls[0][1].version, 2);
+    assert.equal(calls[0][1].text, doc.toText());
+    const docState = lspDocumentState(doc);
+    assert.equal(docState.openedVersion, 2);
+    assert.equal(docState.syncedRevision, doc.revision);
+    assert.equal(docState.requiresFullSync, false);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 async function runSaveAsScenario({ initialPath, selectedPath }) {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText(initialPath ? "old.txt" : "Untitled.txt", "id\nNEW", {

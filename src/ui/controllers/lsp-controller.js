@@ -61,7 +61,7 @@ import { reportBackgroundTaskFailure } from "../../core/background-task-status.j
 import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
-import { jsonDocumentCanOpen, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
+import { jsonDocumentCanOpen, resyncSavedJsonDocument, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
 export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 const HOVER_READY_FALLBACK_MS = 1200;
 const DEFERRED_FULL_UPDATE_DELAY_MS = 250;
@@ -627,7 +627,8 @@ export function createLspController({
   }
   async function rebindSavedDoc(doc, previousUri, { deferRender = false, expectedGeneration = null } = {}) {
     const nextUri = docToUri(doc);
-    if (previousUri === nextUri) return;
+    if (previousUri === nextUri) return resyncSavedJsonDocument(
+      { state, doc, uri: nextUri, expectedGeneration, isVectorLintEngine, updateDoc, handleUpdateError });
     if (previousUri && state.lsp.started) {
       await closeDoc(doc, { uri: previousUri, allowInactiveEngine: true })
         .catch((error) => reportCloseFailure(doc, error, "save-as-rebind"));

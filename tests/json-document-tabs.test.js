@@ -280,6 +280,90 @@ test("clean external JSON reload resynchronizes the live LSP buffer", async () =
   }
 });
 
+test("Keep suppresses duplicate watched-file conflicts until the disk identity changes", async () => {
+  const originalWindow = globalThis.window;
+  const path = "E:\\mod\\data\\local\\lng\\strings\\skills.json";
+  const doc = JsonDocument.fromText("skills.json", "[0]", {
+    path,
+    encoding: "utf-8"
+  });
+  doc.applyEditorText("[local]");
+  let externalText = "[disk]";
+  let externalEncoding = "utf-8";
+  let conflicts = 0;
+  const noteExternalChange = doc.noteExternalChange.bind(doc);
+  doc.noteExternalChange = (payload) => {
+    conflicts += 1;
+    noteExternalChange(payload);
+  };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          assert.equal(command, "read_text_files");
+          return [{
+            Ok: {
+              path,
+              name: "skills.json",
+              text: externalText,
+              encoding: externalEncoding
+            }
+          }];
+        }
+      }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "vector-lsp" },
+    lsp: { generation: 12 }
+  };
+  const controller = createDocumentController({
+    state,
+    els: {},
+    grid: {},
+    emptyDoc: JsonDocument.fromText("empty.json", ""),
+    activeDoc: () => doc,
+    saveSelectionState() {},
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError(error) { throw error; },
+    reportWindowCloseFailure() {},
+    lspOpenDoc: async () => {},
+    reportLspOpenFailure() {},
+    lspCloseDoc: async () => {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace: async () => {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {}
+  });
+
+  try {
+    const changed = { generation: 12, changes: [{ uri: docToUri(doc), type: 2 }] };
+    await controller.handleWatchedFilesChanged(changed);
+    await controller.handleWatchedFilesChanged(changed);
+    assert.equal(conflicts, 1, "the same observed disk payload must not prompt twice");
+
+    externalEncoding = "utf-16le";
+    await controller.handleWatchedFilesChanged(changed);
+    assert.equal(conflicts, 2, "an encoding-only disk change is a new conflict");
+    assert.equal(doc.text, "[local]");
+    assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("CodeMirror module loading is lazy and cached", async () => {
   resetJsonEditorModuleLoaderForTests();
   let calls = 0;

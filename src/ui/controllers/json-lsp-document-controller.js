@@ -79,6 +79,24 @@ export async function updateJsonLspDocument({
   return trackedPromise;
 }
 
+export async function resyncSavedJsonDocument({
+  state,
+  doc,
+  uri,
+  expectedGeneration,
+  isVectorLintEngine,
+  updateDoc,
+  handleUpdateError
+}) {
+  if (expectedGeneration != null && state.lsp.generation !== expectedGeneration) return;
+  const docState = lspDocumentState(doc);
+  if (doc?.kind !== "json" || !uri || !isVectorLintEngine() || !state.lsp.started
+    || state.lsp.readiness !== "ready"
+    || (!docState.requiresFullSync && docState.syncedRevision === documentRevision(doc))) return;
+  await updateDoc(doc, { kind: "json", changes: [] })
+    .catch((error) => handleUpdateError(doc, error, "save-resync"));
+}
+
 export function jsonDocumentCanOpen({ state, doc, uri, docState, generation }) {
   if (state.lsp.readiness !== "ready") return false;
   const allowOpenDocumentFallback = docState.opened
