@@ -56,8 +56,10 @@ export function createDocumentController({
   showToast = () => {},
   reportWindowCloseFailure,
   lspOpenDoc,
+  lspUpdateDoc = async () => {},
   reportLspOpenFailure,
   lspCloseDoc,
+  handleLspUpdateError = () => {},
   reportLspCloseFailure,
   lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
@@ -488,11 +490,21 @@ export function createDocumentController({
     if (!doc.dirty) {
       doc.reloadFromDisk(text, { encoding });
       await jsonEditorController?.reloadActiveDocument(doc);
+      await syncReloadedJsonToLsp(doc, "external-clean-reload");
       renderChrome();
       showToast(`${doc.name} reloaded after an external change.`);
       return;
     }
     await resolveExternalConflict(doc, { path: payload.path, text, encoding, deleted: false });
+  }
+
+  async function syncReloadedJsonToLsp(doc, context) {
+    if (!isJsonDocument(doc) || !isVectorLintEngine()) return;
+    try {
+      await lspUpdateDoc(doc, { kind: "json", changes: [] });
+    } catch (error) {
+      handleLspUpdateError(doc, error, context);
+    }
   }
 
   async function readReplacementAfterDelete(path) {
@@ -516,6 +528,7 @@ export function createDocumentController({
       if (choice === "reload" && !payload.deleted) {
         doc.reloadFromDisk(payload.text, { encoding: payload.encoding });
         await jsonEditorController?.reloadActiveDocument(doc);
+        await syncReloadedJsonToLsp(doc, "external-conflict-reload");
       } else {
         doc.keepLocalAfterExternalChange(payload);
       }

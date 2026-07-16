@@ -285,6 +285,83 @@ test("V-TXT-05 incremental row updates do not serialize the full document", asyn
   }
 });
 
+test("localization JSON didOpen waits for workspace readiness and is sent once", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    workspace: {
+      path: "E:\\mod",
+      files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+    },
+    lint: {
+      enabled: true,
+      engine: "vector-lsp",
+      version: 1,
+      status: "",
+      diagnostics: []
+    },
+    lsp: {
+      started: false,
+      generation: 0,
+      readiness: "stopped",
+      openFileCount: 0
+    },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false
+  };
+  const calls = [];
+  const listeners = new Map();
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_start") return { installed: true };
+          if (command === "lsp_open_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: {
+        listen: async (event, callback) => {
+          listeners.set(event, callback);
+          return () => listeners.delete(event);
+        }
+      }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    controller.startListeners();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await controller.startWorkspace("E:\\mod");
+    assert.equal(state.lsp.readiness, "indexing");
+    assert.equal(calls.filter(([command]) => command === "lsp_open_file").length, 0);
+
+    listeners.get("lsp-ready")?.({ payload: { generation: 1 } });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const opens = calls.filter(([command]) => command === "lsp_open_file");
+    assert.equal(opens.length, 1);
+    assert.equal(opens[0][1].uri, docToUri(doc));
+    assert.equal(opens[0][1].text, doc.toText());
+    assert.equal(state.lsp.readiness, "ready");
+    assert.equal(state.lsp.openFileCount, 1);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("localization JSON edits use versioned didOpen, incremental didChange, and didClose", async () => {
   const originalWindow = globalThis.window;
   const doc = JsonDocument.fromText("skills.json", "[{\"id\":41001}]", {

@@ -18,12 +18,17 @@ export async function updateJsonLspDocument({
   renderChrome
 }) {
   if (!isVectorLintEngine() || !state.lsp.started) return;
-  const uri = docToUri(doc);
-  if (!uri || !isLocalizationJsonPathInCurrentMode(doc.path, state)) return;
   const docState = lspDocumentState(doc);
+  const uri = docToUri(doc);
+  const generation = state.lsp.generation ?? 0;
+  const allowOpenDocumentFallback = docState.opened
+    && docState.openedUri === uri
+    && docState.sessionGeneration === generation;
+  if (!uri || !isLocalizationJsonPathInCurrentMode(doc.path, state, {
+    allowOpenDocumentFallback
+  })) return;
   const version = nextLspDocumentVersion(doc);
   const revision = documentRevision(doc);
-  const generation = state.lsp.generation ?? 0;
   const changes = Array.isArray(change?.changes) ? change.changes : [];
   docState.ready = false;
   docState.diagnosticsReady = false;
@@ -72,4 +77,25 @@ export async function updateJsonLspDocument({
   });
   docState.updatePromise = trackedPromise;
   return trackedPromise;
+}
+
+export function jsonDocumentCanOpen({ state, doc, uri, docState, generation }) {
+  if (state.lsp.readiness !== "ready") return false;
+  const allowOpenDocumentFallback = docState.opened
+    && docState.openedUri === uri
+    && docState.sessionGeneration === generation;
+  return isLocalizationJsonPathInCurrentMode(doc.path, state, { allowOpenDocumentFallback });
+}
+
+export async function syncReadyJsonDocuments({
+  state, generation, documentCanOpenInSession, openDoc, reportOpenFailure, renderChrome
+}) {
+  const documents = state.docs.filter((doc) => doc?.kind === "json" && documentCanOpenInSession(doc));
+  for (const doc of documents) {
+    if (state.lsp.generation !== generation || !state.lsp.started
+      || state.lsp.readiness !== "ready") return;
+    await openDoc(doc, { deferRender: true })
+      .catch((error) => reportOpenFailure(doc, error, "workspace-ready-json-sync"));
+  }
+  if (state.lsp.generation === generation && state.lsp.started) renderChrome();
 }

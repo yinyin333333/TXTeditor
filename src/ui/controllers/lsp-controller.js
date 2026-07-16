@@ -61,7 +61,7 @@ import { reportBackgroundTaskFailure } from "../../core/background-task-status.j
 import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
-import { updateJsonLspDocument } from "./json-lsp-document-controller.js";
+import { jsonDocumentCanOpen, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
 export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 const HOVER_READY_FALLBACK_MS = 1200;
 const DEFERRED_FULL_UPDATE_DELAY_MS = 250;
@@ -211,7 +211,9 @@ export function createLspController({
     referenceRootPath = state.lsp.referenceRootPath,
     includeSubfolders = state.lsp.includeSubfolders
   ) {
-    if (isJsonDocument(doc)) return isLocalizationJsonPathInCurrentMode(doc.path, state);
+    if (isJsonDocument(doc)) return isLocalizationJsonPathInCurrentMode(doc.path, state, {
+      allowOpenDocumentFallback: false
+    });
     return documentMatchesSessionScope(
       doc,
       workspacePath,
@@ -359,7 +361,6 @@ export function createLspController({
     renderChrome();
   }
   async function openDoc(doc, { deferRender = false } = {}) {
-    if (isJsonDocument(doc) && !isLocalizationJsonPathInCurrentMode(doc.path, state)) return;
     if (isTableDocument(doc) && doc?.largeFileMode) {
       recordLintEngineEvent("vector-open-skipped-large-file", {
         fileName: doc?.name, reasons: doc?.largeFileReasons ?? []
@@ -368,8 +369,9 @@ export function createLspController({
     }
     const uri = docToUri(doc);
     const docState = lspDocumentState(doc);
-    const version = ensureLspDocumentVersion(doc);
     const generation = state.lsp.generation ?? 0;
+    if (isJsonDocument(doc) && !jsonDocumentCanOpen({ state, doc, uri, docState, generation })) return;
+    const version = ensureLspDocumentVersion(doc);
     const policy = lspOpenDocumentPolicy({
       vectorEngine: isVectorLintEngine(),
       lspStarted: state.lsp.started,
@@ -819,6 +821,11 @@ export function createLspController({
     state.lsp.readiness = "ready";
     state.lint.status = "";
     renderChrome();
+    syncReadyJsonDocuments({
+      state, generation, documentCanOpenInSession, openDoc, reportOpenFailure, renderChrome
+    }).catch((error) => reportBackgroundFailure(
+      "Vector-LSP JSON document sync", error, "workspace-ready"
+    ));
     hoverController.retryQueuedHover("workspace-ready");
     hoverController.scheduleHoverPrewarm("workspace-ready");
   }

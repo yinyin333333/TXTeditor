@@ -35,11 +35,14 @@ export function jsonPrimaryDataRoots(state = {}) {
   return roots;
 }
 
-export function isLocalizationJsonPathInCurrentMode(path, state = {}) {
+export function isLocalizationJsonPathInCurrentMode(path, state = {}, {
+  allowOpenDocumentFallback = true
+} = {}) {
   const root = localizationJsonDataRoot(path);
   if (!root) return false;
   const primaryRoots = jsonPrimaryDataRoots(state);
   if (primaryRoots.has(root)) return true;
+  if (!allowOpenDocumentFallback) return false;
   return (state.docs ?? []).some((doc) => doc?.kind === "json"
     && localizationJsonDataRoot(doc.path) === root
     && normalizePath(doc.path) === normalizePath(path));

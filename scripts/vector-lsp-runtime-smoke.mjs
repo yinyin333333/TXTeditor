@@ -511,8 +511,10 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
   const jsonPath = path.join(paths.workspaceDir, "data", "local", "lng", "strings", "item-names.json");
   const jsonUri = encodeFileUriPath(jsonPath);
   const duplicateJsonText = `${JSON.stringify([
-    { id: 40_000.5, Key: "SmokeJsonDuplicate" },
-    { id: 40_000.5, Key: "SmokeJsonDuplicate" },
+    { id: 1_000.5, Key: "SmokeJsonIdWinner" },
+    { id: 1_000.5, Key: "SmokeJsonRejectedById" },
+    { id: 1_001, Key: "SmokeJsonKeyWinner" },
+    { id: 1_002, Key: "SmokeJsonKeyWinner" },
     jsonStringEntry(40_001, "SmokeJsonUnused")
   ], null, 2)}\n`;
   const validJsonText = `${JSON.stringify([
@@ -690,8 +692,9 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       || keyUsageJsonDiagnostics(jsonCreated).length !== 1
       || keyUsageJsonDiagnostics(jsonCreated)[0]?.severity !== 2
       || !keyUsageJsonDiagnostics(jsonCreated)[0]?.message.includes("id: 40001")
-      || !createdMessages.some((message) => message.includes("duplicate id 40000.5"))
-      || !createdMessages.some((message) => message.includes("duplicate Key 'SmokeJsonDuplicate'"))) {
+      || !createdMessages.some((message) => message.includes("duplicate id 1000.5"))
+      || !createdMessages.some((message) => message.includes("duplicate Key 'SmokeJsonKeyWinner'"))
+      || createdMessages.some((message) => message.includes("SmokeJsonRejectedById"))) {
       throw new Error(`watched JSON duplicate diagnostics changed: ${JSON.stringify(jsonCreated.params)}`);
     }
 

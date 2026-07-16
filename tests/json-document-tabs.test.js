@@ -54,6 +54,19 @@ test("localization JSON scope is direct, physical, and anchored by primary Excel
   assert.equal(isLocalizationJsonPathInCurrentMode(
     "/mods/other/data/local/lng/strings/item-names.json", state
   ), false);
+  const explicitOnly = JsonDocument.fromText("item-names.json", "[]", {
+    path: allowed,
+    dirty: false
+  });
+  const explicitOnlyState = {
+    docs: [explicitOnly],
+    workspace: null,
+    lsp: { ...state.lsp }
+  };
+  assert.equal(isLocalizationJsonPathInCurrentMode(allowed, explicitOnlyState), true);
+  assert.equal(isLocalizationJsonPathInCurrentMode(allowed, explicitOnlyState, {
+    allowOpenDocumentFallback: false
+  }), false);
   assert.equal(canNavigateLocalizationJsonDiagnostic({
     diagnostic: { filePath: allowed, generation: 7, sourceExists: true },
     state,
@@ -180,6 +193,87 @@ test("atomic-save delete events re-read the replacement without an external conf
     assert.equal(conflicts, 0);
     assert.equal(doc.text, "[2]");
     assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("clean external JSON reload resynchronizes the live LSP buffer", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[0]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    encoding: "utf-8",
+    dirty: false
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "vector-lsp" },
+    lsp: { generation: 10 },
+    workspace: null
+  };
+  const updates = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          assert.equal(command, "read_text_files");
+          return [{
+            Ok: {
+              name: "skills.json",
+              path: doc.path,
+              text: "[1]",
+              encoding: "utf-8",
+              sizeBytes: 3
+            }
+          }];
+        }
+      }
+    }
+  };
+
+  try {
+    const controller = createDocumentController({
+      state,
+      els: {},
+      grid: {},
+      emptyDoc: JsonDocument.fromText("empty.json", ""),
+      activeDoc: () => doc,
+      saveSelectionState() {},
+      applyFreezeToDoc() {},
+      renderChrome() {},
+      showError(error) { throw error; },
+      reportWindowCloseFailure() {},
+      lspOpenDoc: async () => {},
+      lspUpdateDoc: async (candidate, change) => updates.push({ candidate, change }),
+      handleLspUpdateError(_candidate, error) { throw error; },
+      reportLspOpenFailure() {},
+      lspCloseDoc: async () => {},
+      reportLspCloseFailure() {},
+      lspStartWorkspace: async () => {},
+      scheduleHoverPrewarm() {},
+      resetUndoManagerForDocument() {},
+      resetLegacyWorkspaceIndex() {},
+      scheduleLegacyLintForOpen() {},
+      scheduleLegacyLintFull() {},
+      cancelLegacyLintJobs() {},
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      updateGridDiagnostics() {},
+      scrollProblemsToActiveFile() {}
+    });
+
+    await controller.handleWatchedFilesChanged({
+      generation: 10,
+      changes: [{ uri: docToUri(doc), type: 2 }]
+    });
+
+    assert.equal(doc.text, "[1]");
+    assert.equal(doc.dirty, false);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].candidate, doc);
+    assert.deepEqual(updates[0].change, { kind: "json", changes: [] });
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
