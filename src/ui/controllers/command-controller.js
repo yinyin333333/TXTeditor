@@ -1,4 +1,5 @@
 import {
+  canRunCommandForDocument,
   canRunCommandWithoutDocument,
   commandActionForId,
   commandLabelsForEnvironment,
@@ -20,6 +21,7 @@ export function createCommandController({
   state,
   activeDoc,
   hasOpenDocument,
+  activeDocumentKind = () => activeDoc()?.kind ?? "table",
   execute,
   rowsFromSelection,
   rowsForRowOperation = rowsFromSelection,
@@ -33,6 +35,9 @@ export function createCommandController({
 
   function runCommand(id) {
     if (!hasOpenDocument() && !canRunCommandWithoutDocument(id)) return showError("Open a file before using that command.");
+    if (hasOpenDocument() && !canRunCommandForDocument(id, activeDocumentKind())) {
+      return showError("This command is available only for table documents.");
+    }
     const doc = activeDoc();
     const rect = state.selection.rect;
     const action = commandActionForId(id);

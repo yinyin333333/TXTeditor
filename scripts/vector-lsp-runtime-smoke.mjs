@@ -731,6 +731,31 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       "watched JSON diagnostics after restore"
     );
 
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri: jsonUri, languageId: "json", version: 1, text: duplicateJsonText }
+    });
+    const liveJsonFixStart = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: jsonUri, version: 2 },
+      contentChanges: [{ text: validJsonText }]
+    });
+    const liveJsonFixed = await waitForJsonDiagnostics(
+      liveJsonFixStart,
+      (message) => message.params.version === 2 && message.params.diagnostics.length === 0,
+      "open JSON buffer diagnostics after unsaved fix"
+    );
+    const liveJsonReintroduceStart = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: jsonUri, version: 3 },
+      contentChanges: [{ text: duplicateJsonText }]
+    });
+    const liveJsonReintroduced = await waitForJsonDiagnostics(
+      liveJsonReintroduceStart,
+      (message) => message.params.version === 3 && duplicateJsonDiagnostics(message).length === 2,
+      "open JSON buffer diagnostics after unsaved error reintroduction"
+    );
+    client.notify("textDocument/didClose", { textDocument: { uri: jsonUri } });
+
     const jsonFinalDeleteStart = client.messages.length;
     fs.rmSync(jsonPath, { force: true });
     notifyJsonChange(3);
@@ -1033,6 +1058,8 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       watchedJsonReintroducedDiagnostics: duplicateJsonDiagnostics(jsonReintroduced).length,
       watchedJsonDeleteDiagnostics: jsonDeleted.params.diagnostics.length,
       watchedJsonRestoreDiagnostics: duplicateJsonDiagnostics(jsonRestored).length,
+      liveJsonFixDiagnostics: liveJsonFixed.params.diagnostics.length,
+      liveJsonReintroducedDiagnostics: duplicateJsonDiagnostics(liveJsonReintroduced).length,
       watchedJsonFinalDeleteDiagnostics: jsonFinalDelete.params.diagnostics.length,
       watchedJsonFallbackPublishes: unexpectedJsonPublishes.length,
       readyGeneration: readyMessage.params.sessionGeneration,

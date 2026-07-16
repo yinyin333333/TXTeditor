@@ -5,10 +5,12 @@ export {
   listSiblingTextFilesNative,
   listWorkspaceNative,
   openFilesNative,
+  pickOpenFilePathsNative,
   openNativePaths,
   openNativePathsBulk,
   openWorkspaceNative,
   readFileAsDocument,
+  readTextFilesNative,
   saveDocumentNative,
   saveTextNative,
   startupOpenPathsNative
@@ -34,6 +36,7 @@ export {
   lspStart,
   lspStoppedListen,
   lspUpdateFile,
-  lspUpdateFileIncremental
+  lspUpdateFileIncremental,
+  lspWatchedFilesListen
 } from "./platform/lsp-client.js";
 export { downloadText } from "./platform/download.js";

@@ -1,7 +1,7 @@
 use crate::config::{AppConfig, AppConfigState, JsonDiagnosticRules};
 use crate::file_io::decode_text;
 use crate::lsp_file_watcher::{
-    WatchChangeSink, WatchErrorSink, WatchRegistry, WATCHED_FILES_METHOD,
+    WatchChangeSink, WatchErrorSink, WatchRegistry, WatchedFileChange, WATCHED_FILES_METHOD,
 };
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
@@ -50,6 +50,7 @@ struct OutboundState {
 struct DiagnosticSnapshot {
     version: Option<u32>,
     sequence: u64,
+    source_exists: bool,
     diagnostics: Vec<LspDiagnostic>,
 }
 
@@ -96,6 +97,7 @@ pub(crate) struct LspDiagnosticsSnapshot {
     uri: String,
     version: Option<u32>,
     sequence: u64,
+    source_exists: bool,
     diagnostics: Vec<LspDiagnostic>,
 }
 
@@ -104,6 +106,13 @@ pub(crate) struct LspDiagnosticsSnapshot {
 pub(crate) struct LspDiagnosticsRequest {
     uri: String,
     sequence: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspWatchedFilesChanged {
+    generation: u64,
+    changes: Vec<WatchedFileChange>,
 }
 
 #[derive(Clone, Serialize)]
@@ -547,6 +556,7 @@ fn watched_file_sinks(
     app: &tauri::AppHandle,
 ) -> (WatchChangeSink, WatchErrorSink) {
     let weak_process = Arc::downgrade(proc);
+    let app_for_changes = app.clone();
     let changes: WatchChangeSink = Arc::new(move |changes| {
         let Some(proc) = weak_process.upgrade() else {
             return;
@@ -558,6 +568,7 @@ fn watched_file_sinks(
         if !proc.watchers_active.load(Ordering::SeqCst) {
             return;
         }
+        let event_changes = changes.clone();
         let _ = send_lsp_msg(
             &mut outbound.stdin,
             &json!({
@@ -566,6 +577,16 @@ fn watched_file_sinks(
                 "params": { "changes": changes }
             }),
         );
+        drop(outbound);
+        if proc.watchers_active.load(Ordering::SeqCst) {
+            let _ = app_for_changes.emit(
+                "lsp-watched-files-changed",
+                LspWatchedFilesChanged {
+                    generation: proc.generation,
+                    changes: event_changes,
+                },
+            );
+        }
     });
 
     let weak_process = Arc::downgrade(proc);
@@ -811,11 +832,14 @@ fn handle_publish_diagnostics_before_commit(
         return None;
     }
     let sequence = proc.next_diagnostic_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+    let source_exists =
+        version.is_some() || uri_to_path(&uri).ok().is_some_and(|path| path.is_file());
     snapshots.insert(
         uri.clone(),
         DiagnosticSnapshot {
             version,
             sequence,
+            source_exists,
             diagnostics,
         },
     );
@@ -1380,6 +1404,7 @@ pub(crate) fn lsp_get_diagnostics(
         uri,
         version: snapshot.version,
         sequence: snapshot.sequence,
+        source_exists: snapshot.source_exists,
         diagnostics: snapshot.diagnostics,
     }))
 }
@@ -1408,6 +1433,7 @@ pub(crate) fn lsp_get_diagnostics_batch(
                     uri: request.uri,
                     version: snapshot.version,
                     sequence: snapshot.sequence,
+                    source_exists: snapshot.source_exists,
                     diagnostics: snapshot.diagnostics,
                 })
         })

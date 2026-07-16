@@ -1,3 +1,4 @@
+import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
 
 export function createShellController({
@@ -7,6 +8,8 @@ export function createShellController({
   activeDoc,
   hasOpenDocument,
   applyFreezeToDoc,
+  activateDocument = (doc) => grid.setDocument(doc),
+  focusActiveEditor = () => els.host?.focus?.(),
   closeTab,
   openDroppedNativePaths,
   updateGridDiagnostics,
@@ -101,13 +104,14 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
     }
+    const tableDocumentOpen = documentOpen && isTableDocument(activeDoc());
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
-      button.disabled = !documentOpen;
-      button.classList.toggle("active", documentOpen && state.freezeRow);
+      button.disabled = !tableDocumentOpen;
+      button.classList.toggle("active", tableDocumentOpen && state.freezeRow);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-column']")) {
-      button.disabled = !documentOpen;
-      button.classList.toggle("active", documentOpen && state.freezeColumn);
+      button.disabled = !tableDocumentOpen;
+      button.classList.toggle("active", tableDocumentOpen && state.freezeColumn);
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-colorize']")) {
       button.classList.toggle("active", state.colorizeColumns);
@@ -126,7 +130,9 @@ export function createShellController({
       .map((doc, index) => {
         const severity = docDiagnosticSeverity(doc);
         const titleClass = severity ? `tab-title tab-title-${severity}` : "tab-title";
-        return `<button class="${index === state.active ? "active" : ""}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}${doc.dirty ? "*" : ""}</span><span class="tab-close" data-close-tab="${index}" title="Close">x</span></button>`;
+        const kindClass = isJsonDocument(doc) ? "tab-json" : "tab-table";
+        const dirty = doc.dirty ? '<span class="tab-dirty-dot" title="Unsaved changes">●</span>' : "";
+        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="Close">x</span></button>`;
       })
       .join("");
     const workspaceFiles = renderWorkspaceFileList({
@@ -144,7 +150,7 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
-        selectTab(Number(button.dataset.tab));
+        selectTab(Number(button.dataset.tab)).catch(showError);
       });
     }
     for (const button of documentRef.querySelectorAll("[data-close-tab]")) {
@@ -154,7 +160,9 @@ export function createShellController({
       });
     }
     for (const button of documentRef.querySelectorAll("[data-open-path]")) {
-      button.addEventListener("click", async () => openDroppedNativePaths([button.dataset.openPath]).catch(showError));
+      button.addEventListener("click", async () => openDroppedNativePaths(
+        [button.dataset.openPath], { requireCurrentJsonMode: true }
+      ).catch(showError));
     }
     for (const details of els.fileList.querySelectorAll("details[data-file-group]")) {
       details.addEventListener("toggle", () => {
@@ -170,14 +178,24 @@ export function createShellController({
   function selectTab(index) {
     saveSelectionState();
     state.active = index;
-    applyFreezeToDoc(activeDoc());
-    grid.setDocument(activeDoc());
-    updateGridDiagnostics();
-    renderChrome();
-    scrollProblemsToActiveFile();
-    ensureDocumentSession(activeDoc()).catch(showError);
-    scheduleHoverPrewarm("tab-switch");
-    els.host?.focus?.();
+    const doc = activeDoc();
+    if (isTableDocument(doc)) applyFreezeToDoc(doc);
+    const finishActivation = () => {
+      updateGridDiagnostics();
+      renderChrome();
+      scrollProblemsToActiveFile();
+      if (isTableDocument(doc)) {
+        ensureDocumentSession(doc).catch(showError);
+        scheduleHoverPrewarm("tab-switch");
+      }
+      focusActiveEditor();
+    };
+    const activation = activateDocument(doc, { focus: false });
+    if (activation && typeof activation.then === "function") {
+      return activation.then(finishActivation);
+    }
+    finishActivation();
+    return Promise.resolve();
   }
 
   function bindExplorerFilter() {
@@ -227,7 +245,7 @@ export function createShellController({
     els.explorerFilter.value = "";
     renderExplorerSearchResults([]);
     if (result.index != null) return selectTab(result.index);
-    openDroppedNativePaths([result.path]).catch(showError);
+    openDroppedNativePaths([result.path], { requireCurrentJsonMode: true }).catch(showError);
   }
 
   function explorerSearchResults() {

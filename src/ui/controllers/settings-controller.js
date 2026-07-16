@@ -98,6 +98,7 @@ export function createSettingsController({
   lspStartWorkspace,
   ensureDocumentSession = async () => {},
   resetLegacyWorkspaceIndex = () => {},
+  refreshJsonEditorAppearance = () => {},
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
@@ -128,6 +129,7 @@ export function createSettingsController({
     localStorage.setItem("txteditor.theme", state.theme);
     grid.syncTheme();
     grid.draw();
+    refreshJsonEditorAppearance();
     renderChrome();
   }
 
@@ -319,6 +321,7 @@ export function createSettingsController({
     localStorage.setItem("txteditor.gridFont", state.gridFont);
     document.documentElement.style.setProperty("--grid-font", state.gridFont);
     grid.setFontFamily(state.gridFont);
+    refreshJsonEditorAppearance();
     renderChrome();
   }
 

@@ -12,6 +12,7 @@ export const APP_ELEMENT_IDS = Object.freeze({
   problemsList: "problemsList",
   logList: "logList",
   host: "gridHost",
+  jsonHost: "jsonEditorHost",
   canvas: "gridCanvas",
   frozenCanvas: "frozenCanvas",
   scrollSurface: "scrollSurface",
@@ -35,6 +36,8 @@ export const APP_ELEMENT_IDS = Object.freeze({
   contextMenu: "contextMenu",
   closeDialog: "closeDialog",
   closeDialogText: "closeDialogText",
+  externalChangeDialog: "externalChangeDialog",
+  externalChangeDialogText: "externalChangeDialogText",
   overviewRuler: "overviewRuler"
 });
 

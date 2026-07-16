@@ -80,6 +80,10 @@ export async function lspLogListen(callback) {
   return unlisten;
 }
 
+export async function lspWatchedFilesListen(callback) {
+  return listenForLspEvent("lsp-watched-files-changed", callback);
+}
+
 async function listenForLspEvent(eventName, callback) {
   if (!isTauriRuntime()) return () => {};
   const api = await tauriApi();

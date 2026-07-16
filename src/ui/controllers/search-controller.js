@@ -1,3 +1,4 @@
+import { isJsonDocument } from "../../core/document-file-state.js";
 import {
   SEARCH_DIRECTION_BACKWARD,
   SEARCH_DIRECTION_FORWARD,
@@ -16,7 +17,7 @@ import {
   shouldSubmitSearchKey
 } from "../search-policy.js";
 
-export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight, saveSelectionState = () => {} }) {
+export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight, saveSelectionState = () => {}, jsonSearch = null, focusActiveEditor = () => els.host.focus() }) {
   const searchModalCandidate = els.searchPanel.querySelector?.(".search-modal");
   const searchModal = searchModalCandidate?.classList
     && typeof searchModalCandidate.getBoundingClientRect === "function"
@@ -87,6 +88,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   }
 
   function showSearch() {
+    if (isJsonDocument(activeDoc())) return jsonSearch?.openSearch?.();
     Object.assign(state.search, searchStateAfterInput());
     els.searchPanel.classList.remove("hidden");
     clampSearchModalToViewport();
@@ -97,7 +99,7 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   function closeSearch() {
     searchDrag = null;
     els.searchPanel.classList.add("hidden");
-    els.host.focus();
+    focusActiveEditor();
   }
 
   function selectedSearchScope() {
@@ -107,6 +109,11 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
   }
 
   function find(direction = SEARCH_DIRECTION_FORWARD) {
+    if (isJsonDocument(activeDoc())) {
+      return direction === SEARCH_DIRECTION_BACKWARD
+        ? jsonSearch?.findPrevious?.()
+        : jsonSearch?.findNext?.();
+    }
     const query = els.searchInput.value;
     const scope = selectedSearchScope();
     const includeStart = searchShouldIncludeStart(query, scope, state.search.lastQuery, state.search.lastScope);

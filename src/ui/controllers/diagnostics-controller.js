@@ -1,5 +1,6 @@
 import { TableDocument, clamp } from "../../core/table-model.js";
 import { isTauriRuntime, openNativePaths } from "../../core/io.js";
+import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { groupDiagnosticsByCell } from "../../core/lint-engine.js";
 import {
   LINT_ENGINE_LEGACY,
@@ -30,6 +31,10 @@ export function createDiagnosticsController({
   activeDoc,
   hasOpenDocument,
   addDocument,
+  activateDocument = async (doc) => (typeof grid === "function" ? grid() : grid).setDocument(doc),
+  openJsonDocumentPath = async () => null,
+  navigateJsonDiagnostic = async () => false,
+  focusActiveEditor = () => els.host?.focus?.(),
   renderChrome,
   recordUiPerf,
   showError,
@@ -116,8 +121,9 @@ export function createDiagnosticsController({
 
   function updateGridDiagnostics() {
     const started = perfNow();
-    const diagnosticsByCell = lintActive()
-      ? groupDiagnosticsByCell(diagnosticsForDoc(activeDoc()))
+    const doc = activeDoc();
+    const diagnosticsByCell = lintActive() && isTableDocument(doc)
+      ? groupDiagnosticsByCell(diagnosticsForDoc(doc))
       : new Map();
     currentGrid().setDiagnostics(diagnosticsByCell);
     updateOverviewRuler();
@@ -136,6 +142,11 @@ export function createDiagnosticsController({
     ruler.style.height = `${hostRect.height}px`;
     ruler.style.right = "0px";
     const doc = activeDoc();
+    if (isJsonDocument(doc)) {
+      ruler.innerHTML = "";
+      recordUiPerf("update-overview-ruler", started, { marks: 0, json: true });
+      return;
+    }
     const diags = lintActive() ? diagnosticsForDoc(doc) : [];
     const rowCount = doc.rowCount;
     if (!diags.length || !rowCount) {
@@ -176,24 +187,37 @@ export function createDiagnosticsController({
   async function goToDiagnostic(id) {
     const diagnostic = state.lint.diagnostics.find((item) => item.id === id);
     if (!diagnostic || diagnostic.navigationDisabled) return;
+    if (diagnostic.documentKind === "json") {
+      const doc = await openJsonDocumentPath(diagnostic.filePath, { requireCurrentMode: true, focus: false });
+      if (!doc) return;
+      state.active = state.docs.indexOf(doc);
+      await activateDocument(doc, { focus: false });
+      await navigateJsonDiagnostic(doc, diagnostic);
+      state.problemsVisible = true;
+      renderChrome();
+      updateGridDiagnostics();
+      updateActiveProblemHighlight();
+      focusActiveEditor();
+      return;
+    }
     let index = state.docs.findIndex((doc) => lintDocKey(doc) === diagnostic.fileKey);
     if (index < 0 && state.lint.engine === LINT_ENGINE_LEGACY) {
       const workspaceDoc = state.lint.legacy.workspaceDocs.find((doc) => lintDocKey(doc) === diagnostic.fileKey);
       if (workspaceDoc) {
-          await addDocument(workspaceDoc, { scrollProblems: false });
+        await addDocument(workspaceDoc, { scrollProblems: false });
         index = state.active;
       }
     }
     if (index < 0 && diagnostic.filePath && isTauriRuntime()) {
       const [doc] = await openNativePaths([diagnostic.filePath], TableDocument);
       if (doc) {
-          await addDocument(doc, { scrollProblems: false });
+        await addDocument(doc, { scrollProblems: false });
         index = state.active;
       }
     }
     if (index >= 0) state.active = index;
+    await activateDocument(activeDoc(), { focus: false });
     const gridRef = currentGrid();
-    gridRef.setDocument(activeDoc());
     state.selection.set(
       clamp(diagnostic.rowIndex, 0, Math.max(0, activeDoc().rowCount - 1)),
       clamp(diagnostic.columnIndex, 0, Math.max(0, activeDoc().columnCount - 1))
@@ -307,6 +331,12 @@ export function createDiagnosticsController({
   }
 
   function activeProblemDiagnosticIds() {
+    if (isJsonDocument(activeDoc())) {
+      const id = activeDoc()?.activeDiagnosticId;
+      return id && diagnosticsForDoc(activeDoc()).some((diagnostic) => diagnostic.id === id)
+        ? new Set([id])
+        : new Set();
+    }
     const activeCell = currentGrid().editingCell?.() ?? state.selection.focus;
     return activeDiagnosticIdsForCell({
       diagnostics: diagnosticsForDoc(activeDoc()),

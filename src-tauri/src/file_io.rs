@@ -14,6 +14,7 @@ pub(crate) async fn open_files_dialog(app: tauri::AppHandle) -> Result<Vec<Strin
         .dialog()
         .file()
         .add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
+        .add_filter("Localization JSON", &["json"])
         .blocking_pick_files();
     match picked {
         Some(paths) => paths.into_iter().map(file_path_to_string).collect(),
@@ -35,10 +36,13 @@ pub(crate) async fn save_file_dialog(
     app: tauri::AppHandle,
     default_name: String,
 ) -> Result<Option<String>, String> {
-    app.dialog()
-        .file()
-        .add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
-        .set_file_name(default_name)
+    let dialog = app.dialog().file().set_file_name(default_name.clone());
+    let dialog = if default_name.to_ascii_lowercase().ends_with(".json") {
+        dialog.add_filter("Localization JSON", &["json"])
+    } else {
+        dialog.add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
+    };
+    dialog
         .blocking_save_file()
         .map(file_path_to_string)
         .transpose()

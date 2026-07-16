@@ -6,7 +6,7 @@ import {
 } from "./file-payloads.js";
 import { decodeBuffer } from "./text-codec.js";
 import { readNativeTextFiles } from "./native-read.js";
-import { tableFileState } from "../table-file-state.js";
+import { documentTextSnapshot } from "../document-file-state.js";
 import { LARGE_FILE_THRESHOLDS } from "../large-file-policy.js";
 
 const nativeTargetSaveQueues = new Map();
@@ -36,9 +36,15 @@ export async function startupOpenPathsNative(invokeFn = null) {
     : [];
 }
 
+export async function pickOpenFilePathsNative(invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  const paths = await invoke("open_files_dialog");
+  return Array.isArray(paths) ? paths : [];
+}
+
 export async function openFilesNative(DocumentType) {
   const api = await tauriApi();
-  const paths = await api.invoke("open_files_dialog");
+  const paths = await pickOpenFilePathsNative(api.invoke);
   return openNativePaths(paths, DocumentType, api.invoke);
 }
 
@@ -68,6 +74,11 @@ export async function openNativePaths(paths, DocumentType, invokeFn = null) {
   return results.map((result) => result.doc).filter(Boolean);
 }
 
+export async function readTextFilesNative(paths, invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  return readNativeTextFiles(paths, invoke);
+}
+
 export async function openNativePathsBulk(paths, DocumentType, invokeFn = null, { shouldContinue = () => true } = {}) {
   const invoke = invokeFn ?? (await tauriApi()).invoke;
   const results = new Array(paths.length);
@@ -82,18 +93,26 @@ export async function openNativePathsBulk(paths, DocumentType, invokeFn = null, 
   return results;
 }
 
-export async function saveDocumentNative(doc, saveAs = false) {
+export async function saveDocumentNative(doc, saveAs = false, { validateTarget = () => true } = {}) {
   const api = await tauriApi();
   let target = doc.path;
   if (saveAs || !target) {
     target = await api.invoke("save_file_dialog", { defaultName: doc.name });
     if (!target) return false;
   }
-  const revision = tableFileState(doc).revision;
-  const chunks = doc.snapshotTextChunks();
-  const encoding = doc.encoding;
-  const payload = await queueNativeTargetSave(target, () => writeDocumentNative(api.invoke, target, chunks, encoding));
-  applySavedTextPayload(doc, payload, revision);
+  if (!validateTarget(target)) throw new Error("The selected path is not an editable localization JSON file in the current mode.");
+  const snapshot = documentTextSnapshot(doc);
+  doc.beginWrite?.(snapshot);
+  let payload;
+  try {
+    payload = await queueNativeTargetSave(target, () => writeDocumentNative(
+      api.invoke, target, snapshot.chunks, snapshot.encoding
+    ));
+  } catch (error) {
+    doc.cancelWrite?.();
+    throw error;
+  }
+  applySavedTextPayload(doc, payload, snapshot.revision, snapshot);
   return true;
 }
 

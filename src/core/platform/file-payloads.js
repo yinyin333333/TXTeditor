@@ -1,4 +1,4 @@
-import { markTableSaved, tableFileState } from "../table-file-state.js";
+import { documentRevision, markDocumentSaved } from "../document-file-state.js";
 import { LARGE_FILE_THRESHOLDS } from "../large-file-policy.js";
 
 export function normalizeNativeReadResult(entry, fallbackPath, bulkRead) {
@@ -61,10 +61,10 @@ export async function documentOpenResultFromNativeReadAsync(result, DocumentType
   }
 }
 
-export function applySavedTextPayload(doc, payload, revision = tableFileState(doc).revision) {
+export function applySavedTextPayload(doc, payload, revision = documentRevision(doc), snapshot = {}) {
   doc.path = payload.path;
   doc.name = payload.name;
-  markTableSaved(doc, revision);
+  markDocumentSaved(doc, revision, snapshot);
   return doc;
 }
 

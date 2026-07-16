@@ -4,9 +4,15 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
   fileName = "",
   filePath = "",
   index = 0,
-  doc = null
+  doc = null,
+  generation = 0,
+  sequence = null,
+  version = null,
+  sourceExists = true,
+  jsonNavigationEnabled = false
 } = {}) {
   const rowIndex = numberOr(diagnostic?.row, 0);
+  const endRowIndex = numberOr(diagnostic?.endRow, rowIndex);
   const resourceIsJson = isJsonResource(filePath || fileName);
   const tableColumnIndex = numberOr(diagnostic?.col ?? diagnostic?.column, 0);
   const columnIndex = !doc && resourceIsJson
@@ -16,13 +22,20 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
   const data = diagnostic?.data ?? null;
   const code = diagnostic?.code == null ? "" : String(diagnostic.code);
   const range = displayDiagnosticRange(diagnostic, cellValue, data);
-  const navigationDisabled = !doc && resourceIsJson;
+  const navigationDisabled = resourceIsJson ? !jsonNavigationEnabled : false;
   return {
     id: `lsp:${uri}:${rowIndex}:${columnIndex}:${index}`,
+    uri,
+    generation,
+    sequence,
+    version,
+    sourceExists,
+    documentKind: resourceIsJson ? "json" : "table",
     fileKey,
     fileName,
     filePath,
     rowIndex,
+    endRowIndex,
     columnIndex,
     severity: diagnostic?.severity ?? "warning",
     message: diagnostic?.message ?? "",
@@ -119,17 +132,11 @@ function isStructuredInsertionPointData(data) {
   return data?.kind === "missing-token" || data?.kind === "unexpected-eof";
 }
 
-function localInsertionPointFromData(insertionPoint, {
-  cellStartCharacter,
-  cellLength
-}) {
+function localInsertionPointFromData(insertionPoint, { cellStartCharacter, cellLength }) {
   if (insertionPoint == null) return null;
-  if (insertionPoint >= 0 && insertionPoint <= cellLength) {
-    return insertionPoint;
-  }
+  if (insertionPoint >= 0 && insertionPoint <= cellLength) return insertionPoint;
   const absoluteLocalInsertionPoint = insertionPoint - cellStartCharacter;
-  if (absoluteLocalInsertionPoint >= 0 && absoluteLocalInsertionPoint <= cellLength) {
-    return absoluteLocalInsertionPoint;
-  }
-  return null;
+  return absoluteLocalInsertionPoint >= 0 && absoluteLocalInsertionPoint <= cellLength
+    ? absoluteLocalInsertionPoint
+    : null;
 }

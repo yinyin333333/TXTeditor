@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TableDocument } from "../src/core/table-model.js";
+import { JsonDocument } from "../src/core/json-document.js";
 import {
   lspDocumentState,
   resetLspDocumentState
@@ -277,6 +278,74 @@ test("V-TXT-05 incremental row updates do not serialize the full document", asyn
       text: "NEW"
     }]);
     assert.equal(lspDocumentState(doc).syncedRevision, tableFileState(doc).revision);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("localization JSON edits use versioned didOpen, incremental didChange, and didClose", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[{\"id\":41001}]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const state = createState(doc);
+  state.workspace = {
+    path: "E:\\mod",
+    files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+  };
+  state.lsp = {
+    started: true,
+    generation: 77,
+    openFileCount: 0,
+    workspacePath: "E:\\mod",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true
+  };
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (["lsp_open_file", "lsp_update_file_incremental", "lsp_close_file"].includes(command)) return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    await controller.openDoc(doc);
+    doc.applyEditorText("[{\"id\":41002}]");
+    await controller.updateDoc(doc, {
+      kind: "json",
+      changes: [{
+        range: {
+          start: { line: 0, character: 7 },
+          end: { line: 0, character: 12 }
+        },
+        text: "41002"
+      }]
+    });
+    await controller.closeDoc(doc);
+
+    assert.deepEqual(calls.map(([command]) => command), [
+      "lsp_open_file",
+      "lsp_update_file_incremental",
+      "lsp_close_file"
+    ]);
+    assert.equal(calls[0][1].version, 1);
+    assert.equal(calls[0][1].text, "[{\"id\":41001}]");
+    assert.equal(calls[1][1].version, 2);
+    assert.equal(calls[1][1].changes[0].text, "41002");
+    assert.equal(calls[2][1].generation, 77);
+    assert.equal(state.lsp.openFileCount, 0);
   } finally {
     resetLspDocumentState(doc);
     if (originalWindow === undefined) delete globalThis.window;

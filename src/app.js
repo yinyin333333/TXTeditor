@@ -1,13 +1,14 @@
 import { TableDocument, clamp } from "./core/table-model.js";
+import { isTableDocument } from "./core/document-file-state.js";
+import { canNavigateLocalizationJsonDiagnostic } from "./core/json-document-policy.js";
 import { makeCellCommand } from "./core/undo.js";
-import { resetUndoManagerForDocument, undoManagerForDocument } from "./core/document-undo-state.js";
+import { resetUndoManagerForDocument } from "./core/document-undo-state.js";
 import {
+  isTauriRuntime,
   listenForNativeDrops,
   startupOpenPathsNative
 } from "./core/io.js";
-import {
-  exposeTxteditorPerf
-} from "./core/perf-instrumentation.js";
+import { exposeTxteditorPerf } from "./core/perf-instrumentation.js";
 import { normalizePath as lintPathKey } from "./core/lint-paths.js";
 import {
   documentChangeSyncRoute,
@@ -38,6 +39,7 @@ import {
 import { createCommandController } from "./ui/controllers/command-controller.js";
 import { createCommandSurfaceController } from "./ui/controllers/command-surface-controller.js";
 import { createDiagnosticsController } from "./ui/controllers/diagnostics-controller.js";
+import { createDocumentEditorController } from "./ui/controllers/document-editor-controller.js";
 import { createDocumentController } from "./ui/controllers/document-controller.js";
 import { createDockController } from "./ui/controllers/dock-controller.js";
 import { createAppEventController } from "./ui/controllers/app-event-controller.js";
@@ -45,6 +47,7 @@ import { createEditCommandController } from "./ui/controllers/edit-command-contr
 import { createGridCommandController } from "./ui/controllers/grid-command-controller.js";
 import { createLegacyLintController } from "./ui/controllers/legacy-lint-controller.js";
 import { createLspController } from "./ui/controllers/lsp-controller.js";
+import { createJsonEditorController } from "./ui/controllers/json-editor-controller.js";
 import { createSearchController } from "./ui/controllers/search-controller.js";
 import { createSettingsController } from "./ui/controllers/settings-controller.js";
 import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
@@ -65,6 +68,16 @@ document.documentElement.style.setProperty("--problems-height", `${savedPanelSta
 
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
+let documentController = null, documentEditorController = null, lspController = null;
+const jsonEditorController = createJsonEditorController({
+  gridHost: els.host,
+  jsonHost: els.jsonHost,
+  onDocumentChanged: (doc, changeMeta = {}) => {
+    renderChrome(); lspController?.updateDoc(doc, { kind: "json", changes: changeMeta.changes })
+      .catch((error) => handleLspUpdateError(doc, error, "json-edit"));
+  },
+  onLoadError: showError
+});
 const askText = (options) => askPromptText({ ...options, escapeHtml, host: els.host });
 const promptNumber = (options) => promptForNumber({ ...options, askText });
 
@@ -77,6 +90,10 @@ const diagnosticsController = createDiagnosticsController({
   activeDoc,
   hasOpenDocument,
   addDocument,
+  activateDocument,
+  openJsonDocumentPath: (...args) => documentController?.openJsonDocumentPath(...args),
+  navigateJsonDiagnostic: (doc, diagnostic) => jsonEditorController.navigateToDiagnostic(doc, diagnostic),
+  focusActiveEditor,
   renderChrome,
   recordUiPerf,
   showError,
@@ -138,7 +155,6 @@ const {
 
 syncDockLayout();
 
-let lspController = null;
 let shellController = null;
 let gridCommandController = null;
 const grid = new CanvasGrid({
@@ -163,6 +179,14 @@ const grid = new CanvasGrid({
   }
 });
 
+documentEditorController = createDocumentEditorController({
+  grid,
+  gridHost: els.host,
+  jsonEditorController,
+  selection: state.selection,
+  applyFreezeToDoc
+});
+
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
 grid.setMouseResizeLocked(state.mouseResizeLocked);
@@ -172,6 +196,7 @@ gridCommandController = createGridCommandController({
   grid,
   activeDoc,
   hasOpenDocument,
+  activeDocumentKind: () => activeDoc()?.kind ?? "table",
   execute,
   saveSelectionState,
   renderChrome,
@@ -208,7 +233,15 @@ lspController = createLspController({
   applyFreezeToDoc,
   updateActiveProblemHighlight,
   saveSelectionState,
-  lintPathKey
+  lintPathKey,
+  canNavigateJsonDiagnostic: ({ filePath, generation, sourceExists }) =>
+    canNavigateLocalizationJsonDiagnostic({
+      diagnostic: { filePath, generation, sourceExists },
+      state,
+      editorReady: jsonEditorController.available(),
+      desktop: isTauriRuntime()
+    }),
+  handleWatchedFilesChanged: (payload) => documentController?.handleWatchedFilesChanged(payload)
 });
 exposeTxteditorPerf(window, {
   uiPerfSamples,
@@ -235,6 +268,7 @@ const settingsController = createSettingsController({
   lspStartWorkspace,
   ensureDocumentSession: (options) => lspController.ensureStandaloneSession(activeDoc(), options),
   resetLegacyWorkspaceIndex,
+  refreshJsonEditorAppearance: jsonEditorController.refreshAppearance,
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
@@ -248,16 +282,21 @@ const shortcutSettingsController = createShortcutSettingsController({
   showToast,
   escapeHtml
 });
-const documentController = createDocumentController({
+documentController = createDocumentController({
   state,
   els,
   grid,
   emptyDoc: EMPTY_DOC,
   activeDoc,
+  activateDocument,
+  commitActiveEditor,
+  focusActiveEditor,
+  jsonEditorController,
   saveSelectionState,
   applyFreezeToDoc,
   renderChrome,
   showError,
+  showToast,
   reportWindowCloseFailure,
   lspOpenDoc,
   reportLspOpenFailure,
@@ -283,7 +322,9 @@ const searchController = createSearchController({
   grid,
   activeDoc,
   updateActiveProblemHighlight,
-  saveSelectionState
+  saveSelectionState,
+  jsonSearch: jsonEditorController,
+  focusActiveEditor
 });
 const editCommandController = createEditCommandController({
   state,
@@ -299,7 +340,7 @@ const {
   copySelection,
   cutSelection,
   pasteSelection,
-  selectAll,
+  selectAll: selectAllTable,
   addRows,
   insertRows,
   addColumns,
@@ -378,6 +419,8 @@ shellController = createShellController({
   activeDoc,
   hasOpenDocument,
   applyFreezeToDoc,
+  activateDocument,
+  focusActiveEditor,
   closeTab: documentController.closeTab,
   openDroppedNativePaths,
   updateGridDiagnostics,
@@ -430,7 +473,10 @@ const eventController = createAppEventController({
   copySelection,
   cutSelection,
   pasteSelection,
-  selectAll
+  selectAll,
+  jsonEditorOwnsTarget: jsonEditorController.editorOwnsTarget,
+  handleExternalChangeDialogClick: documentController.handleExternalChangeDialogClick,
+  focusActiveEditor
 });
 renderChrome();
 eventController.wireEvents();
@@ -445,26 +491,15 @@ startupOpenPathsNative()
   .then((paths) => openDroppedNativePaths(paths))
   .catch(showError);
 
-function activeDoc() {
-  return state.docs[state.active] ?? EMPTY_DOC;
-}
+function activeDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
 
-function hasOpenDocument() {
-  return state.docs.length > 0 && state.active >= 0;
-}
+function activateDocument(doc = activeDoc(), options) { return documentEditorController.activateDocument(doc, options); }
+function commitActiveEditor() { documentEditorController.commitDocument(activeDoc()); }
+function focusActiveEditor() { documentEditorController.focusDocument(activeDoc()); }
 
-function saveSelectionState(doc = activeDoc()) {
-  if (!hasOpenDocument() || doc === EMPTY_DOC || typeof state.selection.snapshot !== "function") return;
-  doc.selectionState = state.selection.snapshot();
-  if (grid.doc === doc) {
-    doc.scrollLeft = grid.scrollLeft;
-    doc.scrollTop = grid.scrollTop;
-  }
-}
+function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
 
-function activeUndo() {
-  return undoManagerForDocument(activeDoc());
-}
+function saveSelectionState(doc = activeDoc()) { if (hasOpenDocument() && doc !== EMPTY_DOC) documentEditorController.saveViewState(doc); }
 
 function isVectorLintEngine() {
   return isVectorLintEngineValue(state.lint.engine);
@@ -484,15 +519,17 @@ function effectiveVectorLspHoverEnabled() {
 
 function execute(command) {
   if (!hasOpenDocument()) return showError("Open a file before editing.");
+  if (!isTableDocument(activeDoc())) return showError("This command is available only for table documents.");
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
   command.redo(doc);
-  activeUndo().push(command);
+  documentEditorController.pushTableCommand(doc, command);
   finishCommand(doc, command, "edit", started);
 }
 
 function finishCommand(doc, command, context = "edit", started = perfNow()) {
+  if (!isTableDocument(doc)) return;
   const contentChanged = command.contentChanged !== false;
   if (contentChanged) markLegacyLintDocChanged(doc);
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
@@ -512,28 +549,24 @@ function applyEdits(edits, label = "Edit Cells") {
   execute(makeCellCommand(label, activeDoc(), edits));
 }
 
-async function wireCloseHandler() {
-  return documentController.wireCloseHandler();
-}
-
-async function addDocument(doc) {
-  return documentController.addDocument(doc);
-}
-
-async function openDroppedNativePaths(paths) {
-  return documentController.openDroppedNativePaths(paths);
-}
+async function wireCloseHandler() { return documentController.wireCloseHandler(); }
+async function addDocument(doc, options = {}) { return documentController.addDocument(doc, options); }
+async function openDroppedNativePaths(paths, options = {}) { return documentController.openDroppedNativePaths(paths, options); }
 
 function undo() {
   const doc = activeDoc();
-  const command = activeUndo().undo(doc);
+  const command = documentEditorController.undoDocument(doc);
   if (command) finishCommand(doc, command, "undo");
 }
 
 function redo() {
   const doc = activeDoc();
-  const command = activeUndo().redo(doc);
+  const command = documentEditorController.redoDocument(doc);
   if (command) finishCommand(doc, command, "redo");
+}
+
+function selectAll() {
+  return documentEditorController.selectAllDocument(activeDoc(), selectAllTable);
 }
 
 function invalidateLspHover(clearCache = false, reason = "hover-invalidated") {
@@ -608,6 +641,7 @@ function scheduleHoverPrewarm(reason = "schedule") {
 }
 
 function updateGridDiagnostics() {
+  jsonEditorController.reconcileDiagnosticHighlight(state.lint.diagnostics);
   return diagnosticsController.updateGridDiagnostics();
 }
 

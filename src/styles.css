@@ -110,6 +110,13 @@
   --grid-diagnostic-insertion-caret-error: #ff5f6d;
   --grid-diagnostic-insertion-caret-warning: #d9a400;
   --grid-diagnostic-insertion-caret-info: #3794ff;
+  --json-property: #9cdc86;
+  --json-string: #9cdcfe;
+  --json-number: #b5cea8;
+  --json-literal: #c586c0;
+  --json-punctuation: #d4d4d4;
+  --json-diagnostic-focus: rgba(255, 196, 0, .24);
+  --json-diagnostic-focus-border: rgba(255, 196, 0, .78);
   --grid-font: Consolas, "Cascadia Mono", monospace;
   --sidebar-width: 260px;
   --sidebar-height: 260px;
@@ -235,6 +242,13 @@
   --grid-diagnostic-insertion-caret-error: #c92f3f;
   --grid-diagnostic-insertion-caret-warning: #9b6a00;
   --grid-diagnostic-insertion-caret-info: #005fb8;
+  --json-property: #267f00;
+  --json-string: #0451a5;
+  --json-number: #098658;
+  --json-literal: #7a3e9d;
+  --json-punctuation: #3b4652;
+  --json-diagnostic-focus: rgba(203, 145, 0, .22);
+  --json-diagnostic-focus-border: rgba(155, 106, 0, .72);
 }
 
 * {
@@ -1960,4 +1974,42 @@ details:not([open]) .problem-file-header::before {
 .settings-segmented button.active {
   color: var(--text-strong);
   background: var(--selection);
+}
+
+/* Mixed table/JSON document editor surfaces. */
+.editor-surface.hidden {
+  display: none;
+}
+
+.json-editor-host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--grid-bg);
+}
+
+.json-editor-host > .cm-editor {
+  height: 100%;
+}
+
+.json-editor-host .cm-editor,
+.json-editor-host .cm-scroller,
+.json-editor-host .cm-content,
+.json-editor-host .cm-gutters {
+  font-family: var(--grid-font) !important;
+}
+
+.tab-dirty-dot {
+  margin-left: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.tabs button.tab-json .tab-title::before {
+  content: "{}";
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 10px;
 }
