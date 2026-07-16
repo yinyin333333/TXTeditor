@@ -292,6 +292,31 @@ button.active {
   background: var(--selection);
 }
 
+.toggle-button[data-command="toggle-freeze-row"].active:not(:disabled),
+.toggle-button[data-command="toggle-freeze-column"].active:not(:disabled) {
+  color: var(--text-strong);
+  border-color: #667b8d;
+  background: #34414c;
+}
+
+.toggle-button[data-command="toggle-freeze-row"].active:not(:disabled):hover,
+.toggle-button[data-command="toggle-freeze-column"].active:not(:disabled):hover {
+  border-color: #71879a;
+  background: #3c4b58;
+}
+
+:root[data-theme="light"] .toggle-button[data-command="toggle-freeze-row"].active:not(:disabled),
+:root[data-theme="light"] .toggle-button[data-command="toggle-freeze-column"].active:not(:disabled) {
+  border-color: #879caf;
+  background: #dfe7ee;
+}
+
+:root[data-theme="light"] .toggle-button[data-command="toggle-freeze-row"].active:not(:disabled):hover,
+:root[data-theme="light"] .toggle-button[data-command="toggle-freeze-column"].active:not(:disabled):hover {
+  border-color: #7a91a5;
+  background: #d3dee7;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);

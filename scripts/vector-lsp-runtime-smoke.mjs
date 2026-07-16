@@ -521,11 +521,15 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     jsonStringEntry(1001, "SmokeJsonOne"),
     jsonStringEntry(1002, "SmokeJsonTwo")
   ], null, 2)}\n`;
+  const invalidJsonText = duplicateJsonText.replace(/\]\n$/, "");
   const duplicateJsonDiagnostics = (message) => (message.params?.diagnostics ?? []).filter((diagnostic) => (
     diagnostic.code === "Json/DuplicateIds"
   ));
   const keyUsageJsonDiagnostics = (message) => (message.params?.diagnostics ?? []).filter((diagnostic) => (
     diagnostic.code === "Json/KeyUsage"
+  ));
+  const syntaxJsonDiagnostics = (message) => (message.params?.diagnostics ?? []).filter((diagnostic) => (
+    diagnostic.code === "Json/Syntax"
   ));
   const waitForJsonDiagnostics = (startIndex, predicate, label) => withTimeout(
     client.waitForNext((message) => (
@@ -716,6 +720,39 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       "watched JSON diagnostics after error reintroduction"
     );
 
+    const watchedJsonSyntaxStart = client.messages.length;
+    fs.writeFileSync(jsonPath, invalidJsonText, "utf8");
+    notifyJsonChange(2);
+    const watchedJsonSyntax = await waitForJsonDiagnostics(
+      watchedJsonSyntaxStart,
+      (message) => (
+        syntaxJsonDiagnostics(message).length === 1
+        && duplicateJsonDiagnostics(message).length === 2
+      ),
+      "watched invalid JSON preserves semantic diagnostics"
+    );
+    if (watchedJsonSyntax.params.diagnostics.length !== 4
+      || keyUsageJsonDiagnostics(watchedJsonSyntax).length !== 1
+      || syntaxJsonDiagnostics(watchedJsonSyntax)[0]?.severity !== 1) {
+      throw new Error(`watched invalid JSON diagnostics changed: ${JSON.stringify(watchedJsonSyntax.params)}`);
+    }
+
+    const watchedJsonSyntaxRecoveryStart = client.messages.length;
+    fs.writeFileSync(jsonPath, duplicateJsonText, "utf8");
+    notifyJsonChange(2);
+    const watchedJsonSyntaxRecovered = await waitForJsonDiagnostics(
+      watchedJsonSyntaxRecoveryStart,
+      (message) => (
+        syntaxJsonDiagnostics(message).length === 0
+        && duplicateJsonDiagnostics(message).length === 2
+      ),
+      "watched JSON diagnostics after syntax recovery"
+    );
+    if (watchedJsonSyntaxRecovered.params.diagnostics.length !== 3
+      || keyUsageJsonDiagnostics(watchedJsonSyntaxRecovered).length !== 1) {
+      throw new Error(`watched JSON syntax recovery changed: ${JSON.stringify(watchedJsonSyntaxRecovered.params)}`);
+    }
+
     const jsonDeleteStart = client.messages.length;
     fs.rmSync(jsonPath, { force: true });
     notifyJsonChange(3);
@@ -757,6 +794,45 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       (message) => message.params.version === 3 && duplicateJsonDiagnostics(message).length === 2,
       "open JSON buffer diagnostics after unsaved error reintroduction"
     );
+
+    const liveJsonSyntaxStart = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: jsonUri, version: 4 },
+      contentChanges: [{ text: invalidJsonText }]
+    });
+    const liveJsonSyntax = await waitForJsonDiagnostics(
+      liveJsonSyntaxStart,
+      (message) => (
+        message.params.version === 4
+        && syntaxJsonDiagnostics(message).length === 1
+        && duplicateJsonDiagnostics(message).length === 2
+      ),
+      "open invalid JSON preserves semantic diagnostics"
+    );
+    if (liveJsonSyntax.params.diagnostics.length !== 4
+      || keyUsageJsonDiagnostics(liveJsonSyntax).length !== 1
+      || syntaxJsonDiagnostics(liveJsonSyntax)[0]?.severity !== 1) {
+      throw new Error(`open invalid JSON diagnostics changed: ${JSON.stringify(liveJsonSyntax.params)}`);
+    }
+
+    const liveJsonSyntaxRecoveryStart = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: jsonUri, version: 5 },
+      contentChanges: [{ text: duplicateJsonText }]
+    });
+    const liveJsonSyntaxRecovered = await waitForJsonDiagnostics(
+      liveJsonSyntaxRecoveryStart,
+      (message) => (
+        message.params.version === 5
+        && syntaxJsonDiagnostics(message).length === 0
+        && duplicateJsonDiagnostics(message).length === 2
+      ),
+      "open JSON diagnostics after syntax recovery"
+    );
+    if (liveJsonSyntaxRecovered.params.diagnostics.length !== 3
+      || keyUsageJsonDiagnostics(liveJsonSyntaxRecovered).length !== 1) {
+      throw new Error(`open JSON syntax recovery changed: ${JSON.stringify(liveJsonSyntaxRecovered.params)}`);
+    }
     client.notify("textDocument/didClose", { textDocument: { uri: jsonUri } });
 
     const jsonFinalDeleteStart = client.messages.length;
@@ -1059,10 +1135,16 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       watchedJsonKeyUsageSeverity: keyUsageJsonDiagnostics(jsonCreated)[0]?.severity,
       watchedJsonFixDiagnostics: jsonFixed.params.diagnostics.length,
       watchedJsonReintroducedDiagnostics: duplicateJsonDiagnostics(jsonReintroduced).length,
+      watchedJsonSyntaxDiagnostics: syntaxJsonDiagnostics(watchedJsonSyntax).length,
+      watchedJsonSyntaxPreservedDiagnostics: watchedJsonSyntax.params.diagnostics.length - syntaxJsonDiagnostics(watchedJsonSyntax).length,
+      watchedJsonSyntaxRecoveryDiagnostics: watchedJsonSyntaxRecovered.params.diagnostics.length,
       watchedJsonDeleteDiagnostics: jsonDeleted.params.diagnostics.length,
       watchedJsonRestoreDiagnostics: duplicateJsonDiagnostics(jsonRestored).length,
       liveJsonFixDiagnostics: liveJsonFixed.params.diagnostics.length,
       liveJsonReintroducedDiagnostics: duplicateJsonDiagnostics(liveJsonReintroduced).length,
+      liveJsonSyntaxDiagnostics: syntaxJsonDiagnostics(liveJsonSyntax).length,
+      liveJsonSyntaxPreservedDiagnostics: liveJsonSyntax.params.diagnostics.length - syntaxJsonDiagnostics(liveJsonSyntax).length,
+      liveJsonSyntaxRecoveryDiagnostics: liveJsonSyntaxRecovered.params.diagnostics.length,
       watchedJsonFinalDeleteDiagnostics: jsonFinalDelete.params.diagnostics.length,
       watchedJsonFallbackPublishes: unexpectedJsonPublishes.length,
       readyGeneration: readyMessage.params.sessionGeneration,
