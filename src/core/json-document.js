@@ -12,6 +12,7 @@ export class JsonDocument {
     this.editorState = null;
     this.activeDiagnosticId = null;
     this.externalChange = null;
+    this.lastObservedDiskExists = true;
     this.lastObservedDiskText = this.text;
     this.lastObservedDiskEncoding = this.encoding;
     this.lastWrittenText = this.text;
@@ -48,6 +49,7 @@ export class JsonDocument {
     this.lastWrittenText = String(text ?? "");
     this.lastWrittenEncoding = encoding || this.encoding;
     this.observeDiskState({
+      exists: true,
       text: this.lastWrittenText,
       encoding: this.lastWrittenEncoding
     });
@@ -80,18 +82,27 @@ export class JsonDocument {
     this.externalChange = null;
     this.lastWrittenText = this.text;
     this.lastWrittenEncoding = this.encoding;
-    this.observeDiskState({ text: this.text, encoding: this.encoding });
+    this.observeDiskState({ exists: true, text: this.text, encoding: this.encoding });
     this.pendingWriteText = null;
     this.pendingWriteEncoding = null;
     this.refreshTextMetadata();
   }
 
-  observeDiskState({ text = null, encoding = this.encoding } = {}) {
+  observeDiskState({ exists = true, text = null, encoding = this.encoding } = {}) {
+    this.lastObservedDiskExists = Boolean(exists);
+    if (!this.lastObservedDiskExists) {
+      this.lastObservedDiskText = null;
+      this.lastObservedDiskEncoding = null;
+      return;
+    }
     if (text != null) this.lastObservedDiskText = String(text);
     this.lastObservedDiskEncoding = encoding || this.encoding;
   }
 
-  matchesObservedDiskState({ text = null, encoding = this.encoding } = {}) {
+  matchesObservedDiskState({ exists = true, text = null, encoding = this.encoding } = {}) {
+    const sourceExists = Boolean(exists);
+    if (sourceExists !== this.lastObservedDiskExists) return false;
+    if (!sourceExists) return true;
     return text != null
       && String(text) === this.lastObservedDiskText
       && (encoding || this.encoding) === this.lastObservedDiskEncoding;
@@ -102,7 +113,13 @@ export class JsonDocument {
   }
 
   keepLocalAfterExternalChange(payload = this.externalChange) {
-    if (payload) this.observeDiskState(payload);
+    if (payload) {
+      this.observeDiskState({
+        exists: payload.deleted !== true,
+        text: payload.text,
+        encoding: payload.encoding || this.encoding
+      });
+    }
     this.externalChange = null;
     this.dirty = true;
   }

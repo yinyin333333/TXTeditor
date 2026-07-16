@@ -364,6 +364,119 @@ test("Keep suppresses duplicate watched-file conflicts until the disk identity c
   }
 });
 
+test("queued external JSON changes prompt once and deleted observations survive duplicate events", async () => {
+  const originalWindow = globalThis.window;
+  const path = "E:\\mod\\data\\local\\lng\\strings\\skills.json";
+  const doc = JsonDocument.fromText("skills.json", "[0]", {
+    path,
+    encoding: "utf-8"
+  });
+  doc.applyEditorText("[local]");
+
+  let dialogShows = 0;
+  const dialogClasses = new Set(["hidden"]);
+  const externalChangeDialog = {
+    classList: {
+      add(...items) { items.forEach((item) => dialogClasses.add(item)); },
+      remove(...items) {
+        if (items.includes("hidden")) dialogShows += 1;
+        items.forEach((item) => dialogClasses.delete(item));
+      },
+      contains(item) { return dialogClasses.has(item); }
+    }
+  };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          assert.equal(command, "read_text_files");
+          return [{
+            Ok: {
+              path,
+              name: "skills.json",
+              text: "[disk]",
+              encoding: "utf-8"
+            }
+          }];
+        }
+      }
+    }
+  };
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "vector-lsp" },
+    lsp: { generation: 13 }
+  };
+  const controller = createDocumentController({
+    state,
+    els: {
+      externalChangeDialog,
+      externalChangeDialogText: { textContent: "" }
+    },
+    grid: {},
+    emptyDoc: JsonDocument.fromText("empty.json", ""),
+    activeDoc: () => doc,
+    saveSelectionState() {},
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError(error) { throw error; },
+    reportWindowCloseFailure() {},
+    lspOpenDoc: async () => {},
+    reportLspOpenFailure() {},
+    lspCloseDoc: async () => {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace: async () => {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {}
+  });
+  const changed = { generation: 13, changes: [{ uri: docToUri(doc), type: 2 }] };
+  const keep = () => controller.handleExternalChangeDialogClick({
+    target: {
+      closest: () => ({ dataset: { externalChangeChoice: "keep" } })
+    }
+  });
+
+  try {
+    const first = controller.handleWatchedFilesChanged(changed);
+    while (dialogShows === 0) await new Promise((resolve) => setImmediate(resolve));
+    const second = controller.handleWatchedFilesChanged(changed);
+    await new Promise((resolve) => setImmediate(resolve));
+    await keep();
+
+    // A broken queue implementation opens the same dialog again. Resolve that
+    // fallback so the test fails by assertion instead of hanging indefinitely.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (dialogShows > 1) await keep();
+    await Promise.all([first, second]);
+    assert.equal(dialogShows, 1);
+
+    doc.keepLocalAfterExternalChange({
+      path,
+      deleted: true,
+      text: null,
+      encoding: "utf-8"
+    });
+    assert.equal(doc.matchesObservedDiskState({ exists: false }), true);
+    assert.equal(doc.matchesObservedDiskState({
+      exists: true,
+      text: "[disk]",
+      encoding: "utf-8"
+    }), false, "recreating the file must be observable even with previously seen text");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("CodeMirror module loading is lazy and cached", async () => {
   resetJsonEditorModuleLoaderForTests();
   let calls = 0;

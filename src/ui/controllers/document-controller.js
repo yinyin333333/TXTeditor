@@ -470,22 +470,31 @@ export function createDocumentController({
     }
   }
 
+  function externalDiskObservation(doc, payload = {}) {
+    const exists = payload.deleted !== true;
+    return {
+      exists,
+      text: exists ? String(payload.text ?? "") : null,
+      encoding: exists ? (payload.encoding || doc.encoding) : null
+    };
+  }
+
   async function processExternalPayload(doc, payload) {
-    const text = String(payload.text ?? "");
-    const encoding = payload.encoding || doc.encoding;
-    if (doc.matchesObservedDiskState({ text, encoding })) return;
+    const observation = externalDiskObservation(doc, payload);
+    const { text, encoding } = observation;
+    if (doc.matchesObservedDiskState(observation)) return;
     if (text === doc.pendingWriteText && encoding === doc.pendingWriteEncoding) {
       doc.pendingWriteText = null;
       doc.pendingWriteEncoding = null;
-      doc.observeDiskState({ text, encoding });
+      doc.observeDiskState(observation);
       return;
     }
     if (text === doc.lastWrittenText && encoding === doc.lastWrittenEncoding) {
-      doc.observeDiskState({ text, encoding });
+      doc.observeDiskState(observation);
       return;
     }
     if (text === doc.text && encoding === doc.encoding) {
-      doc.observeDiskState({ text, encoding });
+      doc.observeDiskState(observation);
       return;
     }
     if (!doc.dirty) {
@@ -518,6 +527,8 @@ export function createDocumentController({
   }
 
   async function resolveExternalConflict(doc, payload) {
+    const observation = externalDiskObservation(doc, payload);
+    if (doc.matchesObservedDiskState(observation)) return;
     doc.noteExternalChange(payload);
     if (pendingExternal) {
       queuedExternalChanges.set(normalizePath(payload.path || doc.path), { doc, payload });
