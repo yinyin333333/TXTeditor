@@ -7,12 +7,16 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
   doc = null
 } = {}) {
   const rowIndex = numberOr(diagnostic?.row, 0);
-  const columnIndex = numberOr(diagnostic?.col ?? diagnostic?.column, 0);
+  const resourceIsJson = isJsonResource(filePath || fileName);
+  const tableColumnIndex = numberOr(diagnostic?.col ?? diagnostic?.column, 0);
+  const columnIndex = !doc && resourceIsJson
+    ? numberOr(diagnostic?.startCharacter, tableColumnIndex)
+    : tableColumnIndex;
   const cellValue = knownCellValue(doc, rowIndex, columnIndex);
   const data = diagnostic?.data ?? null;
   const code = diagnostic?.code == null ? "" : String(diagnostic.code);
   const range = displayDiagnosticRange(diagnostic, cellValue, data);
-  const navigationDisabled = !doc && isJsonResource(filePath || fileName);
+  const navigationDisabled = !doc && resourceIsJson;
   return {
     id: `lsp:${uri}:${rowIndex}:${columnIndex}:${index}`,
     fileKey,

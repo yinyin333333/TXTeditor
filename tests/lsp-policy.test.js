@@ -1021,6 +1021,8 @@ test("unopened localization JSON diagnostics remain visible but are not editor n
   const diagnostic = mapLspDiagnosticToDisplay({
     row: 8,
     col: 0,
+    startCharacter: 12,
+    endCharacter: 18,
     severity: "warning",
     message: "Duplicate string id",
     code: "Json/DuplicateIds"
@@ -1036,6 +1038,8 @@ test("unopened localization JSON diagnostics remain visible but are not editor n
   assert.equal(diagnostic.fileName, "skills.json");
   assert.equal(diagnostic.message, "Duplicate string id");
   assert.equal(diagnostic.ruleId, "Json/DuplicateIds");
+  assert.equal(diagnostic.columnIndex, 12);
+  assert.equal(diagnostic.locationLabel, "Row 9, Col 13");
   assert.equal(diagnostic.navigationDisabled, true);
 });
 

@@ -355,6 +355,19 @@ fn raw_event_changes(event: &Event) -> Vec<(PathBuf, u8)> {
         EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
             event.paths.iter().cloned().map(|path| (path, 1)).collect()
         }
+        EventKind::Modify(ModifyKind::Name(_)) => {
+            // FSEvents and kqueue can report a one-sided rename without
+            // distinguishing the old path from the new path.
+            event
+                .paths
+                .iter()
+                .cloned()
+                .map(|path| {
+                    let kind = if path.exists() { 1 } else { 3 };
+                    (path, kind)
+                })
+                .collect()
+        }
         EventKind::Modify(_) | EventKind::Any | EventKind::Other => {
             event.paths.iter().cloned().map(|path| (path, 2)).collect()
         }
@@ -401,17 +414,19 @@ mod tests {
     }
 
     #[test]
-    fn watcher_globs_are_relative_case_insensitive_and_kind_filtered() {
+    fn watcher_globs_are_relative_platform_case_aware_and_kind_filtered() {
         let base = PathBuf::from("C:/mods/example/data");
         let json = pattern(
             &base,
             "local/lng/strings/*.[jJ][sS][oO][nN]",
             WATCH_CREATE | WATCH_CHANGE,
         );
-        assert!(json.matches(
-            Path::new("c:/MODS/example/data/local/lng/strings/skills.JSON"),
-            2
-        ));
+        let matching_path = if cfg!(windows) {
+            Path::new("c:/MODS/example/data/local/lng/strings/skills.JSON")
+        } else {
+            Path::new("C:/mods/example/data/local/lng/strings/skills.JSON")
+        };
+        assert!(json.matches(matching_path, 2));
         assert!(!json.matches(
             Path::new("C:/mods/example/data/local/lng/strings/metadata/ignored.json"),
             2
@@ -445,6 +460,33 @@ mod tests {
         assert_eq!(changes.len(), 2);
         assert_eq!(changes[0].kind, 3);
         assert_eq!(changes[1].kind, 1);
+    }
+
+    #[test]
+    fn ambiguous_rename_events_reach_create_delete_only_guards() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "txteditor-ambiguous-rename-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let target = base.join("strings");
+        let patterns = vec![pattern(&base, "strings", WATCH_CREATE | WATCH_DELETE)];
+
+        std::fs::create_dir_all(&target).unwrap();
+        let renamed_in = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any)))
+            .add_path(target.clone());
+        assert_eq!(changes_for_event(&renamed_in, &patterns)[0].kind, 1);
+
+        std::fs::remove_dir_all(&target).unwrap();
+        let renamed_out =
+            Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any))).add_path(target);
+        assert_eq!(changes_for_event(&renamed_out, &patterns)[0].kind, 3);
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
