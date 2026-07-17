@@ -1,6 +1,7 @@
 import {
   getConfig,
   isTauriRuntime,
+  listWorkspaceNative,
   pickFilePath,
   pickFolderPath,
   saveConfig
@@ -27,6 +28,43 @@ import { lintControlsModel } from "../lint-controls-policy.js";
 
 export function shouldCloseSettingsKey(key) {
   return key === "Escape";
+}
+
+const JSON_RULE_ACTIONS = [
+  ["ignore", "Off"],
+  ["warn", "Warning"]
+];
+const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
+
+function normalizeJsonRuleAction(value, fallback = "warn") {
+  if (value === "error") return "warn";
+  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
+}
+
+function normalizeJsonDiagnosticRules(value) {
+  return {
+    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
+    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
+    keyUsage: {
+      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
+      idStart: Number.isFinite(value?.keyUsage?.idStart)
+        ? value.keyUsage.idStart
+        : DEFAULT_JSON_KEY_USAGE_ID_START
+    }
+  };
+}
+
+function jsonRuleActionOptions(selected) {
+  return JSON_RULE_ACTIONS.map(([value, label]) =>
+    `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function parseJsonKeyUsageIdStart(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function bindEscapeToClose(close) {
@@ -58,16 +96,27 @@ export function createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
-  syncOpenDocsToVectorLsp,
+  ensureDocumentSession = async () => {},
+  resetLegacyWorkspaceIndex = () => {},
+  refreshJsonEditorAppearance = () => {},
   recordLintEngineEvent,
   renderChrome,
   reportBackgroundFailure,
   showError,
   escapeHtml
 }) {
+  let legacyReferenceSelectionRequest = 0;
+  let workspaceScopeRequest = 0;
+  let legacyReferenceSaveQueue = Promise.resolve();
+  let configLoaded = Object.keys(state.config ?? {}).length > 0;
+  let configSnapshot = { ...(state.config ?? {}) };
+
   async function loadConfig() {
     const config = await getConfig();
     state.config = config ?? {};
+    configSnapshot = { ...state.config };
+    configLoaded = true;
+    renderLintControls();
   }
 
   function toggleTheme() {
@@ -80,6 +129,7 @@ export function createSettingsController({
     localStorage.setItem("txteditor.theme", state.theme);
     grid.syncTheme();
     grid.draw();
+    refreshJsonEditorAppearance();
     renderChrome();
   }
 
@@ -92,6 +142,46 @@ export function createSettingsController({
     localStorage.setItem("txteditor.colorize", state.colorizeColumns ? "on" : "off");
     grid.setColorizeColumns(state.colorizeColumns);
     renderChrome();
+  }
+
+  function setMouseResizeLocked(locked) {
+    state.mouseResizeLocked = Boolean(locked);
+    localStorage.setItem("txteditor.mouseResizeLocked", state.mouseResizeLocked ? "on" : "off");
+    grid.setMouseResizeLocked(state.mouseResizeLocked);
+    renderChrome();
+  }
+
+  async function setExcludeWorkspaceSubfolders(excluded) {
+    const next = Boolean(excluded);
+    const request = ++workspaceScopeRequest;
+    const workspace = state.workspace;
+    if (!workspace?.path || !isTauriRuntime()) {
+      state.excludeWorkspaceSubfolders = next;
+      localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
+      renderChrome();
+      return true;
+    }
+
+    const includeSubfolders = !next;
+    const refreshed = await listWorkspaceNative(workspace.path, null, { includeSubfolders });
+    if (request !== workspaceScopeRequest || state.workspace !== workspace) return false;
+    if (!refreshed || !Array.isArray(refreshed.files)) {
+      throw new Error("Workspace refresh returned an invalid file list.");
+    }
+    state.excludeWorkspaceSubfolders = next;
+    localStorage.setItem("txteditor.excludeWorkspaceSubfolders", next ? "on" : "off");
+    state.workspace = refreshed;
+    resetLegacyWorkspaceIndex();
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+    if (isVectorLintEngine()) {
+      await ensureDocumentSession({ forceRestart: true });
+    } else {
+      const schedule = legacyLintImmediateSchedule("workspace-subfolders-changed");
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
+    renderChrome();
+    return true;
   }
 
   function toggleVectorLspHover() {
@@ -121,10 +211,8 @@ export function createSettingsController({
     if (isLegacyLintEngine()) {
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (state.workspace?.path) {
-      lspStartWorkspace(state.workspace.path).catch(showError);
-    } else if (state.lsp.started) {
-      syncOpenDocsToVectorLsp().catch(showError);
+    } else {
+      ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
     renderChrome();
   }
@@ -138,8 +226,8 @@ export function createSettingsController({
     } else if (isLegacyLintEngine() && state.problemsVisible) {
       const schedule = legacyLintImmediateSchedule("lint-enabled");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (isVectorLintEngine() && state.workspace?.path && !state.lsp.started) {
-      lspStartWorkspace(state.workspace.path).catch(showError);
+    } else if (isVectorLintEngine() && !state.lsp.started) {
+      ensureDocumentSession({}).catch(showError);
     }
     saveLintSettings();
     renderChrome();
@@ -163,6 +251,62 @@ export function createSettingsController({
     renderChrome();
   }
 
+  async function setLegacyLintReferenceVersion(value) {
+    const supported = new Set(["", "3.2", "3.1", "2.4", "1.13c"]);
+    const referenceVersion = supported.has(String(value ?? "")) ? String(value ?? "") : "";
+    const request = ++legacyReferenceSelectionRequest;
+    const save = legacyReferenceSaveQueue
+      .catch(() => {})
+      .then(async () => {
+        if (!configLoaded) {
+          configSnapshot = { ...((await getConfig()) ?? {}) };
+          configLoaded = true;
+        }
+        const updated = {
+          ...configSnapshot,
+          referenceVersion: referenceVersion || undefined
+        };
+        await saveConfig(updated);
+        configSnapshot = updated;
+        return updated;
+      });
+    legacyReferenceSaveQueue = save;
+    try {
+      const updated = await save;
+      if (request !== legacyReferenceSelectionRequest) return false;
+      state.config = updated;
+    } catch (error) {
+      if (request === legacyReferenceSelectionRequest) {
+        showError(`Failed to save bundled reference version: ${error}`);
+        renderChrome();
+      }
+      return false;
+    }
+    invalidateLegacyReferenceData("reference-version-changed");
+    renderChrome();
+    return true;
+  }
+
+  function invalidateLegacyReferenceData(reason) {
+    state.lint.legacy.referenceDataset = {
+      status: "not-started",
+      selectedVersion: "",
+      gameVersion: "",
+      schemaVariant: "",
+      digest: "",
+      documents: [],
+      error: "",
+      loadMs: 0
+    };
+    state.lint.legacy.workspaceIndexCache = { signature: "", profile: "", index: null };
+    setLintDiagnostics([]);
+    updateGridDiagnostics();
+    if (legacyLintDisplayActive()) {
+      const schedule = legacyLintImmediateSchedule(reason);
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
+  }
+
   function setLegacyLintRuleEnabled(ruleId, enabled) {
     const rule = currentLegacyProfileRules()[ruleId];
     if (!rule) return;
@@ -177,6 +321,7 @@ export function createSettingsController({
     localStorage.setItem("txteditor.gridFont", state.gridFont);
     document.documentElement.style.setProperty("--grid-font", state.gridFont);
     grid.setFontFamily(state.gridFont);
+    refreshJsonEditorAppearance();
     renderChrome();
   }
 
@@ -185,6 +330,8 @@ export function createSettingsController({
     backdrop.className = "modal-backdrop";
     const visualControls = appSettingsVisualControls({
       colorizeColumns: state.colorizeColumns,
+      mouseResizeLocked: state.mouseResizeLocked,
+      excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       vectorLspHover: state.vectorLspHover,
       legacyLintEngine: isLegacyLintEngine(),
       theme: state.theme,
@@ -211,6 +358,14 @@ export function createSettingsController({
           <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.colorize.id}"${visualControls.colorize.checked ? " checked" : ""} />
             ${visualControls.colorize.label}
+          </label>
+          <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.mouseResize.id}"${visualControls.mouseResize.checked ? " checked" : ""} />
+            ${visualControls.mouseResize.label}
+          </label>
+          <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
+            ${visualControls.workspaceSubfolders.label}
           </label>
           <div class="settings-label">Lint Engine</div>
           <div class="settings-segmented" role="group" aria-label="Lint Engine">
@@ -242,6 +397,8 @@ export function createSettingsController({
     document.body.append(backdrop);
 
     const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
+    const mouseResizeInput = backdrop.querySelector("#settingsMouseResizeLocked");
+    const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
     const fontInput = backdrop.querySelector("#settingsGridFont");
@@ -250,6 +407,8 @@ export function createSettingsController({
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
     const refresh = () => {
       colorizeInput.checked = state.colorizeColumns;
+      mouseResizeInput.checked = state.mouseResizeLocked;
+      workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       hoverInput.checked = state.vectorLspHover;
       hoverInput.disabled = isLegacyLintEngine();
       hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
@@ -259,6 +418,17 @@ export function createSettingsController({
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
     };
     colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
+    mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
+    workspaceSubfoldersInput.addEventListener("change", () => {
+      setExcludeWorkspaceSubfolders(workspaceSubfoldersInput.checked)
+        .then((applied) => {
+          if (applied) refresh();
+        })
+        .catch((error) => {
+          refresh();
+          showError(error);
+        });
+    });
     hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
     for (const button of lintEngineButtons) {
@@ -303,6 +473,17 @@ export function createSettingsController({
     const versionOptions = VERSIONS.map((v) =>
       `<option value="${escapeHtml(v)}"${schemaVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
     ).join("");
+    const referenceVersion = config.referenceVersion ?? "";
+    const referenceVersionOptions = [
+      ["", "Use schema/profile version"],
+      ["3.2", "3.2"],
+      ["3.1", "3.1"],
+      ["2.4", "2.4"],
+      ["1.13c", "1.13c"]
+    ].map(([value, label]) =>
+      `<option value="${escapeHtml(value)}"${referenceVersion === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
+    const jsonRules = normalizeJsonDiagnosticRules(config.jsonDiagnosticRules);
 
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -340,13 +521,54 @@ export function createSettingsController({
             ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">Browse&hellip;</button>` : ""}
           </div>
         </div>
+        <label class="settings-label">Bundled Reference Data</label>
+        <select class="modal-input settings-version-select" id="settingsReferenceVersion">${referenceVersionOptions}</select>
+        <div class="settings-hint">One version is used for the whole lint session. Advanced mode requires an explicit version; leave this disabled only when no baseline fallback is wanted.</div>
+        <div class="settings-debug-row">
+          <label class="settings-checkbox-label">
+            <input type="checkbox" id="settingsJsonDiagnostics" aria-controls="settingsJsonDiagnosticRules"${config.jsonDiagnostics ? " checked" : ""} />
+            Enable localization JSON diagnostics
+          </label>
+          <div class="settings-hint">Checks only JSON files present in this mod. Layout JSON is used only as Key Usage evidence.</div>
+          <div class="settings-json-rules" id="settingsJsonDiagnosticRules">
+            <div class="settings-json-rule">
+              <label for="settingsJsonDuplicateIdsAction">
+                <span>Duplicate IDs / keys</span>
+                <span class="settings-json-rule-code">Json/DuplicateIds</span>
+              </label>
+              <select class="modal-input" id="settingsJsonDuplicateIdsAction">${jsonRuleActionOptions(jsonRules.duplicateIds.action)}</select>
+            </div>
+            <div class="settings-json-rule">
+              <label for="settingsJsonStringFormatAction">
+                <span>Required string fields</span>
+                <span class="settings-json-rule-code">Json/StringFormat</span>
+              </label>
+              <select class="modal-input" id="settingsJsonStringFormatAction">${jsonRuleActionOptions(jsonRules.stringFormat.action)}</select>
+            </div>
+            <div class="settings-json-rule">
+              <label for="settingsJsonKeyUsageAction">
+                <span>Unused localization keys</span>
+                <span class="settings-json-rule-code">Json/KeyUsage</span>
+              </label>
+              <select class="modal-input" id="settingsJsonKeyUsageAction">${jsonRuleActionOptions(jsonRules.keyUsage.action)}</select>
+            </div>
+            <div class="settings-json-key-usage-options${config.jsonDiagnostics && jsonRules.keyUsage.action !== "ignore" ? "" : " hidden"}" id="settingsJsonKeyUsageOptions">
+              <div class="settings-json-id-start">
+                <label for="settingsJsonKeyUsageIdStart">Only check IDs greater than</label>
+                <input class="modal-input" type="number" id="settingsJsonKeyUsageIdStart"
+                  step="any" value="${jsonRules.keyUsage.idStart}" />
+              </div>
+              <div class="settings-hint">With ${jsonRules.keyUsage.idStart}, ID ${jsonRules.keyUsage.idStart} is excluded and larger IDs are checked.</div>
+            </div>
+          </div>
+        </div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsDebugLogging"${config.debugLogging ? " checked" : ""} />
             Enable debug logging (shows in Log panel)
           </label>
         </div>
-        <div class="modal-actions">
+        <div class="modal-actions settings-lint-actions">
           <button data-settings-choice="save">Save</button>
           <button data-settings-choice="cancel">Cancel</button>
           ${state.lsp.started ? `<button data-settings-choice="restart-lsp" style="margin-left:auto">Restart LSP</button>` : ""}
@@ -361,6 +583,34 @@ export function createSettingsController({
     const schemaInput = backdrop.querySelector("#settingsSchemaPath");
     const pluginInput = backdrop.querySelector("#settingsPluginPath");
     const versionSelect = backdrop.querySelector("#settingsSchemaVersion");
+    const referenceVersionSelect = backdrop.querySelector("#settingsReferenceVersion");
+    const jsonDiagnosticsEl = backdrop.querySelector("#settingsJsonDiagnostics");
+    const jsonDuplicateIdsActionEl = backdrop.querySelector("#settingsJsonDuplicateIdsAction");
+    const jsonStringFormatActionEl = backdrop.querySelector("#settingsJsonStringFormatAction");
+    const jsonKeyUsageActionEl = backdrop.querySelector("#settingsJsonKeyUsageAction");
+    const jsonKeyUsageOptionsEl = backdrop.querySelector("#settingsJsonKeyUsageOptions");
+    const jsonKeyUsageIdStartEl = backdrop.querySelector("#settingsJsonKeyUsageIdStart");
+    const jsonActionControls = [
+      jsonDuplicateIdsActionEl,
+      jsonStringFormatActionEl,
+      jsonKeyUsageActionEl
+    ].filter(Boolean);
+
+    if (jsonDuplicateIdsActionEl) jsonDuplicateIdsActionEl.value = jsonRules.duplicateIds.action;
+    if (jsonStringFormatActionEl) jsonStringFormatActionEl.value = jsonRules.stringFormat.action;
+    if (jsonKeyUsageActionEl) jsonKeyUsageActionEl.value = jsonRules.keyUsage.action;
+    const syncJsonRuleControls = () => {
+      const masterDisabled = !(jsonDiagnosticsEl?.checked ?? false);
+      for (const control of jsonActionControls) control.disabled = masterDisabled;
+      const keyUsageDisabled = masterDisabled || jsonKeyUsageActionEl?.value === "ignore";
+      jsonKeyUsageOptionsEl?.classList.toggle("hidden", keyUsageDisabled);
+      if (jsonKeyUsageIdStartEl) {
+        jsonKeyUsageIdStartEl.disabled = keyUsageDisabled;
+      }
+    };
+    jsonDiagnosticsEl?.addEventListener("change", syncJsonRuleControls);
+    jsonKeyUsageActionEl?.addEventListener("change", syncJsonRuleControls);
+    syncJsonRuleControls();
 
     tabs.forEach((tab) => tab.addEventListener("click", () => {
       const isBasic = tab.dataset.settingsTab === "basic";
@@ -415,14 +665,36 @@ export function createSettingsController({
           if (saveButton) saveButton.disabled = true;
           const selectedMode = backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? "basic";
           const debugLoggingEl = backdrop.querySelector("#settingsDebugLogging");
+          const jsonDiagnosticsEnabled = jsonDiagnosticsEl?.checked ?? false;
+          const jsonKeyUsageAction = normalizeJsonRuleAction(jsonKeyUsageActionEl?.value);
+          const parsedJsonKeyUsageIdStart = parseJsonKeyUsageIdStart(jsonKeyUsageIdStartEl?.value);
+          const jsonKeyUsageNeedsThreshold = jsonDiagnosticsEnabled && jsonKeyUsageAction !== "ignore";
+          if (jsonKeyUsageNeedsThreshold && parsedJsonKeyUsageIdStart === null) {
+            showError("Key Usage ID threshold must be a finite number.");
+            jsonKeyUsageIdStartEl?.focus();
+            saving = false;
+            if (saveButton) saveButton.disabled = false;
+            return;
+          }
+          const jsonKeyUsageIdStart = parsedJsonKeyUsageIdStart ?? jsonRules.keyUsage.idStart;
           const updated = {
             ...config,
             lintMode: selectedMode,
             schemaVersion: versionSelect?.value || "3.2",
+            referenceVersion: referenceVersionSelect?.value || undefined,
             pluginPath: pluginInput?.value.trim() || undefined,
             schemaPath: schemaInput?.value.trim() || undefined,
             vectorLspPath: lspInput?.value.trim() || undefined,
-            debugLogging: debugLoggingEl?.checked ?? false
+            debugLogging: debugLoggingEl?.checked ?? false,
+            jsonDiagnostics: jsonDiagnosticsEnabled,
+            jsonDiagnosticRules: {
+              duplicateIds: { action: normalizeJsonRuleAction(jsonDuplicateIdsActionEl?.value) },
+              stringFormat: { action: normalizeJsonRuleAction(jsonStringFormatActionEl?.value) },
+              keyUsage: {
+                action: jsonKeyUsageAction,
+                idStart: jsonKeyUsageIdStart
+              }
+            }
           };
           try {
             await saveConfig(updated);
@@ -433,17 +705,21 @@ export function createSettingsController({
             return;
           }
           state.config = updated;
+          configSnapshot = { ...updated };
+          configLoaded = true;
           finish();
-          if (state.workspace) {
+          if (isLegacyLintEngine()) {
+            invalidateLegacyReferenceData("reference-version-changed");
+          } else {
             setLintDiagnostics([]);
             updateGridDiagnostics();
-            lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+            ensureDocumentSession({ forceRestart: true }).catch(showError);
           }
         }
         if (choice === "cancel") finish();
         if (choice === "restart-lsp") {
           finish();
-          if (state.workspace) lspStartWorkspace(state.workspace.path, { forceRestart: true }).catch(showError);
+          ensureDocumentSession({ forceRestart: true }).catch(showError);
         }
       });
     });
@@ -464,6 +740,7 @@ export function createSettingsController({
       lintEnabled: state.lint.enabled,
       profiles: lintProfileOptions(),
       activeProfile: state.lint.legacy.settings.profile,
+      activeReferenceVersion: state.config?.referenceVersion ?? "",
       rulesOpen: state.lint.legacy.rulesOpen
     });
     const lintButton = `<button class="toggle-button${controls.lintButton.active ? " active" : ""}" data-command="${controls.lintButton.id}">${controls.lintButton.label}</button>`;
@@ -471,13 +748,21 @@ export function createSettingsController({
       const options = controls.profileSelect.options.map((option) =>
         `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
       ).join("");
+      const referenceOptions = controls.referenceSelect.options.map((option) =>
+        `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+      ).join("");
       els.lintControls.innerHTML = `
         ${lintButton}
         <select id="${controls.profileSelect.id}" class="${controls.profileSelect.className}" title="${controls.profileSelect.title}">${options}</select>
+        <select id="${controls.referenceSelect.id}" class="${controls.referenceSelect.className}" title="${controls.referenceSelect.title}">${referenceOptions}</select>
         <button data-command="${controls.rulesButton.id}" class="${controls.rulesButton.active ? "active" : ""}">${controls.rulesButton.label}</button>
       `;
       const select = els.lintControls.querySelector("#lintProfileSelect");
       select?.addEventListener("change", () => setLegacyLintProfile(select.value));
+      const referenceSelect = els.lintControls.querySelector("#lintReferenceVersionSelect");
+      referenceSelect?.addEventListener("change", () => {
+        setLegacyLintReferenceVersion(referenceSelect.value).catch((error) => showError(error));
+      });
       renderLegacyLintRulesPanel();
       return;
     }
@@ -529,7 +814,10 @@ export function createSettingsController({
     saveLegacyLintSettings,
     saveLintSettings,
     setColorizeColumns,
+    setMouseResizeLocked,
+    setExcludeWorkspaceSubfolders,
     setLegacyLintProfile,
+    setLegacyLintReferenceVersion,
     setLegacyLintRuleEnabled,
     setLintEngine,
     setTheme,

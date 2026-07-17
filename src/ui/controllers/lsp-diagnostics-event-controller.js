@@ -19,7 +19,8 @@ export function sameProblemsPresentation(left = [], right = []) {
   if (left.length !== right.length) return false;
   const fields = [
     "id", "fileKey", "fileName", "rowIndex", "columnIndex",
-    "severity", "message", "ruleId", "profile"
+    "severity", "message", "ruleId", "profile", "navigationDisabled",
+    "startCharacter", "endCharacter", "endRowIndex"
   ];
   return left.every((diagnostic, index) => fields.every(
     (field) => (diagnostic?.[field] ?? null) === (right[index]?.[field] ?? null)
@@ -42,7 +43,8 @@ export function createLspDiagnosticsEventController({
   renderDiagnosticsChrome = renderChrome,
   markDocHoverReady,
   scheduleHoverPrewarm,
-  sessionAcceptsEvents
+  sessionAcceptsEvents,
+  canNavigateDiagnostic = () => false
 }) {
   let requestToken = 0;
   let pendingEpoch = 0;
@@ -191,6 +193,8 @@ export function createLspDiagnosticsEventController({
       const { doc, fileKey } = current;
       const fileName = doc?.name ?? fileNameFromUri(item.uri);
       const filePath = doc?.path ?? pathFromUri(item.uri);
+      const displayDoc = doc?.kind === "json" ? null : doc;
+      const sourceExists = snapshot.sourceExists !== false;
       recordLspReadiness(item.uri, "firstDiagnosticsReceived", {
         fileName,
         activeFile: activeDoc()?.name ?? "",
@@ -203,7 +207,14 @@ export function createLspDiagnosticsEventController({
           fileName,
           filePath,
           index: diagnosticIndex,
-          doc
+          doc: displayDoc,
+          generation,
+          sequence: snapshot.sequence ?? item.eventSequence,
+          version: snapshotVersion,
+          sourceExists,
+          jsonNavigationEnabled: canNavigateDiagnostic({
+            uri: item.uri, filePath, generation, sourceExists
+          })
         })
       ));
       replacements.set(fileKey, { displayDiagnostics, doc, uri: item.uri });
@@ -239,7 +250,7 @@ export function createLspDiagnosticsEventController({
       }
       let prewarmActive = false;
       for (const { doc, uri } of replacements.values()) {
-        if (!doc) continue;
+        if (!doc || doc.kind === "json") continue;
         lspDocumentState(doc).diagnosticsReady = true;
         markDocHoverReady(doc, uri, "diagnostics-ready");
         if (doc === activeDoc()) prewarmActive = true;

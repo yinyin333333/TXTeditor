@@ -105,7 +105,13 @@ export function vectorTooltipSections({ value = "", hoverText = "", diagnostics 
 export function diagnosticTooltipText(diagnostic = {}) {
   const message = String(diagnostic.message ?? "");
   const guidance = diagnosticUserGuidance(diagnostic);
-  return guidance ? `${message}\n\nWhat to do:\n${guidance}` : message;
+  const trimmedMessage = message.trim();
+  const trimmedGuidance = guidance.trim();
+  const alreadyIncluded = trimmedGuidance
+    && (trimmedMessage === trimmedGuidance || trimmedMessage.endsWith(trimmedGuidance));
+  return trimmedGuidance && !alreadyIncluded
+    ? `${message}\n\nWhat to do:\n${guidance}`
+    : message;
 }
 
 export function diagnosticUserGuidance(diagnostic = {}) {

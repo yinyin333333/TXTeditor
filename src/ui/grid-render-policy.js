@@ -30,6 +30,8 @@ export const GRID_COLORS = {
   rowHeaderFrozen: "#30343b",
   selection: "#264f78",
   selectionFrozen: "#2d5d86",
+  selectionGridLine: "#3e74a4",
+  selectionGridLineFrozen: "#4a8bc3",
   active: "#3794ff",
   columnTextA: "#9cdcfe",
   columnTextB: "#b5cea8",
@@ -83,6 +85,8 @@ export const GRID_CSS_VARS = {
   rowHeaderFrozen: "--grid-row-header-frozen-bg",
   selection: "--grid-selection",
   selectionFrozen: "--grid-selection-frozen",
+  selectionGridLine: "--grid-selection-line",
+  selectionGridLineFrozen: "--grid-selection-line-frozen",
   active: "--grid-active",
   columnTextA: "--columnTextA",
   columnTextB: "--columnTextB",
@@ -158,8 +162,12 @@ export function cellBackground(row, selected, frozen, firstColumnLabel, colors =
   return row % 2 ? colors.rowOdd : colors.rowEven;
 }
 
-export function cellGridLineColor(_state = {}, colors = GRID_COLORS) {
-  return colors.grid;
+export function cellGridLineColor({ selected = false, frozen = false } = {}, colors = GRID_COLORS) {
+  if (!selected) return colors.grid;
+  if (frozen) {
+    return colors.selectionGridLineFrozen ?? colors.selectionGridLine ?? colors.grid;
+  }
+  return colors.selectionGridLine ?? colors.grid;
 }
 
 export function indexHandleRenderState({ selected = false, active = false, frozen = false } = {}) {

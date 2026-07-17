@@ -63,6 +63,7 @@ export class CanvasGrid {
     this.dragging = false;
     this.resizing = null;
     this.resizeGuide = null;
+    this.mouseResizeLocked = false;
     this.hoverPreview = createFirstColumnHoverPreview();
     this.hoverCell = null;
     this.editing = false;
@@ -133,6 +134,15 @@ export class CanvasGrid {
 
   setColorizeColumns(enabled) {
     this.colorizeColumns = Boolean(enabled);
+    this.draw();
+  }
+
+  setMouseResizeLocked(locked) {
+    this.mouseResizeLocked = Boolean(locked);
+    if (!this.mouseResizeLocked) return;
+    this.resizing = null;
+    this.resizeGuide = null;
+    this.host.style.cursor = "default";
     this.draw();
   }
 
@@ -414,7 +424,7 @@ export class CanvasGrid {
   }
 
   resizeHit(hit) {
-    if (!hit || hit.kind === "empty") return null;
+    if (this.mouseResizeLocked || !hit || hit.kind === "empty") return null;
     const columnRight = this.screenXForColumn(hit.column) + this.scaledColumnWidth(hit.column);
     const rowBottom = this.screenYForRow(hit.row) + this.scaledRowHeight(hit.row);
     return classifyResizeHandle({ hit, columnRight, rowBottom, zoom: this.zoom });

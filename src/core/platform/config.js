@@ -12,6 +12,12 @@ export async function saveConfig(config) {
   await api.invoke("save_config", { config });
 }
 
+export async function loadLintReferenceDataset(gameVersion) {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("load_lint_reference_dataset", { gameVersion });
+}
+
 export async function pickFilePath() {
   if (!isTauriRuntime()) return null;
   const api = await tauriApi();

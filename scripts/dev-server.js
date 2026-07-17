@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
+import { buildJsonEditor } from "./build-json-editor.js";
 
 const root = process.cwd();
 const port = Number(process.env.PORT ?? 5173);
@@ -12,6 +13,8 @@ const types = new Map([
   [".txt", "text/plain"],
   [".json", "application/json"]
 ]);
+
+await buildJsonEditor({ outfile: join(root, "generated", "codemirror-json-editor.js") });
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${port}`);

@@ -186,3 +186,14 @@ export function mathCommandItems() {
     { id: "math-divide", label: "Divide" }
   ];
 }
+
+const JSON_DOCUMENT_COMMANDS = new Set([
+  "open-file", "open-folder", "save-file", "save-as", "search", "find-next",
+  "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",
+  "open-app-settings", "open-shortcut-settings", "open-settings",
+  "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems"
+]);
+
+export function canRunCommandForDocument(id, kind = "table") {
+  return kind !== "json" || JSON_DOCUMENT_COMMANDS.has(id);
+}

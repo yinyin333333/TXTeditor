@@ -42,6 +42,27 @@ export const DUPLICATE_KEYS = {
   "weapons.txt": ["code"]
 };
 
+// Duplicate identity follows the parser used by the target field. Only the
+// packed/numeric/name-map distinctions verified during binary revalidation
+// are encoded here; the remaining configured keys retain the existing raw
+// policy comparison.
+export const DUPLICATE_KEY_COMPARISONS = {
+  "armor.txt": { code: "fixed4cc" },
+  "itemstatcost.txt": { stat: "ascii-ci" },
+  "itemtypes.txt": { code: "fixed4cc" },
+  "levels.txt": { id: "integer" },
+  "lvlprest.txt": { def: "integer" },
+  "missiles.txt": { missile: "ascii-ci" },
+  "misc.txt": { code: "fixed4cc" },
+  "monumod.txt": { id: "integer" },
+  "objects.txt": { class: "integer" },
+  "properties.txt": { code: "ascii-ci" },
+  "skills.txt": { skill: "ascii-ci" },
+  "states.txt": { state: "ascii-ci" },
+  "treasureclassex.txt": { "treasure class": "ascii-ci" },
+  "weapons.txt": { code: "fixed4cc" }
+};
+
 export const PROFILE_ACCEPTED_COLUMNS = {
   RotW: {
     "charstats.txt": ["twohandedoffhandrestrictitemtype", "twohandeddamageasonehanded"],
@@ -88,6 +109,12 @@ export const BOOLEAN_FIELDS = {
   "weapons.txt": ["1or2handed", "2handed"]
 };
 
+// Binary-revalidated type-29 bitfields. Their loader meaning is parsed
+// numeric zero=false and every parsed nonzero value=true, not a 0/1 enum.
+export const TYPE29_BOOLEAN_FIELDS = {
+  "missiles.txt": ["explosion", "nomultishot"]
+};
+
 const TREASURE_PROBABILITY_BOUNDS = Object.fromEntries(
   Array.from({ length: 10 }, (_, index) => [`prob${index + 1}`, [0, Number.POSITIVE_INFINITY]])
 );
@@ -107,7 +134,7 @@ export const NUMERIC_BOUNDS = {
     op: [0, 13]
   },
   "levels.txt": {
-    intensity: [0, 128]
+    intensity: [0, 255]
   },
   "missiles.txt": {
     pcltdofunc: [0, 76]

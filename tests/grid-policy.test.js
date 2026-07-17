@@ -62,7 +62,7 @@ import {
   resizedTrackValue
 } from "../src/ui/grid-viewport-policy.js";
 import { shouldClearHoverForInteraction } from "../src/ui/hover-policy.js";
-import { drawGridColumnHeader, drawGridCornerHeader } from "../src/ui/grid/grid-renderer.js";
+import { drawGridCellLayer, drawGridColumnHeader, drawGridCornerHeader } from "../src/ui/grid/grid-renderer.js";
 import {
   createDefaultLintSettings,
   lintRuleGroupsForProfile,
@@ -696,10 +696,30 @@ test("column index labels use normal text weight", () => {
   assert.deepEqual(texts, ["B"]);
 });
 
+test("selected cells use dedicated grid separator colors", () => {
+  const colors = {
+    grid: "ordinary-grid-line",
+    selectionGridLine: "selected-grid-line",
+    selectionGridLineFrozen: "selected-frozen-grid-line"
+  };
+
+  assert.equal(cellGridLineColor({}, colors), "ordinary-grid-line");
+  assert.equal(cellGridLineColor({ frozen: true }, colors), "ordinary-grid-line");
+  assert.equal(cellGridLineColor({ selected: true }, colors), "selected-grid-line");
+  assert.equal(
+    cellGridLineColor({ selected: true, frozen: true }, colors),
+    "selected-frozen-grid-line"
+  );
+});
+
 test("theme gridline tokens are clearer and mode-appropriate", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const darkLine = cssVariable(css, ":root", "--gridLine");
   const lightLine = cssVariable(css, ":root[data-theme=\"light\"]", "--gridLine");
+  const darkSelectionLine = cssVariable(css, ":root", "--grid-selection-line");
+  const darkFrozenSelectionLine = cssVariable(css, ":root", "--grid-selection-line-frozen");
+  const lightSelectionLine = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-line");
+  const lightFrozenSelectionLine = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-line-frozen");
   const lightRgb = hexRgb(lightLine);
   const darkRgb = hexRgb(darkLine);
 
@@ -708,6 +728,10 @@ test("theme gridline tokens are clearer and mode-appropriate", () => {
   assert.ok(lightRgb.every((channel) => channel >= 185 && channel <= 204));
   assert.notEqual(darkLine.toLowerCase(), lightLine.toLowerCase());
   assert.ok(darkRgb.every((channel) => channel >= 60 && channel <= 95));
+  assert.equal(darkSelectionLine, "#3e74a4");
+  assert.equal(darkFrozenSelectionLine, "#4a8bc3");
+  assert.equal(lightSelectionLine, "#6f91b0");
+  assert.equal(lightFrozenSelectionLine, "#567ea1");
   assert.equal(cssVariable(css, ":root", "--grid-diagnostic-range-error"), "#ff5f6d");
   assert.equal(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-diagnostic-range-error"), "#c92f3f");
 });
@@ -1084,7 +1108,7 @@ test("column text color cycle is predictable and bounded", () => {
   assert.equal(cellTextColor(4, 7, "value", false, false, false, colors), "text");
 });
 
-test("selection rendering policy keeps divider stroke brightness unchanged", () => {
+test("selection separator redraw wins after later adjacent cells", () => {
   const colors = {
     grid: "grid"
   };
@@ -1140,11 +1164,97 @@ test("selection rendering policy keeps divider stroke brightness unchanged", () 
     fillText() {},
     drawDiagnosticMarker() {}
   };
-  CanvasGrid.prototype.drawCell.call(grid, 2, 1, 100, 200, 80, 30);
+  drawGridCellLayer(grid, [
+    { row: 2, top: 200, height: 30 },
+    { row: 3, top: 230, height: 30 }
+  ], [
+    { column: 1, left: 100, width: 80 }
+  ]);
   assert.equal(fillRects[0].fillStyle, gridColor("selection"));
-  assert.equal(strokeRects[0].strokeStyle, gridColor("grid"));
-  assert.equal(strokeRects.length, 1);
+  assert.equal(strokeRects[0].strokeStyle, gridColor("selectionGridLine"));
+  assert.equal(strokeRects[1].strokeStyle, gridColor("grid"));
+  assert.equal(strokeRects[2].strokeStyle, gridColor("selectionGridLine"));
+  assert.equal(strokeRects.length, 3);
   assert.equal(paths.length, 0);
+});
+
+test("selection separator redraw keeps the active border above diagnostic markers", () => {
+  const operations = [];
+  let strokeStyle = "";
+  let fillStyle = "";
+  let lineWidth = 1;
+  const ctx = {
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    set lineWidth(value) {
+      lineWidth = value;
+    },
+    get lineWidth() {
+      return lineWidth;
+    },
+    fillRect() {},
+    strokeRect: (x, y, width, height) => operations.push({
+      kind: "strokeRect",
+      strokeStyle,
+      lineWidth,
+      x,
+      y,
+      width,
+      height
+    }),
+    measureText: (value) => ({ width: String(value).length * 7 })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 2, column: 1 },
+      contains: (row, column) => row === 2 && (column === 1 || column === 2)
+    },
+    doc: {
+      columnCount: 3,
+      getCell: () => "selected"
+    },
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText() {},
+    drawDiagnosticMarker: (row, column) => operations.push({ kind: "cornerMarker", row, column })
+  };
+
+  drawGridCellLayer(grid, [
+    { row: 2, top: 200, height: 30 }
+  ], [
+    { column: 1, left: 100, width: 80 },
+    { column: 2, left: 180, width: 80 }
+  ]);
+
+  const activeBorders = operations.filter((operation) => (
+    operation.kind === "strokeRect"
+    && operation.strokeStyle === gridColor("active")
+    && operation.lineWidth === 2
+  ));
+  assert.equal(activeBorders.length, 2);
+  assert.deepEqual(operations.at(-2), { kind: "cornerMarker", row: 2, column: 2 });
+  assert.deepEqual(operations.at(-1), {
+    kind: "strokeRect",
+    strokeStyle: gridColor("active"),
+    lineWidth: 2,
+    x: 101,
+    y: 201,
+    width: 78,
+    height: 28
+  });
 });
 
 test("active cell presses row and column indexes without highlighting field-name header cells", () => {
@@ -1747,4 +1857,74 @@ test("editor presentation policy preserves overlay geometry and cell state", () 
     firstColumnLabel: false,
     fontWeight: "400"
   });
+});
+
+test("mouse resize lock disables resize handles and clears an active mouse resize", () => {
+  const geometry = {
+    mouseResizeLocked: false,
+    zoom: 1,
+    screenXForColumn: () => 100,
+    scaledColumnWidth: () => 80,
+    screenYForRow: () => 50,
+    scaledRowHeight: () => 26
+  };
+  const columnBoundary = { kind: "column-header", row: 0, column: 1, x: 180, y: 10 };
+  const rowBoundary = { kind: "row-header", row: 2, column: 0, x: 10, y: 76 };
+
+  assert.deepEqual(CanvasGrid.prototype.resizeHit.call(geometry, columnBoundary), { kind: "column", index: 1 });
+  assert.deepEqual(CanvasGrid.prototype.resizeHit.call(geometry, rowBoundary), { kind: "row", index: 2 });
+
+  geometry.mouseResizeLocked = true;
+  assert.equal(CanvasGrid.prototype.resizeHit.call(geometry, columnBoundary), null);
+  assert.equal(CanvasGrid.prototype.resizeHit.call(geometry, rowBoundary), null);
+
+  let draws = 0;
+  const activeResize = {
+    mouseResizeLocked: false,
+    resizing: { kind: "column", index: 1 },
+    resizeGuide: { kind: "column", x: 180 },
+    host: { style: { cursor: "col-resize" } },
+    draw: () => { draws += 1; }
+  };
+  CanvasGrid.prototype.setMouseResizeLocked.call(activeResize, true);
+  assert.equal(activeResize.mouseResizeLocked, true);
+  assert.equal(activeResize.resizing, null);
+  assert.equal(activeResize.resizeGuide, null);
+  assert.equal(activeResize.host.style.cursor, "default");
+  assert.equal(draws, 1);
+});
+
+test("locked resize boundaries fall through to normal selection and skip double-click auto-fit", () => {
+  const cellBoundary = { kind: "cell", row: 2, column: 1, x: 180, y: 76 };
+  const selections = [];
+  const grid = {
+    host: { focus: () => {}, style: {} },
+    hideFirstColumnHoverPreview: () => {},
+    isScrollbarEvent: () => false,
+    hitTest: () => cellBoundary,
+    resizeHit: () => null,
+    applyHitSelection: (...args) => selections.push(args),
+    clearHoverState: () => {},
+    draw: () => {},
+    notifySelectionChanged: () => {},
+    dragging: false,
+    resizing: null
+  };
+
+  CanvasGrid.prototype.onMouseDown.call(grid, {
+    button: 0,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false
+  });
+  assert.equal(selections.length, 1);
+  assert.deepEqual(selections[0][0], cellBoundary);
+  assert.equal(grid.resizing, null);
+
+  let autoFits = 0;
+  grid.hitTest = () => ({ kind: "column-header", row: 0, column: 1, x: 180, y: 10 });
+  grid.onAutoFitColumn = () => { autoFits += 1; };
+  grid.startEdit = () => { throw new Error("column header must not start cell editing"); };
+  CanvasGrid.prototype.onDblClick.call(grid, {});
+  assert.equal(autoFits, 0);
 });

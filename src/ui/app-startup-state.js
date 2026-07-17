@@ -19,11 +19,14 @@ import { initialSearchState } from "./search-policy.js";
 import { normaliseGridFont } from "./app-settings-policy.js";
 import { readJsonStorage } from "./app-runtime-utils.js";
 import { loadShortcutBindings } from "./shortcut-policy.js";
+import { freezeStateFromStorage } from "./freeze-state-policy.js";
 
 export function createInitialAppState({ storage = localStorage } = {}) {
   const savedTheme = storage.getItem("txteditor.theme") === "light" ? "light" : "dark";
   const savedGridFont = normaliseGridFont(storage.getItem("txteditor.gridFont"));
   const savedColorize = storage.getItem("txteditor.colorize") === "on";
+  const savedMouseResizeLocked = storage.getItem("txteditor.mouseResizeLocked") === "on";
+  const savedExcludeWorkspaceSubfolders = storage.getItem("txteditor.excludeWorkspaceSubfolders") === "on";
   const savedVectorLspHover = vectorLspHoverFromStorage(storage.getItem("txteditor.vectorLspHover"));
   const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
   const savedLintEngine = normalizeLintEngine(storage.getItem("txteditor.lint.engine"));
@@ -31,6 +34,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedDockLayout = normalizeDockLayout(readJsonStorage(DOCK_LAYOUT_KEY, DEFAULT_DOCK_LAYOUT));
   const savedPanelState = panelStateFromStorage(storage, savedDockLayout);
   const savedShortcuts = loadShortcutBindings(storage);
+  const savedFreeze = freezeStateFromStorage(storage);
   const state = {
     docs: [],
     active: 0,
@@ -44,14 +48,16 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     problemsWidth: savedPanelState.problemsWidth,
     problemsHeight: savedPanelState.problemsHeight,
     dockLayout: savedPanelState.dockLayout,
-    freezeRow: false,
-    freezeColumn: false,
+    freezeRow: savedFreeze.row,
+    freezeColumn: savedFreeze.column,
     contextHit: null,
     contextMenuActiveGroup: "",
     contextMenuOpen: false,
     theme: savedTheme,
     gridFont: savedGridFont,
     colorizeColumns: savedColorize,
+    mouseResizeLocked: savedMouseResizeLocked,
+    excludeWorkspaceSubfolders: savedExcludeWorkspaceSubfolders,
     vectorLspHover: savedVectorLspHover,
     shortcuts: savedShortcuts,
     lint: {
@@ -80,6 +86,25 @@ export function createInitialAppState({ storage = localStorage } = {}) {
           signature: "",
           profile: "",
           index: null
+        },
+        workspaceRefreshRequired: false,
+        siblingDocs: [],
+        siblingLoad: {
+          status: "not-started",
+          files: [],
+          roots: [],
+          error: "",
+          signature: ""
+        },
+        referenceDataset: {
+          status: "not-started",
+          selectedVersion: "",
+          gameVersion: "",
+          schemaVariant: "",
+          digest: "",
+          documents: [],
+          error: "",
+          loadMs: 0
         }
       }
     },
@@ -87,6 +112,9 @@ export function createInitialAppState({ storage = localStorage } = {}) {
       started: false,
       workspacePath: "",
       workspaceKey: "",
+      contextMode: "workspace",
+      referenceRootPath: "",
+      includeSubfolders: true,
       generation: 0,
       readiness: "stopped",
       openFileCount: 0

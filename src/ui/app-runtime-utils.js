@@ -1,3 +1,5 @@
+import { isTauriRuntime, tauriApi } from "../core/platform/tauri-api.js";
+
 export function readJsonStorage(key, fallback, storage = localStorage) {
   try {
     const value = storage.getItem(key);
@@ -36,11 +38,26 @@ export function createToastFeedback(els) {
 }
 
 export async function writeClipboardText(text) {
-  if (!navigator.clipboard?.writeText) throw new Error("Clipboard write is not available in this environment.");
-  await navigator.clipboard.writeText(text);
+  if (isTauriRuntime()) {
+    const { invoke } = await tauriApi();
+    await invoke("plugin:clipboard-manager|write_text", { text: String(text) });
+    return;
+  }
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!clipboard?.writeText) {
+    throw new Error("Clipboard write is unavailable. Allow clipboard access for this site or use the desktop build.");
+  }
+  await clipboard.writeText(String(text));
 }
 
 export async function readClipboardText() {
-  if (!navigator.clipboard?.readText) throw new Error("Clipboard read is not available in this environment.");
-  return navigator.clipboard.readText();
+  if (isTauriRuntime()) {
+    const { invoke } = await tauriApi();
+    return invoke("plugin:clipboard-manager|read_text");
+  }
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!clipboard?.readText) {
+    throw new Error("Clipboard read is unavailable. Focus TXTeditor and allow clipboard access for this site.");
+  }
+  return clipboard.readText();
 }

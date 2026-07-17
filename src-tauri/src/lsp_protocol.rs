@@ -162,6 +162,7 @@ pub(crate) struct LspContentChange {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LspDiagnostic {
     pub(crate) row: u32,
+    pub(crate) end_row: u32,
     pub(crate) col: u32,
     pub(crate) start_character: u32,
     pub(crate) end_character: u32,
@@ -238,6 +239,7 @@ pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> V
         .filter_map(|d| {
             let line = json_u32(&d["range"]["start"]["line"])?;
             let start_character = json_u32(&d["range"]["start"]["character"])?;
+            let end_row = json_u32(&d["range"]["end"]["line"]).unwrap_or(line);
             let end_character =
                 json_u32(&d["range"]["end"]["character"]).unwrap_or(start_character);
             let boundaries = boundaries_by_line.entry(line).or_insert_with(|| {
@@ -263,6 +265,7 @@ pub(crate) fn diagnostics_from_lsp_publish(raw: &[Value], lines: &[String]) -> V
             let data = d.get("data").filter(|value| !value.is_null()).cloned();
             Some(LspDiagnostic {
                 row: line,
+                end_row,
                 col,
                 start_character,
                 end_character,
@@ -523,6 +526,7 @@ mod tests {
             vec![
                 LspDiagnostic {
                     row: 0,
+                    end_row: 0,
                     col: 2,
                     start_character: 10,
                     end_character: 10,
@@ -535,6 +539,7 @@ mod tests {
                 },
                 LspDiagnostic {
                     row: 1,
+                    end_row: 1,
                     col: 0,
                     start_character: 3,
                     end_character: 3,
@@ -636,6 +641,7 @@ mod tests {
             diagnostics,
             vec![LspDiagnostic {
                 row: 0,
+                end_row: 0,
                 col: 2,
                 start_character: start,
                 end_character: end,
@@ -771,5 +777,19 @@ mod tests {
             "Damage $!min!$"
         );
         assert_eq!(strip_markdown_for_tooltip("plain tooltip"), "plain tooltip");
+    }
+    #[test]
+    fn diagnostics_preserve_the_lsp_end_line_for_json_ranges() {
+        let raw = vec![serde_json::json!({
+            "range": {
+                "start": { "line": 2, "character": 3 },
+                "end": { "line": 4, "character": 5 }
+            },
+            "message": "multi-line JSON range"
+        })];
+        let lines = vec![String::new(); 5];
+        let diagnostics = diagnostics_from_lsp_publish(&raw, &lines);
+        assert_eq!(diagnostics[0].row, 2);
+        assert_eq!(diagnostics[0].end_row, 4);
     }
 }

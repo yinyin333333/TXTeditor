@@ -32,7 +32,10 @@ export function createAppEventController({
   copySelection,
   cutSelection,
   pasteSelection,
-  selectAll
+  selectAll,
+  jsonEditorOwnsTarget = () => false,
+  handleExternalChangeDialogClick = () => {},
+  focusActiveEditor = () => els.host.focus()
 }) {
   function wireEvents() {
     document.addEventListener("click", (event) => {
@@ -44,6 +47,9 @@ export function createAppEventController({
     });
     els.closeDialog.addEventListener("click", (event) => {
       documentController.handleCloseDialogClick(event);
+    });
+    els.externalChangeDialog?.addEventListener("click", (event) => {
+      handleExternalChangeDialogClick(event);
     });
     els.tabs.addEventListener("auxclick", (event) => {
       if (event.button !== 1) return;
@@ -96,7 +102,7 @@ export function createAppEventController({
     if (event.key === "Escape" && !els.palette.classList.contains("hidden")) {
       event.preventDefault();
       els.palette.classList.add("hidden");
-      els.host.focus();
+      focusActiveEditor();
       return;
     }
     if (!editingCell && !isGridScrollShortcutBlocked(event.target)) {
@@ -105,7 +111,15 @@ export function createAppEventController({
     }
     const shortcutAction = globalShortcutAction(event, { editingCell, shortcuts: state.shortcuts });
     if (editingCell && !shortcutAction) return;
-    if (!editingCell && isTextInputTarget(event.target)) return;
+    if (!editingCell && jsonEditorOwnsTarget(event.target)) {
+      const appOwned = new Set([
+        "open-file", "save-file", "save-as", "toggle-sidebar", "toggle-problems",
+        "show-palette", "close-tab"
+      ]);
+      if (!shortcutAction || !appOwned.has(shortcutAction)) return;
+    } else if (!editingCell && isTextInputTarget(event.target)) {
+      return;
+    }
     if (shortcutAction) return runGlobalShortcutAction(event, shortcutAction);
   }
 

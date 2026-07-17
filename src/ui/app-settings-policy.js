@@ -56,6 +56,8 @@ export function fontLabelFromFamily(fontFamily) {
 
 export function appSettingsVisualControls({
   colorizeColumns = false,
+  mouseResizeLocked = false,
+  excludeWorkspaceSubfolders = false,
   vectorLspHover = true,
   legacyLintEngine = false,
   theme = "dark",
@@ -63,6 +65,16 @@ export function appSettingsVisualControls({
 } = {}) {
   return {
     colorize: { id: "settingsColorizeColumns", label: "Colorize columns", checked: Boolean(colorizeColumns) },
+    mouseResize: {
+      id: "settingsMouseResizeLocked",
+      label: "Lock mouse row and column resizing",
+      checked: Boolean(mouseResizeLocked)
+    },
+    workspaceSubfolders: {
+      id: "settingsExcludeWorkspaceSubfolders",
+      label: "Exclude subfolders when opening a folder",
+      checked: Boolean(excludeWorkspaceSubfolders)
+    },
     vectorHover: {
       id: "settingsVectorLspHover",
       label: "Vector-LSP Hover",

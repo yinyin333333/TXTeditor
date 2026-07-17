@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TableDocument } from "../src/core/table-model.js";
+import { JsonDocument } from "../src/core/json-document.js";
 import {
   lspDocumentState,
   resetLspDocumentState
@@ -277,6 +278,217 @@ test("V-TXT-05 incremental row updates do not serialize the full document", asyn
       text: "NEW"
     }]);
     assert.equal(lspDocumentState(doc).syncedRevision, tableFileState(doc).revision);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("localization JSON didOpen waits for workspace readiness and is sent once", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    workspace: {
+      path: "E:\\mod",
+      files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+    },
+    lint: {
+      enabled: true,
+      engine: "vector-lsp",
+      version: 1,
+      status: "",
+      diagnostics: []
+    },
+    lsp: {
+      started: false,
+      generation: 0,
+      readiness: "stopped",
+      openFileCount: 0
+    },
+    lspLogs: [],
+    bottomTab: "problems",
+    contextMenuOpen: false
+  };
+  const calls = [];
+  const listeners = new Map();
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_start") return { installed: true };
+          if (command === "lsp_open_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: {
+        listen: async (event, callback) => {
+          listeners.set(event, callback);
+          return () => listeners.delete(event);
+        }
+      }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    controller.startListeners();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await controller.startWorkspace("E:\\mod");
+    assert.equal(state.lsp.readiness, "indexing");
+    assert.equal(calls.filter(([command]) => command === "lsp_open_file").length, 0);
+
+    listeners.get("lsp-ready")?.({ payload: { generation: 1 } });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const opens = calls.filter(([command]) => command === "lsp_open_file");
+    assert.equal(opens.length, 1);
+    assert.equal(opens[0][1].uri, docToUri(doc));
+    assert.equal(opens[0][1].text, doc.toText());
+    assert.equal(state.lsp.readiness, "ready");
+    assert.equal(state.lsp.openFileCount, 1);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("localization JSON edits use versioned didOpen, incremental didChange, and didClose", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[{\"id\":41001}]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const state = createState(doc);
+  state.workspace = {
+    path: "E:\\mod",
+    files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+  };
+  state.lsp = {
+    started: true,
+    generation: 77,
+    openFileCount: 0,
+    workspacePath: "E:\\mod",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true
+  };
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (["lsp_open_file", "lsp_update_file_incremental", "lsp_close_file"].includes(command)) return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    await controller.openDoc(doc);
+    doc.applyEditorText("[{\"id\":41002}]");
+    await controller.updateDoc(doc, {
+      kind: "json",
+      changes: [{
+        range: {
+          start: { line: 0, character: 7 },
+          end: { line: 0, character: 12 }
+        },
+        text: "41002"
+      }]
+    });
+    await controller.closeDoc(doc);
+
+    assert.deepEqual(calls.map(([command]) => command), [
+      "lsp_open_file",
+      "lsp_update_file_incremental",
+      "lsp_close_file"
+    ]);
+    assert.equal(calls[0][1].version, 1);
+    assert.equal(calls[0][1].text, "[{\"id\":41001}]");
+    assert.equal(calls[1][1].version, 2);
+    assert.equal(calls[1][1].changes[0].text, "41002");
+    assert.equal(calls[2][1].generation, 77);
+    assert.equal(state.lsp.openFileCount, 0);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("same-URI JSON save retries a stale live buffer with a full LSP sync", async () => {
+  const originalWindow = globalThis.window;
+  const doc = JsonDocument.fromText("skills.json", "[{\"id\":41001}]", {
+    path: "E:\\mod\\data\\local\\lng\\strings\\skills.json",
+    dirty: false
+  });
+  const uri = docToUri(doc);
+  const state = createState(doc);
+  state.workspace = {
+    path: "E:\\mod",
+    files: [{ path: "E:\\mod\\data\\global\\excel\\skills.txt" }]
+  };
+  state.lsp = {
+    started: true,
+    generation: 78,
+    readiness: "ready",
+    openFileCount: 1,
+    workspacePath: "E:\\mod",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true
+  };
+  resetLspDocumentState(doc, { version: 1 });
+  Object.assign(lspDocumentState(doc), {
+    opened: true,
+    openedUri: uri,
+    openedVersion: 1,
+    syncedRevision: 0,
+    sessionGeneration: 78,
+    requiresFullSync: true
+  });
+  doc.applyEditorText("[{\"id\":41002}]");
+
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_update_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    await controller.rebindSavedDoc(doc, uri);
+
+    assert.deepEqual(calls.map(([command]) => command), ["lsp_update_file"]);
+    assert.equal(calls[0][1].uri, uri);
+    assert.equal(calls[0][1].version, 2);
+    assert.equal(calls[0][1].text, doc.toText());
+    const docState = lspDocumentState(doc);
+    assert.equal(docState.openedVersion, 2);
+    assert.equal(docState.syncedRevision, doc.revision);
+    assert.equal(docState.requiresFullSync, false);
   } finally {
     resetLspDocumentState(doc);
     if (originalWindow === undefined) delete globalThis.window;
@@ -838,7 +1050,7 @@ test("syncOpenDocs stops the old generation after a workspace restart without co
     const controller = createLspHarness(state, first);
     const oldSync = controller.syncOpenDocs();
     await oldOpenStarted.promise;
-    const restart = controller.startWorkspace("E:\\B");
+    const restart = controller.startWorkspace("E:\\A", { forceRestart: true });
     assert.equal(state.lsp.generation, 2);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
@@ -924,7 +1136,7 @@ test("stale didOpen completion cannot clear the current generation open promise 
     oldOpenPromise = controller.openDoc(doc);
     await oldOpenStarted.promise;
 
-    restartPromise = controller.startWorkspace("E:\\B");
+    restartPromise = controller.startWorkspace("E:\\A", { forceRestart: true });
     await currentOpenStarted.promise;
     const currentOpenPromise = lspDocumentState(doc).openPromise;
     assert.ok(currentOpenPromise);
@@ -1048,7 +1260,7 @@ test("stale didChange rejection cannot overwrite the reopened generation state o
       .catch((error) => controller.handleUpdateError(doc, error, "stale-generation-update"));
     await oldUpdateStarted.promise;
 
-    await controller.startWorkspace("E:\\B");
+    await controller.startWorkspace("E:\\A", { forceRestart: true });
     await controller.handleDiagnosticsChanged({
       uri,
       generation: 2,
@@ -1170,6 +1382,97 @@ test("syncOpenDocs coalesces unchanged documents into one diagnostics batch and 
     assert.equal(state.lsp.openFileCount, docs.length);
   } finally {
     for (const doc of docs) resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("reopening the same URI waits for the in-flight didClose", async () => {
+  const originalWindow = globalThis.window;
+  const closingDoc = TableDocument.fromText("items.txt", "id\nOLD", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const reopenedDoc = TableDocument.fromText("items.txt", "id\nDISK", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const uri = docToUri(closingDoc);
+  const state = createState(reopenedDoc);
+  state.docs = [reopenedDoc];
+  state.lsp = { started: true, generation: 12, openFileCount: 1 };
+  const closeGate = deferred();
+  const closeStarted = deferred();
+  const calls = [];
+  let closePromise;
+  let openPromise;
+
+  resetLspDocumentState(closingDoc, { version: 1 });
+  Object.assign(lspDocumentState(closingDoc), {
+    opened: true,
+    openedUri: uri,
+    openedVersion: 1,
+    syncedRevision: tableFileState(closingDoc).revision,
+    sessionGeneration: 12,
+    ready: true,
+    diagnosticsReady: true,
+    hoverReady: true
+  });
+  resetLspDocumentState(reopenedDoc, { version: 1 });
+
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "lsp_close_file") {
+            closeStarted.resolve();
+            return closeGate.promise;
+          }
+          if (command === "lsp_get_diagnostics_batch") {
+            return args.requests.map(() => null);
+          }
+          if (command === "lsp_open_file") return;
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, reopenedDoc);
+    closePromise = controller.closeDoc(closingDoc);
+    await closeStarted.promise;
+
+    openPromise = controller.openDoc(reopenedDoc);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls.some(([command]) => command === "lsp_open_file"), false);
+
+    closeGate.resolve();
+    await Promise.all([closePromise, openPromise]);
+
+    const closeIndex = calls.findIndex(([command]) => command === "lsp_close_file");
+    const openIndex = calls.findIndex(([command]) => command === "lsp_open_file");
+    assert.ok(closeIndex >= 0);
+    assert.ok(openIndex > closeIndex);
+    assert.deepEqual({
+      opened: lspDocumentState(reopenedDoc).opened,
+      openedUri: lspDocumentState(reopenedDoc).openedUri,
+      sessionGeneration: lspDocumentState(reopenedDoc).sessionGeneration,
+      openFileCount: state.lsp.openFileCount
+    }, {
+      opened: true,
+      openedUri: uri,
+      sessionGeneration: 12,
+      openFileCount: 1
+    });
+  } finally {
+    closeGate.resolve();
+    await Promise.allSettled([closePromise, openPromise].filter(Boolean));
+    resetLspDocumentState(closingDoc);
+    resetLspDocumentState(reopenedDoc);
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
   }

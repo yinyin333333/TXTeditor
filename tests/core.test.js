@@ -181,20 +181,20 @@ test("prewarm is disabled so background hover cannot block user hover", () => {
   assert.equal(shouldCancelPrewarmForUserHover(), true);
 });
 
-test("version metadata is bumped to TXTeditor 0.4.6", () => {
+test("version metadata is bumped to TXTeditor 0.4.7", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.4.6");
-  assert.equal(lock.version, "0.4.6");
-  assert.equal(lock.packages[""].version, "0.4.6");
-  assert.match(pkg.description, /TXTeditor 0\.4\.6/);
-  assert.match(cargoToml, /version = "0\.4\.6"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.4\.6/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.6"/);
-  assert.equal(tauri.version, "0.4.6");
-  assert.match(readme, /TXTeditor 0\.4\.6 is/);
+  assert.equal(pkg.version, "0.4.7");
+  assert.equal(lock.version, "0.4.7");
+  assert.equal(lock.packages[""].version, "0.4.7");
+  assert.match(pkg.description, /TXTeditor 0\.4\.7/);
+  assert.match(cargoToml, /version = "0\.4\.7"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.4\.7/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.7"/);
+  assert.equal(tauri.version, "0.4.7");
+  assert.match(readme, /TXTeditor 0\.4\.7 is/);
 });

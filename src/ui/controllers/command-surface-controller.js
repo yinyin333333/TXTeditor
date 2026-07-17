@@ -2,7 +2,8 @@ import {
   columnCommandItems,
   fillCommandItems,
   mathCommandItems,
-  rowCommandItems
+  rowCommandItems,
+  canRunCommandForDocument
 } from "../command-registry.js";
 import {
   contextMenuActiveGroupId,
@@ -35,7 +36,10 @@ export function createCommandSurfaceController({
 
   function renderPalette() {
     const q = els.paletteInput.value.toLowerCase();
-    const labels = commandLabels.filter(([, label]) => label.toLowerCase().includes(q));
+    const kind = activeDoc()?.kind ?? "table";
+    const labels = commandLabels.filter(([id, label]) =>
+      canRunCommandForDocument(id, kind) && label.toLowerCase().includes(q)
+    );
     els.paletteResults.innerHTML = labels.map(([id, label]) => `<button data-run="${id}">${label}</button>`).join("");
     for (const button of els.paletteResults.querySelectorAll("button")) {
       button.addEventListener("click", () => {

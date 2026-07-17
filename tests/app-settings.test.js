@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createDefaultLintSettings } from "../src/core/lint-engine.js";
 import { LINT_ENGINE_VECTOR } from "../src/core/lint-controller-policy.js";
 import { DEFAULT_GRID_FONT } from "../src/ui/app-settings-policy.js";
+import { createInitialAppState } from "../src/ui/app-startup-state.js";
 import { DEFAULT_DOCK_LAYOUT } from "../src/ui/dock-layout-policy.js";
 import { createSettingsController } from "../src/ui/controllers/settings-controller.js";
 import { installFakeAppStartupDom } from "./helpers/fake-dom-app-startup.mjs";
@@ -19,13 +21,17 @@ function makeSettingsController({
   config = {},
   diagnostics = [],
   lspStarted = false,
+  lintEnabled = true,
   saveConfigError = null,
-  workspace = null
+  workspace = null,
+  legacy = false,
+  listWorkspaceHandler = null
 } = {}) {
   const { document, window } = installFakeAppStartupDom();
   const calls = [];
-  const invoke = async (command) => {
-    calls.push(["invoke", command]);
+  const lspStarts = [];
+  const invoke = async (command, args) => {
+    calls.push(["invoke", command, args]);
     if (command === "get_config") return config;
     if (command === "save_config") {
       if (saveConfigError) throw saveConfigError;
@@ -33,6 +39,18 @@ function makeSettingsController({
     }
     if (command === "open_folder_dialog") return "E:\\PickedFolder";
     if (command === "pick_file_path") return "E:\\Tools\\vector-lsp.exe";
+    if (command === "list_workspace_files") {
+      if (listWorkspaceHandler) return listWorkspaceHandler(args);
+      return {
+        path: args.path,
+        files: args.includeSubfolders === false
+          ? [{ path: `${args.path}\\direct.txt`, name: "direct.txt" }]
+          : [
+            { path: `${args.path}\\direct.txt`, name: "direct.txt" },
+            { path: `${args.path}\\base\\nested.txt`, name: "nested.txt" }
+          ]
+      };
+    }
     return undefined;
   };
   window.__TAURI__ = { core: { invoke }, event: { listen: async () => () => {} } };
@@ -40,21 +58,31 @@ function makeSettingsController({
   const state = {
     theme: "dark",
     colorizeColumns: true,
+    mouseResizeLocked: false,
+    excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
     dockLayout: DEFAULT_DOCK_LAYOUT,
     workspace,
     lint: {
-      engine: LINT_ENGINE_VECTOR,
-      enabled: true,
+      engine: legacy ? "legacy" : LINT_ENGINE_VECTOR,
+      enabled: lintEnabled,
       diagnostics: [...diagnostics],
       legacy: {
         settings: createDefaultLintSettings(),
-        rulesOpen: false
+        rulesOpen: false,
+        referenceDataset: {
+          status: "ready",
+          selectedVersion: "3.2",
+          digest: "old-digest",
+          documents: [{ name: "hidden-reference.txt" }]
+        },
+        workspaceIndexCache: { signature: "old", profile: "RotW", index: {} }
       }
     },
     lsp: {
-      started: lspStarted
+      started: lspStarted,
+      includeSubfolders: true
     },
     config: { ...config }
   };
@@ -65,31 +93,36 @@ function makeSettingsController({
       syncTheme: () => calls.push("sync-theme"),
       draw: () => calls.push("draw"),
       setColorizeColumns: (enabled) => calls.push(["colorize", enabled]),
+      setMouseResizeLocked: (locked) => calls.push(["mouse-resize-locked", locked]),
       setFontFamily: (font) => calls.push(["font", font]),
       setVectorLspHoverEnabled: (enabled) => calls.push(["hover", enabled])
     },
     dockForPanel: (panel) => state.dockLayout[panel],
     setPanelDock: (panel, edge) => { state.dockLayout = { ...state.dockLayout, [panel]: edge }; },
     resetDockLayout: () => { state.dockLayout = DEFAULT_DOCK_LAYOUT; },
-    isLegacyLintEngine: () => false,
-    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => state.lint.engine === "legacy",
+    isVectorLintEngine: () => state.lint.engine === LINT_ENGINE_VECTOR,
     effectiveVectorLspHoverEnabled: () => true,
     cancelLegacyLintJobs: () => calls.push("cancel-legacy"),
-    scheduleLegacyLintFull: () => calls.push("schedule-legacy"),
-    legacyLintDisplayActive: () => false,
+    scheduleLegacyLintFull: (reason, delay) => calls.push(["schedule-legacy", reason, delay]),
+    legacyLintDisplayActive: () => state.lint.engine === "legacy",
     currentLegacyProfileRules: () => ({}),
     invalidateLspHover: () => calls.push("invalidate-hover"),
     setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
     updateGridDiagnostics: () => calls.push("update-grid-diagnostics"),
-    lspStartWorkspace: async () => calls.push("lsp-start"),
-    syncOpenDocsToVectorLsp: async () => calls.push("lsp-sync"),
+    lspStartWorkspace: async (...args) => {
+      lspStarts.push(args);
+      calls.push("lsp-start");
+    },
+    ensureDocumentSession: async (options) => calls.push(["ensure-document-session", options]),
+    resetLegacyWorkspaceIndex: () => calls.push("reset-legacy-workspace-index"),
     recordLintEngineEvent: (name) => calls.push(["lint-event", name]),
     renderChrome: () => calls.push("render"),
     reportBackgroundFailure: (label) => calls.push(["background-failure", label]),
     showError: (error) => calls.push(["error", String(error)]),
     escapeHtml
   });
-  return { controller, document, calls, host, state };
+  return { controller, document, calls, host, lspStarts, state };
 }
 
 async function waitForSelector(document, selector) {
@@ -107,6 +140,8 @@ test("App Settings modal renders visual controls in the controller behavior path
   controller.showAppSettings();
 
   assert.equal(document.body.querySelector("#settingsColorizeColumns")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsMouseResizeLocked")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']")?.tagName, "BUTTON");
@@ -115,6 +150,116 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("workspace subfolder exclusion persists, relists Explorer, and restarts Vector-LSP", async () => {
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  };
+  const { controller, calls, lspStarts, state } = makeSettingsController({ workspace });
+  assert.equal(createInitialAppState({ storage: localStorage }).state.excludeWorkspaceSubfolders, false);
+
+  assert.equal(await controller.setExcludeWorkspaceSubfolders(true), true);
+
+  assert.equal(state.excludeWorkspaceSubfolders, true);
+  assert.equal(localStorage.getItem("txteditor.excludeWorkspaceSubfolders"), "on");
+  assert.deepEqual(state.workspace.files.map((file) => file.name), ["direct.txt"]);
+  assert.equal(calls.includes("reset-legacy-workspace-index"), true);
+  assert.deepEqual(lspStarts, []);
+  assert.equal(calls.some((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"
+    && entry[1]?.forceRestart === true), true);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.excludeWorkspaceSubfolders, true);
+});
+
+test("rapid workspace subfolder changes apply only the latest listing", async () => {
+  const pending = [];
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [{ path: "E:\\Workspace\\old.txt", name: "old.txt" }]
+  };
+  const { controller, calls, state } = makeSettingsController({
+    workspace,
+    listWorkspaceHandler: (args) => new Promise((resolve) => pending.push({ args, resolve }))
+  });
+
+  const exclude = controller.setExcludeWorkspaceSubfolders(true);
+  const include = controller.setExcludeWorkspaceSubfolders(false);
+  for (let attempt = 0; attempt < 10 && pending.length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(pending.length, 2);
+  pending[1].resolve({
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  });
+  assert.equal(await include, true);
+  pending[0].resolve({
+    path: "E:\\Workspace",
+    files: [{ path: "E:\\Workspace\\stale.txt", name: "stale.txt" }]
+  });
+  assert.equal(await exclude, false);
+
+  assert.equal(state.excludeWorkspaceSubfolders, false);
+  assert.deepEqual(state.workspace.files.map((file) => file.name), ["direct.txt", "nested.txt"]);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session").length, 1);
+});
+
+test("workspace subfolder exclusion is not committed when the Explorer relist fails", async () => {
+  const workspace = {
+    path: "E:\\Workspace",
+    files: [
+      { path: "E:\\Workspace\\direct.txt", name: "direct.txt" },
+      { path: "E:\\Workspace\\base\\nested.txt", name: "nested.txt" }
+    ]
+  };
+  const { controller, calls, state } = makeSettingsController({
+    workspace,
+    listWorkspaceHandler: async () => {
+      throw new Error("workspace relist failed");
+    }
+  });
+  localStorage.setItem("txteditor.excludeWorkspaceSubfolders", "off");
+  const previousStored = localStorage.getItem("txteditor.excludeWorkspaceSubfolders");
+
+  await assert.rejects(
+    controller.setExcludeWorkspaceSubfolders(true),
+    /workspace relist failed/
+  );
+
+  assert.equal(state.excludeWorkspaceSubfolders, false);
+  assert.equal(localStorage.getItem("txteditor.excludeWorkspaceSubfolders"), previousStored);
+  assert.equal(state.workspace, workspace);
+  assert.equal(calls.includes("reset-legacy-workspace-index"), false);
+  assert.equal(calls.some((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), false);
+});
+
+test("mouse resize lock defaults off, applies immediately, and is restored from storage", () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, false);
+
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsMouseResizeLocked");
+  assert.equal(input.checked, false);
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+
+  assert.equal(state.mouseResizeLocked, true);
+  assert.equal(localStorage.getItem("txteditor.mouseResizeLocked"), "on");
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "mouse-resize-locked"), [
+    ["mouse-resize-locked", true]
+  ]);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, true);
 });
 
 test("App Settings closes on Escape and removes its temporary key listener", () => {
@@ -147,7 +292,13 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
       pluginPath: "E:\\Plugins",
       schemaPath: "E:\\Schema",
       vectorLspPath: "E:\\Tools\\vector-lsp.exe",
-      debugLogging: true
+      debugLogging: true,
+      jsonDiagnostics: true,
+      jsonDiagnosticRules: {
+        duplicateIds: { action: "error" },
+        stringFormat: { action: "ignore" },
+        keyUsage: { action: "warn", idStart: 51566 }
+      }
     }
   });
 
@@ -169,9 +320,150 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
   assert.equal(document.body.querySelector("[data-settings-choice='save']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-choice='restart-lsp']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-choice='cancel']")?.tagName, "BUTTON");
+  assert.equal(document.body.querySelector("#settingsJsonDiagnostics")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsJsonDiagnostics")?.checked, true);
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction")?.value, "warn");
+  assert.equal(document.body.querySelector("#settingsJsonStringFormatAction")?.value, "ignore");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageAction")?.value, "warn");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.value, "51566");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, false);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), false);
+  assert.doesNotMatch(backdrop.innerHTML, /<option value="error"/);
+  assert.match(backdrop.innerHTML, /modal-actions settings-lint-actions/);
+  assert.match(
+    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"),
+    /\.settings-lint-actions\s*\{[^}]*margin-top:\s*18px/s
+  );
+
+  const keyUsageAction = document.body.querySelector("#settingsJsonKeyUsageAction");
+  keyUsageAction.value = "ignore";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), true);
+  keyUsageAction.value = "warn";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, false);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), false);
+
+  const jsonDiagnostics = document.body.querySelector("#settingsJsonDiagnostics");
+  jsonDiagnostics.checked = false;
+  jsonDiagnostics.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageIdStart")?.disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), true);
 
   document.body.querySelector("[data-settings-choice='cancel']").click();
   await pending;
+});
+
+test("standalone Vector Lint Options save and Restart LSP force-rebind the active document session", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    diagnostics: [{ id: "old" }],
+    config: { schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+
+  const savePending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  const jsonDiagnostics = document.body.querySelector("#settingsJsonDiagnostics");
+  assert.equal(jsonDiagnostics.checked, false);
+  assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction").disabled, true);
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageAction").value, "ignore");
+  assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions").classList.contains("hidden"), true);
+  jsonDiagnostics.checked = true;
+  jsonDiagnostics.dispatchEvent({ type: "change", bubbles: true });
+  document.body.querySelector("#settingsJsonDuplicateIdsAction").value = "warn";
+  document.body.querySelector("#settingsJsonStringFormatAction").value = "ignore";
+  document.body.querySelector("#settingsJsonKeyUsageAction").value = "warn";
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "56000.5";
+  document.body.querySelector("#settingsSchemaVersion").value = "3.1";
+  document.body.querySelector("#settingsReferenceVersion").value = "3.1";
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await savePending;
+
+  assert.equal(state.config.schemaVersion, "3.1");
+  assert.equal(state.config.referenceVersion, "3.1");
+  assert.equal(state.config.jsonDiagnostics, true);
+  assert.deepEqual(state.config.jsonDiagnosticRules, {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  });
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(calls.includes("lsp-start"), false);
+  assert.equal(calls.includes("update-grid-diagnostics"), true);
+
+  const restartPending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("[data-settings-choice='restart-lsp']").click();
+  await restartPending;
+
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }],
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("Legacy reference changes force a fresh Vector session while lint reactivation ensures one", async () => {
+  const engineSwitch = makeSettingsController({
+    legacy: true,
+    config: { schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+  assert.equal(await engineSwitch.controller.setLegacyLintReferenceVersion("3.1"), true);
+  engineSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
+  assert.equal(engineSwitch.state.lint.engine, LINT_ENGINE_VECTOR);
+  assert.equal(engineSwitch.state.config.referenceVersion, "3.1");
+  assert.deepEqual(engineSwitch.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(engineSwitch.calls.includes("lsp-start"), false);
+
+  const lintEnable = makeSettingsController({ lintEnabled: false });
+  lintEnable.controller.toggleLint();
+  assert.equal(lintEnable.state.lint.enabled, true);
+  assert.deepEqual(lintEnable.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", {}]
+  ]);
+
+  const workspaceSwitch = makeSettingsController({
+    legacy: true,
+    workspace: { path: "E:\\Workspace" }
+  });
+  workspaceSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
+  assert.equal(workspaceSwitch.calls.includes("lsp-start"), false);
+  assert.deepEqual(workspaceSwitch.lspStarts, []);
+  assert.deepEqual(workspaceSwitch.calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {
+  const { controller, calls, state } = makeSettingsController({
+    legacy: true,
+    diagnostics: [{ id: "old" }],
+    workspace: { path: "E:\\Workspace" },
+    config: { lintMode: "basic", schemaVersion: "3.2" }
+  });
+
+  const first = controller.setLegacyLintReferenceVersion("3.1");
+  const latest = controller.setLegacyLintReferenceVersion("2.4");
+  assert.equal(await first, false);
+  assert.equal(await latest, true);
+
+  assert.equal(state.config.referenceVersion, "2.4");
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.equal(state.lint.legacy.referenceDataset.status, "not-started");
+  assert.deepEqual(state.lint.legacy.referenceDataset.documents, []);
+  assert.deepEqual(state.lint.legacy.workspaceIndexCache, { signature: "", profile: "", index: null });
+  assert.equal(calls.some((entry) => entry === "lsp-start"), false);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "reference-version-changed" && entry[2] === 0).length, 1);
+  assert.deepEqual(calls
+    .filter((entry) => Array.isArray(entry) && entry[0] === "invoke" && entry[1] === "save_config")
+    .map((entry) => entry[2].config.referenceVersion), ["3.1", "2.4"]);
 });
 
 test("Lint Options Escape behaves like Cancel without saving or restarting LSP", async () => {
@@ -204,13 +496,98 @@ test("Lint Options Escape behaves like Cancel without saving or restarting LSP",
   assert.equal(document.listeners.get("keydown")?.length, 0);
 });
 
+test("rapid Lint Options Save clicks persist JSON diagnostics and restart one latest session", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    diagnostics: [{ id: "stale-json" }],
+    config: { schemaVersion: "3.2", jsonDiagnostics: false }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsJsonDiagnostics").checked = true;
+  const saveButton = document.body.querySelector("[data-settings-choice='save']");
+
+  saveButton.click();
+  saveButton.click();
+  await pending;
+
+  assert.equal(state.config.jsonDiagnostics, true);
+  assert.deepEqual(state.config.jsonDiagnosticRules, {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "warn" },
+    keyUsage: { action: "ignore", idStart: 40000 }
+  });
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 1);
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("Lint Options rejects an invalid Key Usage ID threshold without saving or restarting", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    config: { schemaVersion: "3.2", jsonDiagnostics: true }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  const keyUsageAction = document.body.querySelector("#settingsJsonKeyUsageAction");
+  keyUsageAction.value = "warn";
+  keyUsageAction.dispatchEvent({ type: "change", bubbles: true });
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "";
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(state.config, { schemaVersion: "3.2", jsonDiagnostics: true });
+  assert.equal(document.body.querySelector(".settings-modal") !== null, true);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "ensure-document-session").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "error").length, 1);
+  assert.equal(document.body.querySelector("[data-settings-choice='save']").disabled, false);
+
+  document.body.querySelector("[data-settings-choice='cancel']").click();
+  await pending;
+});
+
+test("Lint Options can disable JSON diagnostics without validating an inactive Key Usage threshold", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    config: {
+      schemaVersion: "3.2",
+      jsonDiagnostics: true,
+      jsonDiagnosticRules: {
+        duplicateIds: { action: "warn" },
+        stringFormat: { action: "warn" },
+        keyUsage: { action: "warn", idStart: 51566 }
+      }
+    }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "";
+  document.body.querySelector("#settingsJsonDiagnostics").checked = false;
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await pending;
+
+  assert.equal(state.config.jsonDiagnostics, false);
+  assert.equal(state.config.jsonDiagnosticRules.keyUsage.idStart, 51566);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "error").length, 0);
+  assert.equal(calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "invoke" && entry[1] === "save_config").length, 1);
+});
+
 test("V-TXT-14 keeps config, diagnostics, modal, and LSP session unchanged when config write fails", async () => {
   const originalConfig = {
     lintMode: "advanced",
     pluginPath: "E:\\Plugins",
     schemaPath: "E:\\Schema",
     vectorLspPath: "E:\\Tools\\vector-lsp.exe",
-    debugLogging: true
+    debugLogging: true,
+    jsonDiagnostics: false
   };
   const originalDiagnostics = [{ id: "existing-diagnostic" }];
   const { controller, document, calls, state } = makeSettingsController({
@@ -227,6 +604,7 @@ test("V-TXT-14 keeps config, diagnostics, modal, and LSP session unchanged when 
   });
   assert.ok(await waitForSelector(document, ".settings-modal"));
   document.body.querySelector("#settingsPluginPath").value = "E:\\NewPlugins";
+  document.body.querySelector("#settingsJsonDiagnostics").checked = true;
   const saveButton = document.body.querySelector("[data-settings-choice='save']");
   const cancelButton = document.body.querySelector("[data-settings-choice='cancel']");
 

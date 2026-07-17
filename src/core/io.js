@@ -2,17 +2,23 @@ export { isTauriRuntime } from "./platform/tauri-api.js";
 export { decodeBuffer, encodeText } from "./platform/text-codec.js";
 export {
   listenForNativeDrops,
+  listSiblingTextFilesNative,
+  listWorkspaceNative,
   openFilesNative,
+  pickOpenFilePathsNative,
   openNativePaths,
   openNativePathsBulk,
   openWorkspaceNative,
   readFileAsDocument,
+  readTextFilesNative,
   saveDocumentNative,
-  saveTextNative
+  saveTextNative,
+  startupOpenPathsNative
 } from "./platform/file-io.js";
 export {
   closeWindow,
   getConfig,
+  loadLintReferenceDataset,
   pickFilePath,
   pickFolderPath,
   saveConfig
@@ -30,6 +36,7 @@ export {
   lspStart,
   lspStoppedListen,
   lspUpdateFile,
-  lspUpdateFileIncremental
+  lspUpdateFileIncremental,
+  lspWatchedFilesListen
 } from "./platform/lsp-client.js";
 export { downloadText } from "./platform/download.js";

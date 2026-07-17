@@ -1,5 +1,8 @@
-use crate::config::{AppConfig, AppConfigState};
+use crate::config::{AppConfig, AppConfigState, JsonDiagnosticRules};
 use crate::file_io::decode_text;
+use crate::lsp_file_watcher::{
+    WatchChangeSink, WatchErrorSink, WatchRegistry, WatchedFileChange, WATCHED_FILES_METHOD,
+};
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
     strip_markdown_for_tooltip, uri_to_path, LspContentChange, LspDiagnostic,
@@ -10,7 +13,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,11 +25,14 @@ type PendingRequests = Mutex<HashMap<u64, PendingResponse>>;
 
 struct LspProcess {
     generation: u64,
+    workspace_root: PathBuf,
     outbound: Mutex<OutboundState>,
     next_id: AtomicU64,
     pending: PendingRequests,
     diagnostics: Mutex<HashMap<String, DiagnosticSnapshot>>,
     next_diagnostic_sequence: AtomicU64,
+    watchers_active: AtomicBool,
+    watchers: Mutex<WatchRegistry>,
 }
 
 #[derive(Clone)]
@@ -44,6 +50,7 @@ struct OutboundState {
 struct DiagnosticSnapshot {
     version: Option<u32>,
     sequence: u64,
+    source_exists: bool,
     diagnostics: Vec<LspDiagnostic>,
 }
 
@@ -57,11 +64,13 @@ struct ActiveSession {
 #[derive(Default)]
 struct ManagerState {
     active: Option<ActiveSession>,
+    starting: HashMap<u64, Child>,
 }
 
 struct LspManagerCore {
     state: Mutex<ManagerState>,
     latest_requested_generation: AtomicU64,
+    shutdown_requested: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -88,6 +97,7 @@ pub(crate) struct LspDiagnosticsSnapshot {
     uri: String,
     version: Option<u32>,
     sequence: u64,
+    source_exists: bool,
     diagnostics: Vec<LspDiagnostic>,
 }
 
@@ -96,6 +106,13 @@ pub(crate) struct LspDiagnosticsSnapshot {
 pub(crate) struct LspDiagnosticsRequest {
     uri: String,
     sequence: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspWatchedFilesChanged {
+    generation: u64,
+    changes: Vec<WatchedFileChange>,
 }
 
 #[derive(Clone, Serialize)]
@@ -115,26 +132,28 @@ impl LspManager {
             core: Arc::new(LspManagerCore {
                 state: Mutex::new(ManagerState::default()),
                 latest_requested_generation: AtomicU64::new(0),
+                shutdown_requested: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Stop every child owned by this editor instance. This must be invoked from
+    /// the native run-event path because Tauri exits with `process::exit`, which
+    /// does not guarantee that managed-state destructors run.
+    pub(crate) fn shutdown(&self) -> usize {
+        shutdown_lsp_manager(&self.core)
     }
 }
 
 impl Drop for LspManager {
     fn drop(&mut self) {
-        self.core
-            .latest_requested_generation
-            .fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut state) = self.core.state.lock() {
-            if let Some(mut active) = state.active.take() {
-                drain_pending_requests(&active.process.pending, "LSP manager stopped");
-                kill_and_wait_child(&mut active.child);
-            }
-        }
+        // Fallback for tests and non-Tauri owners. The native app also calls
+        // shutdown explicitly before the event loop exits.
+        let _ = self.shutdown();
     }
 }
 
-fn find_vector_lsp_binary() -> Result<PathBuf, String> {
+pub(crate) fn find_vector_lsp_binary() -> Result<PathBuf, String> {
     let exe = if cfg!(windows) {
         "vector-lsp.exe"
     } else {
@@ -175,9 +194,12 @@ struct EditorLaunchSpec {
     binary: PathBuf,
     lint_mode: String,
     schema_version: Option<String>,
+    reference_version: Option<String>,
     schema_path: Option<PathBuf>,
     plugin_path: Option<PathBuf>,
     debug_logging: bool,
+    json_diagnostics: bool,
+    json_diagnostic_rules: JsonDiagnosticRules,
 }
 
 impl EditorLaunchSpec {
@@ -218,13 +240,27 @@ impl EditorLaunchSpec {
                 None,
             )
         };
+        let reference_version = config
+            .reference_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                (lint_mode == "basic")
+                    .then(|| schema_version.clone())
+                    .flatten()
+            });
         Ok(Self {
             binary,
             lint_mode,
             schema_version,
+            reference_version,
             schema_path,
             plugin_path,
             debug_logging: config.debug_logging,
+            json_diagnostics: config.json_diagnostics,
+            json_diagnostic_rules: config.json_diagnostic_rules,
         })
     }
 
@@ -240,14 +276,29 @@ impl EditorLaunchSpec {
             })
             .unwrap_or_else(|| "none".to_string());
         format!(
-            "vector-lsp editor launch: executable={} mode={} schema={} encoding=auto transport=stdio singleShot=false pluginPath={}",
+            "vector-lsp editor launch: executable={} mode={} schema={} reference={} encoding=auto transport=stdio singleShot=false pluginPath={} jsonDiagnostics={} jsonRules=duplicateIds:{},stringFormat:{},keyUsage:{}@{}",
             self.binary.display(),
             self.lint_mode,
             schema,
+            self.reference_version.as_deref().unwrap_or("disabled"),
             self.plugin_path
                 .as_ref()
                 .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "none".to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            self.json_diagnostics,
+            self.json_diagnostic_rules
+                .duplicate_ids
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules
+                .string_format
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules
+                .key_usage
+                .action
+                .as_env_value(),
+            self.json_diagnostic_rules.key_usage.id_start
         )
     }
 }
@@ -274,10 +325,16 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
         "VLSP_SCHEMA_LOADER",
         "VLSP_SCHEMA_PATH",
         "VLSP_SCHEMA_VARIANT",
+        "VLSP_REFERENCE_VARIANT",
         "VLSP_PLUGIN_PATH",
         "VLSP_WORKSPACE_PATH",
         "VLSP_ENCODING",
         "VLSP_DEBUG_LOGGING",
+        "VLSP_JSON_DIAGNOSTICS",
+        "VLSP_JSON_DUPLICATE_IDS_ACTION",
+        "VLSP_JSON_STRING_FORMAT_ACTION",
+        "VLSP_JSON_KEY_USAGE_ACTION",
+        "VLSP_JSON_KEY_USAGE_ID_START",
     ];
     command.arg("--editor-mode");
     for name in SANITIZED_ENVIRONMENT {
@@ -290,16 +347,89 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
     if let Some(version) = &spec.schema_version {
         command.env("VLSP_SCHEMA_VARIANT", version);
     }
+    if let Some(version) = &spec.reference_version {
+        command.env("VLSP_REFERENCE_VARIANT", version);
+    }
     if let Some(path) = &spec.plugin_path {
         command.env("VLSP_PLUGIN_PATH", path);
     }
     if spec.debug_logging {
         command.env("VLSP_DEBUG_LOGGING", "1");
     }
+    if spec.json_diagnostics {
+        command.env("VLSP_JSON_DIAGNOSTICS", "true");
+        command.env(
+            "VLSP_JSON_DUPLICATE_IDS_ACTION",
+            spec.json_diagnostic_rules
+                .duplicate_ids
+                .action
+                .as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_STRING_FORMAT_ACTION",
+            spec.json_diagnostic_rules
+                .string_format
+                .action
+                .as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_KEY_USAGE_ACTION",
+            spec.json_diagnostic_rules.key_usage.action.as_env_value(),
+        );
+        command.env(
+            "VLSP_JSON_KEY_USAGE_ID_START",
+            spec.json_diagnostic_rules.key_usage.id_start.to_string(),
+        );
+    }
+}
+
+fn stop_active_session(manager: &mut ManagerState, reason: &str) -> usize {
+    let Some(mut active) = manager.active.take() else {
+        return 0;
+    };
+    deactivate_lsp_process(&active.process);
+    drain_pending_requests(&active.process.pending, reason);
+    kill_and_wait_child(&mut active.child);
+    1
+}
+
+fn stop_starting_sessions(
+    manager: &mut ManagerState,
+    mut should_stop: impl FnMut(u64) -> bool,
+) -> usize {
+    let mut generations = manager
+        .starting
+        .keys()
+        .copied()
+        .filter(|generation| should_stop(*generation))
+        .collect::<Vec<_>>();
+    generations.sort_unstable();
+    let mut stopped = 0;
+    for generation in generations {
+        if let Some(mut child) = manager.starting.remove(&generation) {
+            kill_and_wait_child(&mut child);
+            stopped += 1;
+        }
+    }
+    stopped
+}
+
+fn shutdown_lsp_manager(core: &LspManagerCore) -> usize {
+    core.shutdown_requested.store(true, Ordering::SeqCst);
+    core.latest_requested_generation
+        .store(u64::MAX, Ordering::SeqCst);
+    let mut manager = core
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stopped = stop_active_session(&mut manager, "LSP manager stopped");
+    stopped += stop_starting_sessions(&mut manager, |_| true);
+    stopped
 }
 
 fn is_latest_request(core: &LspManagerCore, generation: u64) -> bool {
-    core.latest_requested_generation.load(Ordering::SeqCst) == generation
+    !core.shutdown_requested.load(Ordering::SeqCst)
+        && core.latest_requested_generation.load(Ordering::SeqCst) == generation
 }
 
 fn is_current_process(core: &LspManagerCore, proc: &Arc<LspProcess>) -> bool {
@@ -320,6 +450,11 @@ fn drain_pending_requests(pending: &PendingRequests, reason: &str) -> usize {
         let _ = sender.send(Err(reason.to_string()));
     }
     count
+}
+
+fn deactivate_lsp_process(proc: &LspProcess) {
+    proc.watchers_active.store(false, Ordering::SeqCst);
+    proc.watchers.lock().unwrap().clear();
 }
 
 fn is_response_to_request(msg: &Value, request_id: u64) -> bool {
@@ -384,6 +519,18 @@ fn cleanup_startup_failure(child: &mut std::process::Child, error: String) -> St
     error
 }
 
+fn cleanup_tracked_startup_failure(
+    core: &LspManagerCore,
+    generation: u64,
+    error: String,
+) -> String {
+    let mut manager = core.state.lock().unwrap();
+    if let Some(mut child) = manager.starting.remove(&generation) {
+        return cleanup_startup_failure(&mut child, error);
+    }
+    error
+}
+
 fn json_rpc_response_result(msg: &Value) -> Result<Option<Value>, String> {
     if let Some(error) = msg.get("error") {
         return Err(json_rpc_error_message(error));
@@ -404,6 +551,113 @@ fn json_rpc_error_message(error: &Value) -> String {
     }
 }
 
+fn watched_file_sinks(
+    proc: &Arc<LspProcess>,
+    app: &tauri::AppHandle,
+) -> (WatchChangeSink, WatchErrorSink) {
+    let weak_process = Arc::downgrade(proc);
+    let app_for_changes = app.clone();
+    let changes: WatchChangeSink = Arc::new(move |changes| {
+        let Some(proc) = weak_process.upgrade() else {
+            return;
+        };
+        if !proc.watchers_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut outbound = proc.outbound.lock().unwrap();
+        if !proc.watchers_active.load(Ordering::SeqCst) {
+            return;
+        }
+        let event_changes = changes.clone();
+        let _ = send_lsp_msg(
+            &mut outbound.stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": WATCHED_FILES_METHOD,
+                "params": { "changes": changes }
+            }),
+        );
+        drop(outbound);
+        if proc.watchers_active.load(Ordering::SeqCst) {
+            let _ = app_for_changes.emit(
+                "lsp-watched-files-changed",
+                LspWatchedFilesChanged {
+                    generation: proc.generation,
+                    changes: event_changes,
+                },
+            );
+        }
+    });
+
+    let weak_process = Arc::downgrade(proc);
+    let app = app.clone();
+    let errors: WatchErrorSink = Arc::new(move |message| {
+        let Some(proc) = weak_process.upgrade() else {
+            return;
+        };
+        if proc.watchers_active.load(Ordering::SeqCst) {
+            let _ = app.emit("lsp-log", message);
+        }
+    });
+    (changes, errors)
+}
+
+fn send_server_request_response(
+    proc: &LspProcess,
+    id: Value,
+    result: Result<(), (i64, String)>,
+) -> Result<(), String> {
+    let response = server_request_response(id, result);
+    let mut outbound = proc.outbound.lock().unwrap();
+    send_lsp_msg(&mut outbound.stdin, &response)
+}
+
+fn server_request_response(id: Value, result: Result<(), (i64, String)>) -> Value {
+    match result {
+        Ok(()) => json!({ "jsonrpc": "2.0", "id": id, "result": null }),
+        Err((code, message)) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message }
+        }),
+    }
+}
+
+fn handle_server_request(
+    proc: &Arc<LspProcess>,
+    msg: &Value,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    let id = msg
+        .get("id")
+        .filter(|id| id.is_u64() || id.is_i64() || id.is_string())
+        .cloned()
+        .ok_or_else(|| "LSP server request had an invalid id".to_string())?;
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+    let result = match method {
+        "client/registerCapability" => {
+            let (changes, errors) = watched_file_sinks(proc, app);
+            proc.watchers
+                .lock()
+                .unwrap()
+                .register(&params, &proc.workspace_root, changes, errors)
+                .map_err(|message| (-32602, message))
+        }
+        "client/unregisterCapability" => proc
+            .watchers
+            .lock()
+            .unwrap()
+            .unregister(&params)
+            .map_err(|message| (-32602, message)),
+        _ => Err((-32601, format!("Unsupported LSP server request: {method}"))),
+    };
+    send_server_request_response(proc, id, result)
+}
+
 fn run_lsp_reader(
     mut reader: BufReader<ChildStdout>,
     proc: Arc<LspProcess>,
@@ -420,6 +674,18 @@ fn run_lsp_reader(
                 if let Some(tx) = sender {
                     let _ = tx.send(json_rpc_response_result(&msg));
                 }
+            }
+            continue;
+        }
+        if msg.get("id").is_some() && msg.get("method").is_some() {
+            if let Err(error) = handle_server_request(&proc, &msg, &app) {
+                finish_lsp_reader(
+                    &core,
+                    &proc,
+                    &format!("server request response failed: {error}"),
+                    &app,
+                );
+                return;
             }
             continue;
         }
@@ -566,11 +832,14 @@ fn handle_publish_diagnostics_before_commit(
         return None;
     }
     let sequence = proc.next_diagnostic_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+    let source_exists =
+        version.is_some() || uri_to_path(&uri).ok().is_some_and(|path| path.is_file());
     snapshots.insert(
         uri.clone(),
         DiagnosticSnapshot {
             version,
             sequence,
+            source_exists,
             diagnostics,
         },
     );
@@ -599,6 +868,7 @@ fn remove_open_document(proc: &LspProcess, outbound: &mut OutboundState, uri: &s
     proc.diagnostics.lock().unwrap().remove(uri);
 }
 
+#[cfg(test)]
 fn take_current_session(core: &LspManagerCore, proc: &Arc<LspProcess>) -> Option<ActiveSession> {
     let mut state = core.state.lock().unwrap();
     let current = state.active.as_ref().is_some_and(|active| {
@@ -614,10 +884,16 @@ fn finish_lsp_reader(
     app: &tauri::AppHandle,
 ) {
     drain_pending_requests(&proc.pending, "LSP reader stopped");
-    let Some(mut active) = take_current_session(core, proc) else {
-        return;
+    let stopped = {
+        let mut manager = core.state.lock().unwrap();
+        let current = manager.active.as_ref().is_some_and(|active| {
+            active.generation == proc.generation && Arc::ptr_eq(&active.process, proc)
+        });
+        current && stop_active_session(&mut manager, "LSP reader stopped") == 1
     };
-    kill_and_wait_child(&mut active.child);
+    if !stopped {
+        return;
+    }
     let _ = app.emit(
         "lsp-stopped",
         LspStopped {
@@ -643,19 +919,58 @@ fn get_lsp_proc(
 }
 
 enum CandidateInstall {
-    Installed { replaced: Option<ActiveSession> },
-    Superseded { candidate: ActiveSession },
+    Installed,
+    Superseded,
+    Cancelled,
 }
 
+fn install_candidate_locked(
+    core: &LspManagerCore,
+    manager: &mut ManagerState,
+    mut candidate: ActiveSession,
+) -> CandidateInstall {
+    if is_latest_request(core, candidate.generation) {
+        if let Some(mut replaced) = manager.active.replace(candidate) {
+            deactivate_lsp_process(&replaced.process);
+            drain_pending_requests(&replaced.process.pending, "LSP session replaced");
+            kill_and_wait_child(&mut replaced.child);
+        }
+        CandidateInstall::Installed
+    } else {
+        deactivate_lsp_process(&candidate.process);
+        drain_pending_requests(&candidate.process.pending, "LSP start superseded");
+        kill_and_wait_child(&mut candidate.child);
+        CandidateInstall::Superseded
+    }
+}
+
+#[cfg(test)]
 fn install_candidate(core: &LspManagerCore, candidate: ActiveSession) -> CandidateInstall {
     let mut manager = core.state.lock().unwrap();
-    if is_latest_request(core, candidate.generation) {
-        CandidateInstall::Installed {
-            replaced: manager.active.replace(candidate),
-        }
-    } else {
-        CandidateInstall::Superseded { candidate }
-    }
+    install_candidate_locked(core, &mut manager, candidate)
+}
+
+fn install_tracked_candidate(
+    core: &LspManagerCore,
+    generation: u64,
+    workspace_path: String,
+    process: Arc<LspProcess>,
+) -> CandidateInstall {
+    let mut manager = core.state.lock().unwrap();
+    let Some(child) = manager.starting.remove(&generation) else {
+        drain_pending_requests(&process.pending, "LSP start cancelled");
+        return CandidateInstall::Cancelled;
+    };
+    install_candidate_locked(
+        core,
+        &mut manager,
+        ActiveSession {
+            generation,
+            workspace_path,
+            process,
+            child,
+        },
+    )
 }
 
 fn require_newer_document_version(uri: &str, current: u32, incoming: u32) -> Result<(), String> {
@@ -668,16 +983,43 @@ fn require_newer_document_version(uri: &str, current: u32, incoming: u32) -> Res
     }
 }
 
+fn reference_context_mode(value: Option<&str>) -> Result<&'static str, String> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("workspace") => Ok("workspace"),
+        Some("sibling") => Ok("sibling"),
+        Some(value) => Err(format!(
+            "Unsupported LSP reference context mode '{value}'. Expected 'workspace' or 'sibling'."
+        )),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
     generation: u64,
+    context_mode: Option<String>,
+    reference_root_path: Option<String>,
+    include_subfolders: Option<bool>,
     state: tauri::State<'_, LspManager>,
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
 ) -> Result<LspStartResult, String> {
+    let reference_context_mode = reference_context_mode(context_mode.as_deref())?;
+    let reference_root_uri = reference_root_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(path_to_uri);
+    let include_subfolders = include_subfolders.unwrap_or(true);
     if generation == 0 {
         return Err("LSP generation must be positive".to_string());
+    }
+    if state.core.shutdown_requested.load(Ordering::SeqCst) {
+        return Ok(LspStartResult {
+            generation,
+            workspace_path,
+            installed: false,
+        });
     }
     let previous_latest = state
         .core
@@ -690,21 +1032,18 @@ pub(crate) async fn lsp_start(
             installed: false,
         });
     }
-    let old_active = {
+    {
         let mut manager = state.core.state.lock().unwrap();
         if manager
             .active
             .as_ref()
             .is_some_and(|active| active.generation < generation)
         {
-            manager.active.take()
-        } else {
-            None
+            stop_active_session(&mut manager, "LSP session restarted");
         }
-    };
-    if let Some(mut active) = old_active {
-        drain_pending_requests(&active.process.pending, "LSP session restarted");
-        kill_and_wait_child(&mut active.child);
+        stop_starting_sessions(&mut manager, |starting_generation| {
+            starting_generation < generation
+        });
     }
     if !is_latest_request(&state.core, generation) {
         return Ok(LspStartResult {
@@ -731,13 +1070,41 @@ pub(crate) async fn lsp_start(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start vector-lsp: {e}"))?;
-
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    // Keep the child handle in ManagerState from the instant it is spawned.
+    // The native exit callback can then reap it even while initialize is pending.
+    let (mut stdin, stdout, stderr) = {
+        let mut manager = state.core.state.lock().unwrap();
+        if !is_latest_request(&state.core, generation)
+            || manager.starting.contains_key(&generation)
+            || manager
+                .active
+                .as_ref()
+                .is_some_and(|active| active.generation == generation)
+        {
+            return Ok(LspStartResult {
+                generation,
+                workspace_path,
+                installed: false,
+            });
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start vector-lsp: {e}"))?;
+        let Some(stdin) = child.stdin.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stdin pipe".to_string());
+        };
+        let Some(stdout) = child.stdout.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stdout pipe".to_string());
+        };
+        let Some(stderr) = child.stderr.take() else {
+            kill_and_wait_child(&mut child);
+            return Err("vector-lsp started without a stderr pipe".to_string());
+        };
+        manager.starting.insert(generation, child);
+        (stdin, stdout, stderr)
+    };
 
     let root_uri = path_to_uri(&workspace_path);
     if let Err(error) = send_lsp_msg(
@@ -749,13 +1116,28 @@ pub(crate) async fn lsp_start(
             "params": {
                 "processId": std::process::id(),
                 "rootUri": root_uri,
-                "initializationOptions": { "sessionGeneration": generation },
-                "capabilities": { "textDocument": { "publishDiagnostics": {} } }
+                "initializationOptions": {
+                    "sessionGeneration": generation,
+                    "referenceContextMode": reference_context_mode,
+                    "referenceRootUri": reference_root_uri,
+                    "includeSubfolders": include_subfolders,
+                    "workspaceDirectoryScopes": true
+                },
+                "capabilities": {
+                    "workspace": {
+                        "didChangeWatchedFiles": {
+                            "dynamicRegistration": true,
+                            "relativePatternSupport": true
+                        }
+                    },
+                    "textDocument": { "publishDiagnostics": {} }
+                }
             }
         }),
     ) {
-        return Err(cleanup_startup_failure(
-            &mut child,
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
             format!("Failed to send LSP initialize request: {error}"),
         ));
     }
@@ -764,11 +1146,19 @@ pub(crate) async fn lsp_start(
         match read_initial_lsp_message(BufReader::new(stdout), Duration::from_secs(10)) {
             Ok(result) => result,
             Err(error) => {
-                return Err(cleanup_startup_failure(&mut child, error));
+                return Err(cleanup_tracked_startup_failure(
+                    &state.core,
+                    generation,
+                    error,
+                ));
             }
         };
     if let Err(error) = validate_initialize_response(&initialize_response) {
-        return Err(cleanup_startup_failure(&mut child, error));
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
+            error,
+        ));
     }
 
     if let Err(error) = send_lsp_msg(
@@ -779,14 +1169,16 @@ pub(crate) async fn lsp_start(
             "params": {}
         }),
     ) {
-        return Err(cleanup_startup_failure(
-            &mut child,
+        return Err(cleanup_tracked_startup_failure(
+            &state.core,
+            generation,
             format!("Failed to send LSP initialized notification: {error}"),
         ));
     }
 
     let proc = Arc::new(LspProcess {
         generation,
+        workspace_root: PathBuf::from(&workspace_path),
         outbound: Mutex::new(OutboundState {
             stdin,
             documents: HashMap::new(),
@@ -795,26 +1187,18 @@ pub(crate) async fn lsp_start(
         pending: Mutex::new(HashMap::new()),
         diagnostics: Mutex::new(HashMap::new()),
         next_diagnostic_sequence: AtomicU64::new(0),
+        watchers_active: AtomicBool::new(true),
+        watchers: Mutex::new(WatchRegistry::new()),
     });
 
-    let candidate = ActiveSession {
+    match install_tracked_candidate(
+        &state.core,
         generation,
-        workspace_path: workspace_path.clone(),
-        process: Arc::clone(&proc),
-        child,
-    };
-    match install_candidate(&state.core, candidate) {
-        CandidateInstall::Installed { replaced } => {
-            if let Some(mut active) = replaced {
-                drain_pending_requests(&active.process.pending, "LSP session replaced");
-                kill_and_wait_child(&mut active.child);
-            }
-        }
-        CandidateInstall::Superseded {
-            candidate: mut stale,
-        } => {
-            drain_pending_requests(&stale.process.pending, "LSP start superseded");
-            kill_and_wait_child(&mut stale.child);
+        workspace_path.clone(),
+        Arc::clone(&proc),
+    ) {
+        CandidateInstall::Installed => {}
+        CandidateInstall::Superseded | CandidateInstall::Cancelled => {
             return Ok(LspStartResult {
                 generation,
                 workspace_path,
@@ -1020,6 +1404,7 @@ pub(crate) fn lsp_get_diagnostics(
         uri,
         version: snapshot.version,
         sequence: snapshot.sequence,
+        source_exists: snapshot.source_exists,
         diagnostics: snapshot.diagnostics,
     }))
 }
@@ -1048,6 +1433,7 @@ pub(crate) fn lsp_get_diagnostics_batch(
                     uri: request.uri,
                     version: snapshot.version,
                     sequence: snapshot.sequence,
+                    source_exists: snapshot.source_exists,
                     diagnostics: snapshot.diagnostics,
                 })
         })
@@ -1207,6 +1593,7 @@ mod tests {
         (
             Arc::new(LspProcess {
                 generation,
+                workspace_root: std::env::temp_dir(),
                 outbound: Mutex::new(OutboundState {
                     stdin,
                     documents: HashMap::new(),
@@ -1215,6 +1602,8 @@ mod tests {
                 pending: Mutex::new(HashMap::new()),
                 diagnostics: Mutex::new(HashMap::new()),
                 next_diagnostic_sequence: AtomicU64::new(0),
+                watchers_active: AtomicBool::new(true),
+                watchers: Mutex::new(WatchRegistry::new()),
             }),
             child,
         )
@@ -1224,6 +1613,7 @@ mod tests {
         LspManagerCore {
             state: Mutex::new(ManagerState::default()),
             latest_requested_generation: AtomicU64::new(latest_generation),
+            shutdown_requested: AtomicBool::new(false),
         }
     }
 
@@ -1239,7 +1629,7 @@ mod tests {
         };
         assert!(matches!(
             install_candidate(&core, candidate_b),
-            CandidateInstall::Installed { replaced: None }
+            CandidateInstall::Installed
         ));
 
         let (process_a, child_a) = test_lsp_process(1);
@@ -1249,14 +1639,10 @@ mod tests {
             process: process_a,
             child: child_a,
         };
-        let CandidateInstall::Superseded {
-            candidate: mut stale,
-        } = install_candidate(&core, candidate_a)
-        else {
-            panic!("generation 1 must lose to generation 2");
-        };
-        kill_and_wait_child(&mut stale.child);
-        assert!(stale.child.try_wait().unwrap().is_some());
+        assert!(matches!(
+            install_candidate(&core, candidate_a),
+            CandidateInstall::Superseded
+        ));
         assert!(is_current_process(&core, &process_b));
         assert_eq!(
             core.state
@@ -1563,15 +1949,47 @@ mod tests {
     }
 
     #[test]
+    fn manager_shutdown_reaps_active_and_starting_children_and_is_idempotent() {
+        let manager = LspManager::new();
+        let (process, child) = test_lsp_process(1);
+        let (tx, mut rx) = oneshot::channel();
+        process.pending.lock().unwrap().insert(7, tx);
+        {
+            let mut state = manager.core.state.lock().unwrap();
+            state.active = Some(ActiveSession {
+                generation: 1,
+                workspace_path: "active".to_string(),
+                process,
+                child,
+            });
+            state.starting.insert(2, spawn_long_running_child());
+        }
+
+        assert_eq!(manager.shutdown(), 2);
+        assert!(manager.core.shutdown_requested.load(Ordering::SeqCst));
+        assert!(!is_latest_request(&manager.core, 1));
+        {
+            let state = manager.core.state.lock().unwrap();
+            assert!(state.active.is_none());
+            assert!(state.starting.is_empty());
+        }
+        assert_eq!(rx.try_recv().unwrap().unwrap_err(), "LSP manager stopped");
+        assert_eq!(manager.shutdown(), 0);
+    }
+
+    #[test]
     fn request_guard_accepts_only_latest_generation() {
         let core = LspManagerCore {
             state: Mutex::new(ManagerState::default()),
             latest_requested_generation: AtomicU64::new(4),
+            shutdown_requested: AtomicBool::new(false),
         };
         assert!(is_latest_request(&core, 4));
         assert!(!is_latest_request(&core, 3));
         core.latest_requested_generation.store(5, Ordering::SeqCst);
         assert!(!is_latest_request(&core, 4));
+        core.shutdown_requested.store(true, Ordering::SeqCst);
+        assert!(!is_latest_request(&core, 5));
     }
 
     #[test]
@@ -1665,6 +2083,17 @@ mod tests {
     }
 
     #[test]
+    fn reference_context_mode_is_explicit_and_rejects_unknown_values() {
+        assert_eq!(reference_context_mode(None).unwrap(), "workspace");
+        assert_eq!(
+            reference_context_mode(Some("workspace")).unwrap(),
+            "workspace"
+        );
+        assert_eq!(reference_context_mode(Some("sibling")).unwrap(), "sibling");
+        assert!(reference_context_mode(Some("recursive-sibling")).is_err());
+    }
+
+    #[test]
     fn editor_launch_defaults_match_the_ui_and_resolve_absolute_paths() {
         let binary = std::env::current_exe().unwrap();
         let config = AppConfig {
@@ -1677,6 +2106,7 @@ mod tests {
         assert!(spec.binary.is_absolute());
         assert_eq!(spec.lint_mode, "basic");
         assert_eq!(spec.schema_version.as_deref(), Some("3.2"));
+        assert_eq!(spec.reference_version.as_deref(), Some("3.2"));
         assert!(spec.schema_path.is_none());
         assert!(spec.plugin_path.is_none());
         assert!(canonical_existing_path(".", "cwd").unwrap().is_absolute());
@@ -1688,13 +2118,21 @@ mod tests {
             binary: std::env::current_exe().unwrap(),
             lint_mode: "basic".to_string(),
             schema_version: Some("3.2".to_string()),
+            reference_version: Some("3.2".to_string()),
             schema_path: None,
             plugin_path: None,
             debug_logging: false,
+            json_diagnostics: false,
+            json_diagnostic_rules: JsonDiagnosticRules::default(),
         };
         let mut command = Command::new(&spec.binary);
         command.env("VLSP_SINGLE_SHOT", "true");
         command.env("VLSP_IO_TYPE", "tcp");
+        command.env("VLSP_JSON_DIAGNOSTICS", "true");
+        command.env("VLSP_JSON_DUPLICATE_IDS_ACTION", "error");
+        command.env("VLSP_JSON_STRING_FORMAT_ACTION", "error");
+        command.env("VLSP_JSON_KEY_USAGE_ACTION", "error");
+        command.env("VLSP_JSON_KEY_USAGE_ID_START", "1");
 
         configure_editor_command(&mut command, &spec);
 
@@ -1724,6 +2162,108 @@ mod tests {
             environment.get("VLSP_SCHEMA_VARIANT"),
             Some(&Some("3.2".to_string()))
         );
+        assert_eq!(
+            environment.get("VLSP_REFERENCE_VARIANT"),
+            Some(&Some("3.2".to_string()))
+        );
+        assert_eq!(environment.get("VLSP_JSON_DIAGNOSTICS"), Some(&None));
+        for name in [
+            "VLSP_JSON_DUPLICATE_IDS_ACTION",
+            "VLSP_JSON_STRING_FORMAT_ACTION",
+            "VLSP_JSON_KEY_USAGE_ACTION",
+            "VLSP_JSON_KEY_USAGE_ID_START",
+        ] {
+            assert_eq!(environment.get(name), Some(&None), "{name}");
+        }
+    }
+
+    #[test]
+    fn editor_command_enables_json_diagnostics_only_when_configured() {
+        let rules = JsonDiagnosticRules {
+            duplicate_ids: crate::config::JsonDiagnosticRule {
+                action: crate::config::JsonDiagnosticAction::Warn,
+            },
+            string_format: crate::config::JsonDiagnosticRule {
+                action: crate::config::JsonDiagnosticAction::Ignore,
+            },
+            key_usage: crate::config::JsonKeyUsageRule {
+                action: crate::config::JsonDiagnosticAction::Warn,
+                id_start: 51_566.5,
+            },
+        };
+        let spec = EditorLaunchSpec {
+            binary: std::env::current_exe().unwrap(),
+            lint_mode: "basic".to_string(),
+            schema_version: Some("3.2".to_string()),
+            reference_version: Some("3.2".to_string()),
+            schema_path: None,
+            plugin_path: None,
+            debug_logging: false,
+            json_diagnostics: true,
+            json_diagnostic_rules: rules,
+        };
+        let mut command = Command::new(&spec.binary);
+        configure_editor_command(&mut command, &spec);
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            environment.get("VLSP_JSON_DIAGNOSTICS"),
+            Some(&Some("true".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_DUPLICATE_IDS_ACTION"),
+            Some(&Some("warn".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_STRING_FORMAT_ACTION"),
+            Some(&Some("ignore".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_KEY_USAGE_ACTION"),
+            Some(&Some("warn".to_string()))
+        );
+        assert_eq!(
+            environment.get("VLSP_JSON_KEY_USAGE_ID_START"),
+            Some(&Some("51566.5".to_string()))
+        );
+    }
+
+    #[test]
+    fn advanced_editor_mode_never_guesses_a_reference_version() {
+        let binary = std::env::current_exe().unwrap();
+        let config = AppConfig {
+            vector_lsp_path: Some(binary.to_string_lossy().to_string()),
+            lint_mode: Some("advanced".to_string()),
+            schema_path: Some(binary.to_string_lossy().to_string()),
+            schema_version: Some("3.2".to_string()),
+            reference_version: None,
+            ..Default::default()
+        };
+
+        let spec = EditorLaunchSpec::resolve(&config).unwrap();
+        assert_eq!(spec.lint_mode, "advanced");
+        assert!(spec.reference_version.is_none());
+
+        let mut command = Command::new(&spec.binary);
+        configure_editor_command(&mut command, &spec);
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(environment.get("VLSP_REFERENCE_VARIANT"), Some(&None));
     }
 
     #[test]
@@ -1747,6 +2287,21 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("-32603"));
         assert!(error.contains("hover failed"));
+    }
+
+    #[test]
+    fn server_request_responses_preserve_numeric_and_string_ids() {
+        let ok = server_request_response(json!(27), Ok(()));
+        assert_eq!(ok["id"], 27);
+        assert!(ok["result"].is_null());
+
+        let error = server_request_response(
+            json!("watch-registration"),
+            Err((-32602, "invalid watcher".to_string())),
+        );
+        assert_eq!(error["id"], "watch-registration");
+        assert_eq!(error["error"]["code"], -32602);
+        assert_eq!(error["error"]["message"], "invalid watcher");
     }
 
     #[test]

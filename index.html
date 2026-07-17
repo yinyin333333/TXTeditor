@@ -26,7 +26,7 @@
             </div>
             <div class="sidebar-search">
               <span class="sidebar-search-icon" aria-hidden="true"></span>
-              <input id="explorerFilter" class="sidebar-filter" type="search" placeholder="Search TXT file" aria-label="Search TXT file" autocomplete="off" spellcheck="false" />
+              <input id="explorerFilter" class="sidebar-filter" type="search" placeholder="Search file" aria-label="Search file" autocomplete="off" spellcheck="false" />
               <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files"></div>
             </div>
             <div id="fileList" class="file-list"></div>
@@ -44,10 +44,10 @@
             <button data-command="search">Find</button>
             <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
             <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
-            <button data-command="open-app-settings">Settings</button>
             <button data-command="open-shortcut-settings">Shortcuts</button>
+            <button data-command="open-app-settings">Settings</button>
           </section>
-          <section id="gridHost" class="grid-host" tabindex="0" aria-label="Virtual table editor">
+          <section id="gridHost" class="grid-host editor-surface" tabindex="0" aria-label="Virtual table editor">
             <canvas id="gridCanvas"></canvas>
             <canvas id="frozenCanvas"></canvas>
             <div id="scrollSurface" class="scroll-surface"></div>
@@ -55,6 +55,7 @@
             <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
             <div id="overviewRuler" class="overview-ruler"></div>
           </section>
+          <section id="jsonEditorHost" class="json-editor-host editor-surface hidden" aria-label="JSON code editor"></section>
         </main>
 
         <section id="dockRight" class="dock dock-right" data-dock-edge="right" aria-label="Right dock"></section>
@@ -79,7 +80,7 @@
 
     <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
       <div class="modal search-modal">
-        <h2 id="searchTitle">Find</h2>
+        <h2 id="searchTitle" data-search-drag-handle>Find</h2>
         <input id="searchInput" class="modal-input" type="search" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
         <fieldset class="search-scope" aria-label="Search scope">
           <label><input type="radio" name="searchScope" value="all" checked /> All cells</label>
@@ -88,7 +89,8 @@
         </fieldset>
         <div id="searchStatus" class="search-status"></div>
         <div class="modal-actions">
-          <button data-command="find-next">Find Next</button>
+          <button data-search-previous aria-keyshortcuts="Shift+Enter">Find Prev</button>
+          <button data-command="find-next" aria-keyshortcuts="Enter">Find Next</button>
           <button data-search-close>Close</button>
         </div>
       </div>
@@ -109,6 +111,17 @@
           <button data-close-choice="save">Save</button>
           <button data-close-choice="discard">Don't Save</button>
           <button data-close-choice="cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="externalChangeDialog" class="modal-backdrop hidden">
+      <div class="modal">
+        <h2>File changed outside TXTeditor</h2>
+        <p id="externalChangeDialogText">This JSON file changed on disk.</p>
+        <div class="modal-actions">
+          <button data-external-change-choice="reload">Reload</button>
+          <button data-external-change-choice="keep">Keep My Changes</button>
         </div>
       </div>
     </div>

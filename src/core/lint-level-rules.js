@@ -1,55 +1,41 @@
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
+import { referenceTable } from "./lint-reference-semantics.js";
 import { clean, rowLabelFor } from "./lint-table.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const LEVEL_LINT_RULES = [
-  rule("Level/ValidWarp", "Valid warps", lintValidWarp, true, PROFILE_OPTIONS, "Checks levels.txt vis and warp links for valid targets, valid lvlwarp rows, and matching backlink connections."),
-  rule("Level/ValidWPs", "Valid waypoints", lintValidWaypoints, true, PROFILE_OPTIONS, "Checks that waypoint IDs in levels.txt are not reused by multiple levels.")
+  rule("Level/ValidWarp", "Valid warps", lintValidWarp, true, PROFILE_OPTIONS, "Checks that each Levels Vis index and LvlWarp Id exists, without requiring an unconfirmed reciprocal link."),
+  rule("Level/ValidWPs", "Valid waypoints", lintValidWaypoints, true, PROFILE_OPTIONS, "Checks that waypoint numbers remain unique after the game reads them as values from 0 through 255."),
 ];
 
 export function lintValidWarp(index, ctx) {
   const levels = index.tablesByName.get("levels.txt");
-  const lvlWarp = index.tablesByName.get("lvlwarp.txt");
+  const lvlWarp = referenceTable(index, "lvlwarp.txt");
   if (!levels || !lvlWarp) return;
+  const canValidateWarp = lvlWarp.hasColumn("id");
+  const warpIds = new Set();
+  if (canValidateWarp) lvlWarp.eachRow((row) => {
+    const id = integerFromRow(row, "id");
+    if (id !== null) warpIds.add(id);
+  });
   levels.eachRow((row) => {
     if (clean(row.get("name")) === "Expansion") return;
-    const id = integerFromRow(row, "id");
-    const line = row.rowIndex - 1;
     for (let slot = 0; slot <= 7; slot += 1) {
       const visColumn = `vis${slot}`;
       const warpColumn = `warp${slot}`;
       if (!levels.hasColumn(visColumn)) continue;
       const vis = integerFromRow(row, visColumn);
-      const warp = levels.hasColumn(warpColumn) ? integerFromRow(row, warpColumn) : 0;
+      const warpRaw = levels.hasColumn(warpColumn) ? clean(row.get(warpColumn)) : "0";
+      const warp = warpRaw ? integerValue(warpRaw) : 0;
       if (vis === null || vis <= 0) continue;
-      if (isHardcodedWarpException(id, warpColumn)) continue;
       if (vis >= levels.rows.length - 1) {
         ctx.add(levels, row.rowIndex, visColumn, `${visColumn} points to missing level index ${vis}.`, {
           d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: invalid ${visColumn} for level '${clean(row.get("name"))}'`
         });
       }
-      if (warp !== null && (warp < 0 || warp >= lvlWarp.rows.length - 1)) {
-        ctx.add(levels, row.rowIndex, warpColumn, `${warpColumn} points outside lvlwarp.txt.`, {
+      if (canValidateWarp && (warp === null || (warp >= 0 && !warpIds.has(warp)))) {
+        ctx.add(levels, row.rowIndex, warpColumn, `${warpColumn} does not resolve to a lvlwarp.txt Id/variant record.`, {
           d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: invalid ${warpColumn} for level '${clean(row.get("name"))}'`
-        });
-      }
-      if (clean(row.get("act")) === "4") continue;
-      const targetRow = levels.rows[vis + 1];
-      if (!targetRow) {
-        ctx.add(levels, row.rowIndex, visColumn, `Invalid level index ${vis}.`, {
-          d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: invalid level '${vis}' for level '${clean(row.get("name"))}'`
-        });
-        continue;
-      }
-      const target = {
-        table: levels,
-        rowIndex: vis + 1,
-        get: (columnName) => levels.rows[vis + 1]?.[levels.columnIndex(columnName)] ?? ""
-      };
-      const backlink = Array.from({ length: 8 }, (_, backlinkSlot) => `vis${backlinkSlot}`).some((columnName) => levels.hasColumn(columnName) && clean(target.get(columnName)) === String(line));
-      if (!backlink) {
-        ctx.add(levels, row.rowIndex, visColumn, `Target level ${vis} does not link back to ${line}.`, {
-          d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: level '${clean(target.get("name"))}' doesn't have a vis field pointing at us for level '${clean(row.get("name"))}'`
         });
       }
     }
@@ -61,10 +47,14 @@ export function lintValidWaypoints(index, ctx) {
   if (!table?.hasColumn("waypoint")) return;
   const seen = new Map();
   table.eachRow((row) => {
-    const waypoint = clean(row.get("waypoint"));
-    if (!waypoint || waypoint === "255") return;
+    const rawWaypoint = clean(row.get("waypoint"));
+    if (!rawWaypoint) return;
+    const waypoint = storedUnsignedByte(rawWaypoint);
+    if (waypoint === null || waypoint === 255) return;
     if (seen.has(waypoint)) {
-      ctx.add(table, row.rowIndex, "waypoint", `Waypoint ${waypoint} is also used by ${seen.get(waypoint).label}.`);
+      ctx.add(table, row.rowIndex, "waypoint", `Waypoint ${waypoint} is also used by ${seen.get(waypoint).label}. Choose a unique waypoint number.`, {
+        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: waypoint ${waypoint} is already used by '${seen.get(waypoint).label}'. Choose a unique number.`
+      });
     } else {
       seen.set(waypoint, { label: rowLabelFor(table, row.rowIndex) });
     }
@@ -87,17 +77,13 @@ function integerFromRow(row, columnName) {
   return integerValue(value);
 }
 
-function isHardcodedWarpException(id, warpColumn) {
-  return (id === 26 && warpColumn === "warp1") ||
-    (id === 27 && warpColumn === "warp0") ||
-    (id === 27 && warpColumn === "warp1") ||
-    (id === 28 && warpColumn === "warp0") ||
-    (id === 32 && warpColumn === "warp1") ||
-    (id === 33 && warpColumn === "warp0") ||
-    (id === 107 && warpColumn === "warp1") ||
-    (id === 108 && warpColumn === "warp0");
-}
-
 function isIntegerText(value) {
   return /^-?\d+$/.test(clean(value));
+}
+
+function storedUnsignedByte(value) {
+  const text = clean(value);
+  if (!isIntegerText(text)) return null;
+  const wrapped = BigInt(text) % 256n;
+  return Number(wrapped < 0n ? wrapped + 256n : wrapped);
 }

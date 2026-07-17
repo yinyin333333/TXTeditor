@@ -7,6 +7,7 @@ import { markTableViewDirty, resetTableViewState, tableViewState } from "./table
 
 export class TableDocument {
   constructor(name = "Untitled.txt", rows = [[]], meta = {}) {
+    this.kind = "table";
     this.rows = rows.length ? rows : [[]];
     Object.defineProperty(this, "serializedColumnCount", {
       configurable: true,

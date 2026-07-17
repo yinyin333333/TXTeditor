@@ -132,7 +132,7 @@ export function problemsPanelHtml({
     <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsed.has(fileName) ? "" : " open"}>
       <summary class="problem-file-header">${escapeHtml(fileName)} <span class="problem-file-count">(${fileDiagnostics.length})</span></summary>
       ${fileDiagnostics.map((diagnostic) => `
-        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}">
+        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? " disabled aria-disabled=\"true\" title=\"JSON diagnostics are read-only in TXTEditor.\"" : ""}>
           <span class="problem-location">R${diagnostic.rowIndex + 1}:C${diagnostic.columnIndex + 1}</span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}

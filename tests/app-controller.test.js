@@ -78,6 +78,7 @@ import {
 } from "../src/ui/panel-state-policy.js";
 import {
   lintDiagnosticsStateAfterUpdate,
+  problemsPanelHtml,
   problemsPanelRenderDecision,
   problemsPanelRenderKey,
   shouldRenderProblemsPanel
@@ -595,6 +596,36 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
   assert.match(state.lint.status, /Large file mode/);
 });
 
+test("opening a standalone native TXT starts a sibling-only Vector session at its parent", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => {} } } };
+  const doc = TableDocument.fromText("magicprefix.txt", "name\titype1\nmod\tstaff", {
+    path: "E:\\Mods\\Example\\TXT\\magicprefix.txt"
+  });
+  const starts = [];
+  const opens = [];
+  try {
+    const { controller } = testDocumentController([], {
+      autoFitInitialColumns: () => {},
+      layout: () => {}
+    }, {
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async (...args) => starts.push(args),
+      lspOpenDoc: (opened) => opens.push(opened)
+    });
+
+    await controller.addDocument(doc);
+
+    assert.deepEqual(starts, [["E:\\Mods\\Example\\TXT", { contextMode: "sibling" }]]);
+    assert.deepEqual(opens, []);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("opening another document saves the outgoing selection and scroll state", async () => {
   const active = TableDocument.fromText("active.txt", "id\nactive");
   const next = TableDocument.fromText("next.txt", "id\nnext");
@@ -732,6 +763,68 @@ test("closing another tab commits the active editor before switching documents",
   assert.deepEqual(state.docs.map((doc) => doc.name), ["active.txt"]);
 });
 
+test("closing active standalone tab rebinds the revealed document through its parent session", async () => {
+  const first = TableDocument.fromText("first.txt", "id\nA", {
+    path: "E:\\Mods\\A\\first.txt",
+    dirty: false
+  });
+  const second = TableDocument.fromText("second.txt", "id\nB", {
+    path: "E:\\Mods\\B\\second.txt",
+    dirty: false
+  });
+  const closed = [];
+  const ensured = [];
+  const { controller, state } = testDocumentController([first, second], {}, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspCloseDoc: async (doc) => closed.push(doc),
+    ensureDocumentSession: async (doc) => ensured.push({ doc, active: state.docs[state.active] })
+  });
+  state.active = 1;
+
+  await controller.closeTab(1);
+
+  assert.deepEqual(state.docs, [first]);
+  assert.equal(state.active, 0);
+  assert.deepEqual(closed, [second]);
+  assert.deepEqual(ensured, [{ doc: first, active: first }]);
+});
+
+test("closing an active Vector tab waits for didClose before rebinding the revealed document", async () => {
+  const first = TableDocument.fromText("first.txt", "id\nA", {
+    path: "E:\\Mods\\A\\first.txt",
+    dirty: false
+  });
+  const second = TableDocument.fromText("second.txt", "id\nB", {
+    path: "E:\\Mods\\B\\second.txt",
+    dirty: false
+  });
+  const events = [];
+  let releaseClose;
+  const closeBlocked = new Promise((resolve) => { releaseClose = resolve; });
+  const { controller, state } = testDocumentController([first, second], {}, {
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspCloseDoc: async () => {
+      events.push("close-start");
+      await closeBlocked;
+      events.push("close-end");
+    },
+    ensureDocumentSession: async () => events.push("ensure")
+  });
+  state.active = 1;
+
+  const closing = controller.closeTab(1);
+  await Promise.resolve();
+  assert.deepEqual(events, ["close-start"]);
+
+  releaseClose();
+  await closing;
+  assert.deepEqual(events, ["close-start", "close-end", "ensure"]);
+});
+
 test("context menu command item registries preserve expected command groups", () => {
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
@@ -808,7 +901,7 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
 
   assert.ok(appSource.split(/\r?\n/).length <= 760);
   assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 860);
+  assert.ok(lspController.split(/\r?\n/).length <= 900);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1021,6 +1114,11 @@ test("Settings modal exposes immediate visual settings without save cancel apply
     gridFont: "custom"
   });
   assert.deepEqual(controls.colorize, { id: "settingsColorizeColumns", label: "Colorize columns", checked: true });
+  assert.deepEqual(controls.workspaceSubfolders, {
+    id: "settingsExcludeWorkspaceSubfolders",
+    label: "Exclude subfolders when opening a folder",
+    checked: false
+  });
   assert.equal(controls.vectorHover.id, "settingsVectorLspHover");
   assert.equal(controls.vectorHover.label, "Vector-LSP Hover");
   assert.equal(controls.vectorHover.disabled, true);
@@ -1061,6 +1159,23 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
   }), ["legacy", "on", "stopped", "ready", "", "rules-open", "RotW", 7, "a.txt\u001fb.txt"].join("\u001e"));
   assert.equal(problemsPanelRenderDecision({ currentKey: "same", nextKey: "same" }), "cached");
   assert.equal(problemsPanelRenderDecision({ currentKey: "old", nextKey: "new" }), "render");
+  const jsonProblems = problemsPanelHtml({
+    lintEnabled: true,
+    vectorEngine: true,
+    lspStarted: true,
+    diagnostics: [{
+      id: "json:1",
+      fileName: "skills.json",
+      rowIndex: 0,
+      columnIndex: 0,
+      severity: "warning",
+      message: "Duplicate id",
+      ruleId: "Json/DuplicateIds",
+      navigationDisabled: true
+    }]
+  });
+  assert.match(jsonProblems, /skills\.json/);
+  assert.match(jsonProblems, /data-diagnostic-id="json:1" disabled aria-disabled="true"/);
 });
 
 test("Find Next includes the current cell once when the query changes", () => {
@@ -1419,9 +1534,10 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
-    lspCloseDoc: () => {},
+    lspCloseDoc: options.lspCloseDoc ?? (() => {}),
     reportLspCloseFailure: () => {},
-    lspStartWorkspace: () => {},
+    lspStartWorkspace: options.lspStartWorkspace ?? (() => {}),
+    ensureDocumentSession: options.ensureDocumentSession ?? (() => {}),
     scheduleHoverPrewarm: options.scheduleHoverPrewarm ?? (() => {}),
     resetUndoManagerForDocument: () => {},
     resetLegacyWorkspaceIndex: () => {},

@@ -181,7 +181,7 @@ test("V-TXT-13 ignores delayed worker results after a Legacy lint cancellation",
 
     controller.scheduleFull("cancellation-regression", 0);
     for (let attempt = 0; attempt < 20 && workerHarness.waiting.length < 2; attempt += 1) {
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
     assert.equal(workerHarness.waiting.length, 2);
 

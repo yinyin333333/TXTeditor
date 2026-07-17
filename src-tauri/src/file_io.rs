@@ -1,5 +1,6 @@
 use crate::native_paths::file_path_to_string;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io;
@@ -14,6 +15,7 @@ pub(crate) async fn open_files_dialog(app: tauri::AppHandle) -> Result<Vec<Strin
         .dialog()
         .file()
         .add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
+        .add_filter("Localization JSON", &["json"])
         .blocking_pick_files();
     match picked {
         Some(paths) => paths.into_iter().map(file_path_to_string).collect(),
@@ -35,10 +37,13 @@ pub(crate) async fn save_file_dialog(
     app: tauri::AppHandle,
     default_name: String,
 ) -> Result<Option<String>, String> {
-    app.dialog()
-        .file()
-        .add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
-        .set_file_name(default_name)
+    let dialog = app.dialog().file().set_file_name(default_name.clone());
+    let dialog = if default_name.to_ascii_lowercase().ends_with(".json") {
+        dialog.add_filter("Localization JSON", &["json"])
+    } else {
+        dialog.add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
+    };
+    dialog
         .blocking_save_file()
         .map(file_path_to_string)
         .transpose()
@@ -262,8 +267,31 @@ fn journal_path_for(target: &Path) -> PathBuf {
     sibling_path(target, ".save-journal")
 }
 
-fn lock_path_for(target: &Path) -> PathBuf {
-    sibling_path(target, ".save-lock")
+fn lock_path_for(target: &Path) -> Result<PathBuf, String> {
+    let absolute = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(target)
+    };
+    let identity = if absolute.exists() {
+        absolute.canonicalize().map_err(|err| err.to_string())?
+    } else if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
+        parent
+            .canonicalize()
+            .map(|parent| parent.join(name))
+            .unwrap_or(absolute)
+    } else {
+        absolute
+    };
+    #[cfg(windows)]
+    let identity = identity.to_string_lossy().to_lowercase();
+    #[cfg(not(windows))]
+    let identity = identity.to_string_lossy().into_owned();
+    let directory = std::env::temp_dir().join("txteditor-save-locks");
+    fs::create_dir_all(&directory).map_err(|err| err.to_string())?;
+    Ok(directory.join(format!("{:x}.lock", Sha256::digest(identity.as_bytes()))))
 }
 
 fn sibling_path(target: &Path, suffix: &str) -> PathBuf {
@@ -365,7 +393,7 @@ fn with_target_lock<T>(
     target: &Path,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let lock_path = lock_path_for(target);
+    let lock_path = lock_path_for(target)?;
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -786,6 +814,30 @@ mod tests {
         assert_eq!(second.name, "items.txt");
         assert_eq!(fs::read_to_string(&target).unwrap(), "id\n2\n");
         assert!(!dir.join(".items.txt.tmp").exists());
+        assert!(!dir.join(".items.txt.save-lock").exists());
+        assert!(lock_path_for(&target).unwrap().exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_lock_identity_is_stable_and_kept_outside_the_target_directory() {
+        let dir =
+            std::env::temp_dir().join(format!("txteditor-lock-path-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("item-names.json");
+
+        let first = lock_path_for(&target).unwrap();
+        let second = lock_path_for(&dir.join(".").join("item-names.json")).unwrap();
+
+        assert_eq!(first, second);
+        assert_ne!(first.parent(), Some(dir.as_path()));
+        assert_eq!(
+            first.extension().and_then(|value| value.to_str()),
+            Some("lock")
+        );
+        assert!(!first.to_string_lossy().contains("item-names.json"));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -978,7 +1030,7 @@ mod tests {
             .create(true)
             .read(true)
             .write(true)
-            .open(lock_path_for(&target))
+            .open(lock_path_for(&target).unwrap())
             .unwrap();
         lock.try_lock().unwrap();
 

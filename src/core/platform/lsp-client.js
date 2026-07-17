@@ -4,10 +4,14 @@ function withGeneration(payload, generation) {
   return generation == null ? payload : { ...payload, generation };
 }
 
-export async function lspStart(workspacePath, generation) {
+export async function lspStart(workspacePath, generation, contextMode = "workspace", referenceRootPath = "", includeSubfolders = true) {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
-  return api.invoke("lsp_start", withGeneration({ workspacePath }, generation));
+  const payload = { workspacePath };
+  if (contextMode === "sibling") payload.contextMode = contextMode;
+  if (referenceRootPath) payload.referenceRootPath = referenceRootPath;
+  if (!includeSubfolders) payload.includeSubfolders = false;
+  return api.invoke("lsp_start", withGeneration(payload, generation));
 }
 
 export async function lspOpenFile(uri, version, text, generation) {
@@ -74,6 +78,10 @@ export async function lspLogListen(callback) {
   if (!api.listen) return () => {};
   const unlisten = await api.listen("lsp-log", (event) => callback(event.payload));
   return unlisten;
+}
+
+export async function lspWatchedFilesListen(callback) {
+  return listenForLspEvent("lsp-watched-files-changed", callback);
 }
 
 async function listenForLspEvent(eventName, callback) {

@@ -1,5 +1,10 @@
+import { normalizePath } from "../core/lint-paths.js";
+
 export function documentOpenPlan(docs, doc) {
-  const existingIndex = doc?.path ? docs.findIndex((openDoc) => openDoc.path === doc.path) : -1;
+  const target = doc?.path ? normalizePath(doc.path) : "";
+  const existingIndex = target
+    ? docs.findIndex((openDoc) => normalizePath(openDoc.path) === target)
+    : -1;
   if (existingIndex >= 0) return { action: "activate-existing", activeIndex: existingIndex };
   return { action: "add-new", activeIndex: docs.length };
 }
