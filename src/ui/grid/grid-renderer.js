@@ -202,6 +202,14 @@ export function drawGridActiveRowHeaderChrome(grid, y, height) {
   return drawActiveRowHeaderChrome(grid, y, height);
 }
 
+function drawActiveCellBorder(grid, x, y, width, height) {
+  const ctx = grid.ctx;
+  ctx.strokeStyle = GRID_COLORS.active;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
+  ctx.lineWidth = 1;
+}
+
 function drawCell(grid, row, column, x, y, width, height, options = {}) {
   const editing = grid.editingCell();
   const editingThisCell = editing?.row === row && editing?.column === column;
@@ -235,18 +243,14 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
   drawDiagnosticTextOverlay(grid, row, column, value, x, y, width, height, { active });
   if (typeof grid.drawDiagnosticMarker === "function") grid.drawDiagnosticMarker(row, column, x, y, width, height);
   else drawDiagnosticMarker(grid, row, column, x, y, width, height);
-  if (active) {
-    ctx.strokeStyle = GRID_COLORS.active;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
-    ctx.lineWidth = 1;
-  }
+  if (active) drawActiveCellBorder(grid, x, y, width, height);
 }
 
 function redrawSelectedCellSeparator(grid, row, column, x, y, width, height, options = {}) {
   const editing = grid.editingCell();
-  if (editing?.row === row && editing?.column === column) return;
-  if (!grid.selection.contains(row, column)) return;
+  if (editing?.row === row && editing?.column === column) return null;
+  if (!grid.selection.contains(row, column)) return null;
+  const active = grid.selection.focus.row === row && grid.selection.focus.column === column;
   const frozen = options.frozenRow || options.frozenColumn;
   grid.ctx.strokeStyle = cellGridLineColor({ selected: true, frozen });
   grid.ctx.strokeRect(x, y, width, height);
@@ -255,6 +259,7 @@ function redrawSelectedCellSeparator(grid, row, column, x, y, width, height, opt
   } else {
     drawDiagnosticMarker(grid, row, column, x, y, width, height);
   }
+  return active ? { x, y, width, height } : null;
 }
 
 export function drawGridCellLayer(grid, rows, columns, options = {}) {
@@ -263,9 +268,10 @@ export function drawGridCellLayer(grid, rows, columns, options = {}) {
       drawCell(grid, row.row, column.column, column.left, row.top, column.width, row.height, options);
     }
   }
+  let activeCell = null;
   for (const row of rows) {
     for (const column of columns) {
-      redrawSelectedCellSeparator(
+      activeCell = redrawSelectedCellSeparator(
         grid,
         row.row,
         column.column,
@@ -274,8 +280,11 @@ export function drawGridCellLayer(grid, rows, columns, options = {}) {
         column.width,
         row.height,
         options
-      );
+      ) ?? activeCell;
     }
+  }
+  if (activeCell) {
+    drawActiveCellBorder(grid, activeCell.x, activeCell.y, activeCell.width, activeCell.height);
   }
 }
 

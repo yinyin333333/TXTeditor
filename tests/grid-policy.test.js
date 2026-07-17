@@ -1178,6 +1178,85 @@ test("selection separator redraw wins after later adjacent cells", () => {
   assert.equal(paths.length, 0);
 });
 
+test("selection separator redraw keeps the active border above diagnostic markers", () => {
+  const operations = [];
+  let strokeStyle = "";
+  let fillStyle = "";
+  let lineWidth = 1;
+  const ctx = {
+    set fillStyle(value) {
+      fillStyle = value;
+    },
+    get fillStyle() {
+      return fillStyle;
+    },
+    set strokeStyle(value) {
+      strokeStyle = value;
+    },
+    get strokeStyle() {
+      return strokeStyle;
+    },
+    set lineWidth(value) {
+      lineWidth = value;
+    },
+    get lineWidth() {
+      return lineWidth;
+    },
+    fillRect() {},
+    strokeRect: (x, y, width, height) => operations.push({
+      kind: "strokeRect",
+      strokeStyle,
+      lineWidth,
+      x,
+      y,
+      width,
+      height
+    }),
+    measureText: (value) => ({ width: String(value).length * 7 })
+  };
+  const grid = {
+    ctx,
+    rowHeaderWidth: 48,
+    colorizeColumns: false,
+    selection: {
+      focus: { row: 2, column: 1 },
+      contains: (row, column) => row === 2 && (column === 1 || column === 2)
+    },
+    doc: {
+      columnCount: 3,
+      getCell: () => "selected"
+    },
+    font: () => "12px sans-serif",
+    editingCell: () => null,
+    fillText() {},
+    drawDiagnosticMarker: (row, column) => operations.push({ kind: "cornerMarker", row, column })
+  };
+
+  drawGridCellLayer(grid, [
+    { row: 2, top: 200, height: 30 }
+  ], [
+    { column: 1, left: 100, width: 80 },
+    { column: 2, left: 180, width: 80 }
+  ]);
+
+  const activeBorders = operations.filter((operation) => (
+    operation.kind === "strokeRect"
+    && operation.strokeStyle === gridColor("active")
+    && operation.lineWidth === 2
+  ));
+  assert.equal(activeBorders.length, 2);
+  assert.deepEqual(operations.at(-2), { kind: "cornerMarker", row: 2, column: 2 });
+  assert.deepEqual(operations.at(-1), {
+    kind: "strokeRect",
+    strokeStyle: gridColor("active"),
+    lineWidth: 2,
+    x: 101,
+    y: 201,
+    width: 78,
+    height: 28
+  });
+});
+
 test("active cell presses row and column indexes without highlighting field-name header cells", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const selection = { focus: { row: 2, column: 3 } };
