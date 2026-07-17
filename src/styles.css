@@ -95,6 +95,8 @@
   --grid-row-header-frozen-bg: var(--frozenCornerBg);
   --grid-selection: var(--selectionBg);
   --grid-selection-frozen: rgba(0, 105, 185, .76);
+  --grid-selection-line: #3e74a4;
+  --grid-selection-line-frozen: #4a8bc3;
   --grid-active: var(--activeCellBorder);
   --grid-row-text: var(--rowIndexText);
   --grid-text: var(--cellText);
@@ -227,6 +229,8 @@
   --grid-row-header-frozen-bg: var(--frozenCornerBg);
   --grid-selection: var(--selectionBg);
   --grid-selection-frozen: rgba(0, 96, 170, .42);
+  --grid-selection-line: #6f91b0;
+  --grid-selection-line-frozen: #567ea1;
   --grid-active: var(--activeCellBorder);
   --grid-row-text: var(--rowIndexText);
   --grid-text: var(--cellText);

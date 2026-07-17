@@ -47,9 +47,7 @@ function drawRows(grid, rows, columns) {
   const left = grid.rowHeaderWidth + grid.frozenColumnWidth();
   const top = grid.headerHeight + grid.frozenRowHeight();
   withClip(grid, left, top, grid.host.clientWidth - left, grid.host.clientHeight - top, () => {
-    for (const row of rows) {
-      for (const col of columns) drawCell(grid, row.row, col.column, col.left, row.top, col.width, row.height);
-    }
+    drawGridCellLayer(grid, rows, columns);
   });
   withClip(grid, 0, top, grid.rowHeaderWidth, grid.host.clientHeight - top, () => {
     for (const row of rows) drawRowHeader(grid, row.row, row.top, row.height);
@@ -74,13 +72,21 @@ function drawFrozenPanes(grid, columns, rows) {
   if (grid.doc.freezeFirstColumn && frozenColWidth) {
     const top = headerHeight + frozenRowHeight;
     withClip(grid, grid.rowHeaderWidth, top, frozenColWidth, grid.host.clientHeight - top, () => {
-      for (const row of rows) drawCell(grid, row.row, 0, grid.rowHeaderWidth, row.top, frozenColWidth, row.height, { frozenColumn: true });
+      drawGridCellLayer(grid, rows, [{
+        column: 0,
+        left: grid.rowHeaderWidth,
+        width: frozenColWidth
+      }], { frozenColumn: true });
     });
   }
   if (grid.doc.freezeFirstRow && frozenRowHeight) {
     const y = headerHeight;
     withClip(grid, grid.rowHeaderWidth + frozenColWidth, y, grid.host.clientWidth - grid.rowHeaderWidth - frozenColWidth, frozenRowHeight, () => {
-      for (const col of columns) drawCell(grid, 0, col.column, col.left, y, col.width, frozenRowHeight, { frozenRow: true });
+      drawGridCellLayer(grid, [{
+        row: 0,
+        top: y,
+        height: frozenRowHeight
+      }], columns, { frozenRow: true });
     });
     withClip(grid, 0, y, grid.rowHeaderWidth, frozenRowHeight, () => {
       drawRowHeader(grid, 0, y, frozenRowHeight, { frozenRow: true });
@@ -234,6 +240,42 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
     ctx.lineWidth = 2;
     ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
     ctx.lineWidth = 1;
+  }
+}
+
+function redrawSelectedCellSeparator(grid, row, column, x, y, width, height, options = {}) {
+  const editing = grid.editingCell();
+  if (editing?.row === row && editing?.column === column) return;
+  if (!grid.selection.contains(row, column)) return;
+  const frozen = options.frozenRow || options.frozenColumn;
+  grid.ctx.strokeStyle = cellGridLineColor({ selected: true, frozen });
+  grid.ctx.strokeRect(x, y, width, height);
+  if (typeof grid.drawDiagnosticMarker === "function") {
+    grid.drawDiagnosticMarker(row, column, x, y, width, height);
+  } else {
+    drawDiagnosticMarker(grid, row, column, x, y, width, height);
+  }
+}
+
+export function drawGridCellLayer(grid, rows, columns, options = {}) {
+  for (const row of rows) {
+    for (const column of columns) {
+      drawCell(grid, row.row, column.column, column.left, row.top, column.width, row.height, options);
+    }
+  }
+  for (const row of rows) {
+    for (const column of columns) {
+      redrawSelectedCellSeparator(
+        grid,
+        row.row,
+        column.column,
+        column.left,
+        row.top,
+        column.width,
+        row.height,
+        options
+      );
+    }
   }
 }
 
