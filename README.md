@@ -1,6 +1,6 @@
 # TXTeditor
 
-TXTeditor is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
+TXTeditor is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files and supported D2R JSON string files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
 
 TXTeditor is a personal project. I am not an experienced programmer, and most of the implementation was built with the help of OpenAI Codex. The app may contain bugs, incomplete behavior, or rough edges, but I am sharing it in case it is useful to others.
 
@@ -8,7 +8,7 @@ TXTeditor is not affiliated with, endorsed by, or connected to Blizzard Entertai
 
 ## Features
 
-- Open individual `.txt` files and supported D2R localization `.json` files.
+- Open individual `.txt` files and supported D2R JSON string files.
 - Open a D2R `data/global/excel` style folder or workspace, including subfolders when desired.
 - Open file paths passed to TXTeditor when the desktop app starts.
 - Edit tab-separated data in a grid interface.
@@ -22,32 +22,49 @@ TXTeditor is not affiliated with, endorsed by, or connected to Blizzard Entertai
 - D2R-aware linting in the live Problems panel.
 - Select either Vector-LSP or Legacy Lint as the active lint engine.
 - Run cross-file lint rules against the active workspace or the sibling files of an individually opened table.
+- Optionally lint supported D2R JSON string files with Vector-LSP.
 - Click a diagnostic to jump to the matching table cell or JSON range.
 - Configure versioned schema and bundled reference data, or use RotW and 2.4 profiles with Legacy Lint.
 
-## Localization JSON
+## JSON Editing
 
-TXTeditor recognizes D2R localization files under `data/local/lng/strings/*.json`. These files open in a CodeMirror-based editor with JSON syntax highlighting, bracket matching, folding, search, and syntax markers. Saving uses the same document tab workflow as table files. If an open JSON file changes on disk, TXTeditor asks whether to reload the disk version or keep the editor version.
+TXTeditor includes a dedicated JSON code editor based on [CodeMirror](https://codemirror.net/). It currently supports D2R string files under `data/local/lng/strings/*.json`, with JSON syntax highlighting, bracket matching, folding, search, and syntax markers.
 
-Localization JSON diagnostics are available through **Lint Options** when Vector-LSP is selected. They are disabled by default and can be enabled or disabled individually for duplicate IDs or keys, required string fields, and unused localization keys. The unused-key rule also has a configurable lower ID threshold. Only JSON files present in the mod are checked; layout JSON contributes key-usage evidence without being treated as an editable localization document.
+JSON files use the same document tab and save workflow as table files. If an open JSON file changes on disk, TXTeditor asks whether to reload the disk version or keep the editor version.
 
-Malformed JSON is reported as a syntax problem. When semantic results from the last parse are still relevant, a syntax error does not make those existing findings appear resolved merely because the current document cannot be parsed.
+## Linting
 
-## Lint Engines
+Lint results appear in the live Problems panel. Selecting a diagnostic opens the matching table cell or JSON range.
 
-Vector-LSP is the default engine for first-time runs. It provides bundled Vector-LSP diagnostics, Vector-LSP hover, Lint Options, localization JSON diagnostics, and Problems panel integration.
+### Lint Engines
 
-Legacy Lint uses TXTeditor's built-in lint path. In Legacy Lint mode, the Problems panel shows the RotW / 2.4 profile selector and Rules panel, and diagnostics are produced by TXTeditor instead of Vector-LSP. These rules are based on the behavior of [d2rlint](https://github.com/eezstreet/d2rlint), the original D2R linting tool made by eezstreet.
+Vector-LSP is the default engine for first-time runs. It provides bundled Vector-LSP diagnostics, Vector-LSP hover, Lint Options, JSON lint support, and Problems panel integration.
+
+Legacy Lint uses TXTeditor's built-in lint path. In Legacy Lint mode, diagnostics are produced by TXTeditor instead of Vector-LSP, and the Problems panel provides the profile selector and Rules panel.
 
 You can switch between Vector-LSP and Legacy Lint while TXTeditor is running. Only the selected engine updates the active diagnostics, cell markers, overview-ruler marks, and Problems panel. Switching back to Vector-LSP resyncs open files with Vector-LSP and restores the stored Vector-LSP Hover preference.
+
+TXTeditor uses a [modified fork of vector-lsp](https://github.com/yinyin333333/vector-lsp) that includes application-specific integration changes. This fork is derived from the [original vector-lsp](https://github.com/eezstreet/vector-lsp) created by eezstreet and remains subject to the original project's attribution and license.
+
+### Lint Profiles
+
+Legacy Lint includes RotW and 2.4 profiles. These rules are based on the behavior of [d2rlint](https://github.com/eezstreet/d2rlint), the original D2R linting tool made by eezstreet.
+
+The RotW-oriented lint behavior has been checked against the project's current d2rlint-compatible fixture/oracle workflow. Other data sets, mod variants, or future rule changes may still expose bugs or differences.
+
+### Reference Data and Cross-File Lint
 
 Cross-file rules use the files in the active workspace. For a separately opened `.txt` file, sibling tables in the same folder provide its lint context. Folder workspaces include subfolders by default; **Exclude subfolders when opening a folder** in Settings limits the session to the selected folder itself.
 
 Versioned bundled reference data can supply tables that are absent from the current mod. A local workspace, sibling, or explicitly opened table takes precedence over the bundled fallback, so diagnostics follow the files being edited. One selected reference version is used for the whole lint session.
 
-The RotW-oriented lint behavior has been checked against the project's current d2rlint-compatible fixture/oracle workflow. Other data sets, mod variants, or future rule changes may still expose bugs or differences.
+### JSON Lint
 
-TXTeditor uses a [modified fork of vector-lsp](https://github.com/yinyin333333/vector-lsp) that includes application-specific integration changes. This fork is derived from the [original vector-lsp](https://github.com/eezstreet/vector-lsp) created by eezstreet and remains subject to the original project's attribution and license.
+Vector-LSP can lint the supported D2R JSON string files. JSON lint is disabled by default and can be enabled through **Lint Options**. Individual rules can check duplicate IDs or keys, required string fields, and unused string keys. The unused-key rule also has a configurable lower ID threshold.
+
+Only JSON files present in the mod are checked. D2R layout JSON is used as evidence when checking whether string keys are used, but layout files are not opened as editable string documents.
+
+Malformed JSON is reported as a syntax problem. When semantic results from the last successful parse are still relevant, a syntax error does not make those existing findings appear resolved merely because the current document cannot be parsed.
 
 ## Build
 
