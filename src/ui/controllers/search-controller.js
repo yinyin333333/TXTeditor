@@ -3,7 +3,9 @@ import {
   SEARCH_DIRECTION_BACKWARD,
   SEARCH_DIRECTION_FORWARD,
   findInTable,
-  normalizeSearchScope
+  normalizeSearchScope,
+  replaceAllInTable,
+  replaceNextInTable
 } from "../../core/search.js";
 import {
   clampSearchModalPosition,
@@ -17,7 +19,17 @@ import {
   shouldSubmitSearchKey
 } from "../search-policy.js";
 
-export function createSearchController({ state, els, grid, activeDoc, updateActiveProblemHighlight, saveSelectionState = () => {}, jsonSearch = null, focusActiveEditor = () => els.host.focus() }) {
+export function createSearchController({
+  state,
+  els,
+  grid,
+  activeDoc,
+  updateActiveProblemHighlight,
+  saveSelectionState = () => {},
+  applyEdits = () => {},
+  jsonSearch = null,
+  focusActiveEditor = () => els.host.focus()
+}) {
   const searchModalCandidate = els.searchPanel.querySelector?.(".search-modal");
   const searchModal = searchModalCandidate?.classList
     && typeof searchModalCandidate.getBoundingClientRect === "function"
@@ -89,11 +101,28 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
 
   function showSearch() {
     if (isJsonDocument(activeDoc())) return jsonSearch?.openSearch?.();
+    setReplaceMode(false);
     Object.assign(state.search, searchStateAfterInput());
     els.searchPanel.classList.remove("hidden");
     clampSearchModalToViewport();
     els.searchInput.focus();
     els.searchInput.select();
+  }
+
+  function showReplace() {
+    if (isJsonDocument(activeDoc())) return jsonSearch?.openReplace?.();
+    setReplaceMode(true);
+    Object.assign(state.search, searchStateAfterInput());
+    els.searchPanel.classList.remove("hidden");
+    clampSearchModalToViewport();
+    els.searchInput.focus();
+    els.searchInput.select();
+  }
+
+  function setReplaceMode(enabled) {
+    if (els.searchTitle) els.searchTitle.textContent = enabled ? "Find and Replace" : "Find";
+    setElementHidden(els.searchReplaceRow, !enabled);
+    setElementHidden(els.searchReplaceActions, !enabled);
   }
 
   function closeSearch() {
@@ -141,6 +170,47 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     return find(SEARCH_DIRECTION_BACKWARD);
   }
 
+  function replaceNext() {
+    if (isJsonDocument(activeDoc())) return jsonSearch?.openReplace?.();
+    const query = els.searchInput.value;
+    const scope = selectedSearchScope();
+    const focus = state.selection.focus;
+    const result = replaceNextInTable(activeDoc(), query, els.searchReplaceInput?.value ?? "", focus, { scope });
+    if (!result.found || !result.replacementCount) {
+      els.searchStatus.textContent = "No results";
+      return false;
+    }
+    applyEdits(result.edits, "Replace");
+    const target = searchTargetForResult(scope, result.found, focus);
+    Object.assign(state.search, searchStateAfterFind(query, scope));
+    state.selection.set(target.row, target.column);
+    saveSelectionState();
+    grid.scrollCellToCenter(target.row, target.column, searchScrollOptionsForScope(scope));
+    grid.draw();
+    updateActiveProblemHighlight();
+    els.searchStatus.textContent = `Replaced 1 match at ${searchStatusText(scope, result.found, target)}`;
+    return true;
+  }
+
+  function replaceAll() {
+    if (isJsonDocument(activeDoc())) return jsonSearch?.openReplace?.();
+    const query = els.searchInput.value;
+    const scope = selectedSearchScope();
+    const result = replaceAllInTable(activeDoc(), query, els.searchReplaceInput?.value ?? "", { scope });
+    if (!result.replacementCount) {
+      els.searchStatus.textContent = "No results";
+      return 0;
+    }
+    applyEdits(result.edits, "Replace All");
+    Object.assign(state.search, searchStateAfterInput());
+    saveSelectionState();
+    grid.draw();
+    updateActiveProblemHighlight();
+    const cells = result.edits.length;
+    els.searchStatus.textContent = `Replaced ${result.replacementCount} match${result.replacementCount === 1 ? "" : "es"} in ${cells} cell${cells === 1 ? "" : "s"}`;
+    return result.replacementCount;
+  }
+
   function submitSearch(event) {
     if (!shouldSubmitSearchKey(event.key)) return false;
     event.preventDefault();
@@ -160,6 +230,16 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     els.searchInput.addEventListener("input", () => {
       Object.assign(state.search, searchStateAfterInput());
     });
+    els.searchReplaceInput?.addEventListener("keydown", (event) => {
+      if (shouldSubmitSearchKey(event.key)) {
+        event.preventDefault();
+        replaceNext();
+      }
+      if (shouldCloseSearchKey(event.key)) {
+        event.preventDefault();
+        closeSearch();
+      }
+    });
     els.searchPanel.querySelectorAll("input[name='searchScope']").forEach((input) => {
       input.addEventListener("keydown", submitSearch);
       input.addEventListener("change", () => {
@@ -168,6 +248,8 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     });
     els.searchPanel.addEventListener("click", (event) => {
       if (event.target.closest("[data-search-previous]")) findPrevious();
+      if (event.target.closest("[data-search-replace]")) replaceNext();
+      if (event.target.closest("[data-search-replace-all]")) replaceAll();
       if (event.target === els.searchPanel || event.target.closest("[data-search-close]")) closeSearch();
     });
     els.searchPanel.addEventListener("wheel", (event) => {
@@ -186,7 +268,16 @@ export function createSearchController({ state, els, grid, activeDoc, updateActi
     closeSearch,
     findNext,
     findPrevious,
+    replaceAll,
+    replaceNext,
+    showReplace,
     showSearch,
     wireEvents
   };
+}
+
+function setElementHidden(element, hidden) {
+  if (!element?.classList) return;
+  if (hidden) element.classList.add("hidden");
+  else element.classList.remove("hidden");
 }

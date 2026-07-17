@@ -201,19 +201,12 @@ gridCommandController = createGridCommandController({
   saveSelectionState,
   renderChrome,
   showError,
+  promptNumber,
   applyFreezeToDoc,
   rowsForContextOperation,
   columnsFromSelection
 });
-const {
-  toggleFreeze,
-  unhideAll,
-  zoomBy,
-  zoomReset,
-  resetRowHeights,
-  resizeFit,
-  cloneRows
-} = gridCommandController;
+const { toggleFreeze, unhideAll, zoomBy, zoomReset, resetRowHeights, goToRow, resizeFit, cloneRows, cloneColumns } = gridCommandController;
 lspController = createLspController({
   state,
   els,
@@ -324,6 +317,7 @@ const searchController = createSearchController({
   activeDoc,
   updateActiveProblemHighlight,
   saveSelectionState,
+  applyEdits,
   jsonSearch: jsonEditorController,
   focusActiveEditor
 });
@@ -368,13 +362,18 @@ const commandController = createCommandController({
     redo,
     showSearch: searchController.showSearch,
     findNext: searchController.findNext,
+    findPrevious: searchController.findPrevious,
+    showReplace: searchController.showReplace,
+    goToRow,
+    nextTab: () => shellController?.switchTab(1),
+    previousTab: () => shellController?.switchTab(-1),
     copySelection,
     pasteSelection,
     cutSelection,
     selectAll,
     addRows,
     insertRows,
-    cloneRows,
+    cloneRows, cloneColumns,
     addColumns,
     insertColumns,
     unhideAll,
@@ -436,7 +435,7 @@ shellController = createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
-  ensureDocumentSession: lspController.ensureStandaloneSession,
+  ensureDocumentSession: lspController.ensureStandaloneSession, commitActiveEditor,
   saveSelectionState,
   recordUiPerf,
   perfNow,
@@ -477,6 +476,7 @@ const eventController = createAppEventController({
   selectAll,
   jsonEditorOwnsTarget: jsonEditorController.editorOwnsTarget,
   handleExternalChangeDialogClick: documentController.handleExternalChangeDialogClick,
+  commitActiveEditor,
   focusActiveEditor
 });
 renderChrome();

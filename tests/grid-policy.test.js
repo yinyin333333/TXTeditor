@@ -171,6 +171,8 @@ test("grid keyboard selection target preserves tab and arrow navigation semantic
 
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "Tab" }), { row: 2, column: 3, extend: false });
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "Tab", shiftKey: true }), { row: 2, column: 1, extend: false });
+  assert.equal(keyboardSelectionTarget({ ...base, key: "Tab", ctrlKey: true }), null);
+  assert.equal(keyboardSelectionTarget({ ...base, key: "Tab", ctrlKey: true, shiftKey: true }), null);
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowDown", shiftKey: true }), { row: 3, column: 2, extend: true });
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowRight", ctrlKey: true }), { row: 2, column: 3, extend: false });
   assert.deepEqual(keyboardSelectionTarget({ ...base, key: "ArrowUp", ctrlKey: true }), { row: 0, column: 2, extend: false });

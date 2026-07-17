@@ -826,7 +826,7 @@ test("closing an active Vector tab waits for didClose before rebinding the revea
 });
 
 test("context menu command item registries preserve expected command groups", () => {
-  assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
+  assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column", "clone-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
   const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
@@ -1082,7 +1082,7 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
 
-test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
+test("context menu uses one explicit active submenu and exposes row and column cloning", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const activeGroup = { dataset: { menuGroup: "Row Operations" } };
   const inactiveGroup = { dataset: { menuGroup: "Column Operations" } };
@@ -1092,8 +1092,10 @@ test("context menu uses one explicit active submenu and exposes Clone Row only",
   assert.equal(contextMenuGroupIsActive(inactiveGroup, activeGroup), false);
   assert.deepEqual(contextMenuHiddenState(), { contextMenuActiveGroup: "", contextMenuOpen: false });
   assert.equal(rowCommandItems().some((item) => item.id === "clone-row" && item.label === "Clone Row"), true);
+  assert.equal(columnCommandItems().some((item) => item.id === "clone-column" && item.label === "Clone Column(s)"), true);
   assert.equal(rowCommandItems().some((item) => item.label === "Swap Rows"), false);
   assert.match(css, /\.menu-group\.active > \.submenu\s*\{\s*display: block;/);
+  assert.match(css, /\.submenu\s*\{[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/);
   assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
 });
 
@@ -1102,6 +1104,13 @@ test("row context menu orders Clone Row after hide and delete without changing c
   const ids = rowItems.map((item) => item.id);
   assert.deepEqual(ids, ["add-row", "insert-row", "hide-row", "delete-row", "clone-row"]);
   assert.deepEqual(rowItems.at(-1), { id: "clone-row", label: "Clone Row", disabled: true });
+});
+
+test("column context menu orders Clone Column(s) after hide and delete", () => {
+  const columnItems = columnCommandItems({ cloneDisabled: true });
+  const ids = columnItems.map((item) => item.id);
+  assert.deepEqual(ids, ["add-column", "insert-column", "hide-column", "delete-column", "clone-column"]);
+  assert.deepEqual(columnItems.at(-1), { id: "clone-column", label: "Clone Column(s)", disabled: true });
 });
 
 test("Settings modal exposes immediate visual settings without save cancel apply", () => {

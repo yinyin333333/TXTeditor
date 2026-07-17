@@ -82,12 +82,20 @@
       <div class="modal search-modal">
         <h2 id="searchTitle" data-search-drag-handle>Find</h2>
         <input id="searchInput" class="modal-input" type="search" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
+        <div id="searchReplaceRow" class="search-replace-row hidden">
+          <label for="searchReplaceInput">Replace with</label>
+          <input id="searchReplaceInput" class="modal-input" type="text" autocomplete="off" spellcheck="false" />
+        </div>
         <fieldset class="search-scope" aria-label="Search scope">
           <label><input type="radio" name="searchScope" value="all" checked /> All cells</label>
           <label><input type="radio" name="searchScope" value="column-titles" /> Column only</label>
           <label><input type="radio" name="searchScope" value="row-titles" /> Row only</label>
         </fieldset>
         <div id="searchStatus" class="search-status"></div>
+        <div id="searchReplaceActions" class="modal-actions search-replace-actions hidden">
+          <button data-search-replace>Replace</button>
+          <button data-search-replace-all>Replace All</button>
+        </div>
         <div class="modal-actions">
           <button data-search-previous aria-keyshortcuts="Shift+Enter">Find Prev</button>
           <button data-command="find-next" aria-keyshortcuts="Enter">Find Next</button>

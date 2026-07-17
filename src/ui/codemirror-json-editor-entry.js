@@ -187,6 +187,15 @@ export function openJsonSearch(view) {
   return Boolean(view && openSearchPanel(view));
 }
 
+export function openJsonReplace(view) {
+  if (!view) return false;
+  const opened = openSearchPanel(view);
+  const replaceInput = view.dom.querySelector(".cm-search input[name='replace']");
+  replaceInput?.focus();
+  replaceInput?.select();
+  return Boolean(opened);
+}
+
 export function findNextJson(view) {
   return Boolean(view && findNext(view));
 }

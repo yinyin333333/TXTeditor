@@ -102,6 +102,9 @@ The toolbar **Shortcuts** button lets you replace command and grid-scrolling sho
 - `Ctrl+S`: save
 - `Ctrl+Shift+S`: save as
 - `Ctrl+F`: search from the active cell
+- `F3` / `Shift+F3`: find next / previous
+- `Ctrl+Shift+H`: find and replace
+- `Ctrl+G`: go to a displayed row number
 - `Ctrl+B`: toggle Explorer panel
 - `Ctrl+L`: toggle Problems panel
 - `Ctrl+H`: reset all row heights to default
@@ -113,6 +116,7 @@ The toolbar **Shortcuts** button lets you replace command and grid-scrolling sho
 - `Ctrl+A`: select all
 - `Ctrl+P` / `Ctrl+Shift+P`: command palette
 - `Ctrl+W`: close current tab
+- `Ctrl+Tab` / `Ctrl+Shift+Tab`: move to the next / previous open tab
 - `Ctrl+Plus`: zoom in on the table grid
 - `Ctrl+Minus`: zoom out on the table grid
 - `Ctrl+0`: reset table-grid zoom

@@ -22,6 +22,7 @@ import {
 import {
   addColumnsCommand,
   addRowsCommand,
+  cloneColumnsCommand,
   cloneRowsCommand,
   copyRange,
   copyRanges,
@@ -230,23 +231,45 @@ test("insert and delete row are grouped undoable commands", () => {
   assert.equal(doc.getCell(1, 1), "2");
 });
 
-test("clone rows inserts body-row copies below the selected range and skips the header row", () => {
+test("clone rows appends body-row copies at the end and skips the header row", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2\n3\t4\n5\t6");
   const undo = new UndoManager();
-  const command = cloneRowsCommand(doc, [0, 1, 2], 3);
+  const command = cloneRowsCommand(doc, [0, 1, 2]);
   command.redo(doc);
   undo.push(command);
   assert.equal(doc.dirty, true);
   assert.equal(doc.rowCount, 6);
-  assert.equal(doc.getCell(3, 0), "1");
-  assert.equal(doc.getCell(4, 0), "3");
-  assert.equal(doc.getCell(5, 0), "5");
+  assert.equal(doc.getCell(3, 0), "5");
+  assert.equal(doc.getCell(4, 0), "1");
+  assert.equal(doc.getCell(5, 0), "3");
   undo.undo(doc);
   assert.equal(doc.rowCount, 4);
   assert.equal(doc.getCell(3, 0), "5");
   undo.redo(doc);
-  assert.equal(doc.getCell(3, 1), "2");
-  assert.equal(doc.getCell(4, 1), "4");
+  assert.equal(doc.getCell(4, 1), "2");
+  assert.equal(doc.getCell(5, 1), "4");
+});
+
+test("clone columns copies headers, body values, and widths as one undoable command", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
+  doc.columnWidths[0] = 170;
+  doc.columnWidths[2] = 230;
+  const undo = new UndoManager();
+  const command = cloneColumnsCommand(doc, [0, 2], 3);
+  command.redo(doc);
+  undo.push(command);
+  assert.equal(doc.columnCount, 5);
+  assert.deepEqual(doc.rows, [
+    ["a", "b", "c", "a", "c"],
+    ["1", "2", "3", "1", "3"],
+    ["4", "5", "6", "4", "6"]
+  ]);
+  assert.deepEqual(doc.columnWidths.slice(3), [170, 230]);
+  undo.undo(doc);
+  assert.equal(doc.columnCount, 3);
+  assert.deepEqual(doc.rows[1], ["1", "2", "3"]);
+  undo.redo(doc);
+  assert.deepEqual(doc.rows[2], ["4", "5", "6", "4", "6"]);
 });
 
 test("add row and add column append grouped undoable changes", () => {
@@ -775,6 +798,8 @@ test("only quick edit mode commits on arrow-key cell navigation", () => {
   assert.deepEqual(editorKeyAction({ key: "ArrowDown", editMode: "explicit" }), { action: "none" });
   assert.deepEqual(editorKeyAction({ key: "Enter", shiftKey: true, editMode: "explicit" }), { action: "commit-move", rowDelta: -1, columnDelta: 0 });
   assert.deepEqual(editorKeyAction({ key: "Tab", shiftKey: false, editMode: "explicit" }), { action: "commit-move", rowDelta: 0, columnDelta: 1 });
+  assert.deepEqual(editorKeyAction({ key: "Tab", ctrlKey: true, editMode: "explicit" }), { action: "none" });
+  assert.deepEqual(editorKeyAction({ key: "Tab", ctrlKey: true, shiftKey: true, editMode: "explicit" }), { action: "none" });
   assert.deepEqual(editorKeyAction({ key: "Escape", editMode: "quick" }), { action: "cancel" });
   assert.deepEqual(editorKeyAction({ key: "a", editMode: "quick" }), { action: "none" });
 });

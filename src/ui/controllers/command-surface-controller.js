@@ -57,7 +57,7 @@ export function createCommandSurfaceController({
     const focusRow = hit?.row ?? state.selection.focus.row;
     const focusCol = hit?.column ?? state.selection.focus.column;
     const entries = [
-      { type: "submenu", label: "Column Operations", items: columnCommandItems() },
+      { type: "submenu", label: "Column Operations", items: columnItems() },
       { type: "submenu", label: "Row Operations", items: rowItems() },
       { id: "resize-fit", label: "Resize To Fit" },
       { id: "resize-selected-fit", label: "Resize Selected To Fit" },
@@ -84,6 +84,9 @@ export function createCommandSurfaceController({
         event.preventDefault();
         activate();
       });
+    }
+    for (const button of els.contextMenu.querySelectorAll(":scope > button[data-run]")) {
+      button.addEventListener("mouseenter", closeContextSubmenu);
     }
     els.contextMenu.classList.remove("hidden");
     els.contextMenu.dataset.x = String(x);
@@ -113,6 +116,11 @@ export function createCommandSurfaceController({
     positionSubmenu(group);
   }
 
+  function closeContextSubmenu() {
+    state.contextMenuActiveGroup = "";
+    for (const group of els.contextMenu.querySelectorAll(".menu-group.active")) group.classList.remove("active");
+  }
+
   function positionSubmenu(group) {
     const submenu = group.querySelector(".submenu");
     if (!submenu) return;
@@ -138,7 +146,7 @@ export function createCommandSurfaceController({
     els.contextMenu.classList.add("hidden");
     Object.assign(state, contextMenuHiddenState());
     setContextMenuOpen(false);
-    for (const group of els.contextMenu.querySelectorAll(".menu-group.active")) group.classList.remove("active");
+    closeContextSubmenu();
   }
 
   function setContextMenuOpen(open) {
@@ -165,6 +173,11 @@ export function createCommandSurfaceController({
   function rowItems() {
     const cloneDisabled = rowsForContextOperation().filter((row) => row > 0 && row < activeDoc().rowCount).length === 0;
     return rowCommandItems({ cloneDisabled });
+  }
+
+  function columnItems() {
+    const cloneDisabled = activeDoc().columnCount === 0;
+    return columnCommandItems({ cloneDisabled });
   }
 
   return {

@@ -494,6 +494,7 @@ test("JSON editor controller retains state and navigates an exact diagnostic ran
   let selected = null;
   let cleared = 0;
   let measured = 0;
+  let replaceOpened = 0;
   const fakeModule = {
     createJsonEditorState({ text }) {
       return { doc: { length: text.length, toString: () => text } };
@@ -511,6 +512,7 @@ test("JSON editor controller retains state and navigates an exact diagnostic ran
     undoJsonEditor() { return true; },
     redoJsonEditor() { return true; },
     openJsonSearch() { return true; },
+    openJsonReplace() { replaceOpened += 1; return true; },
     findNextJson() { return true; },
     findPreviousJson() { return true; },
     selectAllJson() { return true; }
@@ -540,6 +542,8 @@ test("JSON editor controller retains state and navigates an exact diagnostic ran
   assert.equal(cleared, 0, "ordinary editor selection changes must not clear the problem highlight");
   controller.refreshAppearance();
   assert.equal(measured, 1);
+  assert.equal(controller.openReplace(), true);
+  assert.equal(replaceOpened, 1);
   controller.reconcileDiagnosticHighlight([]);
   assert.equal(cleared, 1);
   assert.equal(doc.activeDiagnosticId, null);

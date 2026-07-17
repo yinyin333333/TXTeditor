@@ -1,4 +1,5 @@
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
+import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
 import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
 
 export function createShellController({
@@ -25,6 +26,7 @@ export function createShellController({
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
   ensureDocumentSession = async () => {},
+  commitActiveEditor = () => {},
   saveSelectionState = () => {},
   recordUiPerf,
   perfNow,
@@ -176,6 +178,8 @@ export function createShellController({
   }
 
   function selectTab(index) {
+    if (index < 0 || index >= state.docs.length) return Promise.resolve();
+    commitActiveEditor();
     saveSelectionState();
     state.active = index;
     const doc = activeDoc();
@@ -196,6 +200,16 @@ export function createShellController({
     }
     finishActivation();
     return Promise.resolve();
+  }
+
+  function switchTab(delta) {
+    const index = cyclicDocumentIndex({
+      activeIndex: state.active,
+      documentCount: state.docs.length,
+      delta
+    });
+    if (index < 0 || index === state.active) return Promise.resolve();
+    return selectTab(index);
   }
 
   function bindExplorerFilter() {
@@ -279,6 +293,8 @@ export function createShellController({
   return {
     collapsedFileGroups,
     renderDiagnosticsChrome,
-    renderChrome
+    renderChrome,
+    selectTab,
+    switchTab
   };
 }

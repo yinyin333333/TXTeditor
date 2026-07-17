@@ -5,6 +5,11 @@ export const COMMAND_LABELS_BASE = [
   ["save-as", "Save As"],
   ["search", "Find/Search"],
   ["find-next", "Find Next"],
+  ["find-previous", "Find Previous"],
+  ["replace", "Find and Replace"],
+  ["go-to-row", "Go to Row"],
+  ["next-tab", "Next Tab"],
+  ["previous-tab", "Previous Tab"],
   ["undo", "Undo"],
   ["redo", "Redo"],
   ["copy", "Copy"],
@@ -21,6 +26,7 @@ export const COMMAND_LABELS_BASE = [
   ["unhide-all", "Unhide All"],
   ["add-column", "Add Column"],
   ["insert-column", "Insert Columns..."],
+  ["clone-column", "Clone Column(s)"],
   ["delete-column", "Delete Column"],
   ["clear-column", "Clear Column"],
   ["hide-column", "Hide Column"],
@@ -88,6 +94,11 @@ const COMMAND_ACTIONS = new Map([
   ["redo", { type: "handler", name: "redo" }],
   ["search", { type: "handler", name: "showSearch" }],
   ["find-next", { type: "handler", name: "findNext" }],
+  ["find-previous", { type: "handler", name: "findPrevious" }],
+  ["replace", { type: "handler", name: "showReplace" }],
+  ["go-to-row", { type: "handler", name: "goToRow" }],
+  ["next-tab", { type: "handler", name: "nextTab" }],
+  ["previous-tab", { type: "handler", name: "previousTab" }],
   ["copy", { type: "handler", name: "copySelection" }],
   ["paste", { type: "handler", name: "pasteSelection" }],
   ["cut", { type: "handler", name: "cutSelection" }],
@@ -102,6 +113,7 @@ const COMMAND_ACTIONS = new Map([
   ["unhide-rows", { type: "execute", name: "unhideRows" }],
   ["add-column", { type: "handler", name: "addColumns" }],
   ["insert-column", { type: "handler", name: "insertColumns" }],
+  ["clone-column", { type: "handler", name: "cloneColumns" }],
   ["delete-column", { type: "execute", name: "deleteColumn" }],
   ["clear-column", { type: "execute", name: "clearColumn" }],
   ["hide-column", { type: "execute", name: "hideColumn" }],
@@ -162,12 +174,13 @@ export function rowCommandItems({ cloneDisabled = false } = {}) {
   ];
 }
 
-export function columnCommandItems() {
+export function columnCommandItems({ cloneDisabled = false } = {}) {
   return [
     { id: "add-column", label: "Add Columns..." },
     { id: "insert-column", label: "Insert Columns..." },
     { id: "hide-column", label: "Hide Column(s)" },
-    { id: "delete-column", label: "Delete Column(s)" }
+    { id: "delete-column", label: "Delete Column(s)" },
+    { id: "clone-column", label: "Clone Column(s)", disabled: cloneDisabled }
   ];
 }
 
@@ -188,7 +201,8 @@ export function mathCommandItems() {
 }
 
 const JSON_DOCUMENT_COMMANDS = new Set([
-  "open-file", "open-folder", "save-file", "save-as", "search", "find-next",
+  "open-file", "open-folder", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
+  "next-tab", "previous-tab",
   "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",
   "open-app-settings", "open-shortcut-settings", "open-settings",
   "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems"

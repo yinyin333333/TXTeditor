@@ -5,6 +5,10 @@ export const SHORTCUT_DEFINITIONS = Object.freeze([
   shortcut("save-file", "Save", ["Ctrl+S"], { allowWhileEditing: true }),
   shortcut("save-as", "Save As", ["Ctrl+Shift+S"], { allowWhileEditing: true }),
   shortcut("search", "Find/Search", ["Ctrl+F"]),
+  shortcut("find-next", "Find Next", ["F3"], { allowWhileEditing: true }),
+  shortcut("find-previous", "Find Previous", ["Shift+F3"], { allowWhileEditing: true }),
+  shortcut("replace", "Find and Replace", ["Ctrl+Shift+H"], { allowWhileEditing: true }),
+  shortcut("go-to-row", "Go to Row", ["Ctrl+G"], { allowWhileEditing: true }),
   shortcut("undo", "Undo", ["Ctrl+Z"]),
   shortcut("redo", "Redo", ["Ctrl+Y", "Ctrl+Shift+Z"]),
   shortcut("copy", "Copy", ["Ctrl+C"]),
@@ -14,6 +18,8 @@ export const SHORTCUT_DEFINITIONS = Object.freeze([
   shortcut("clear-selection", "Clear Cell(s)", ["Delete"]),
   shortcut("show-palette", "Command Palette", ["Ctrl+P", "Ctrl+Shift+P"]),
   shortcut("close-tab", "Close Current Tab", ["Ctrl+W"], { allowWhileEditing: true }),
+  shortcut("next-tab", "Next Tab", ["Ctrl+Tab"], { allowWhileEditing: true }),
+  shortcut("previous-tab", "Previous Tab", ["Ctrl+Shift+Tab"], { allowWhileEditing: true }),
   shortcut("toggle-sidebar", "Toggle Explorer", ["Ctrl+B"]),
   shortcut("toggle-problems", "Toggle Problems", ["Ctrl+L"], { allowWhileEditing: true }),
   shortcut("reset-row-heights", "Reset Row Heights", ["Ctrl+H"], { allowWhileEditing: true }),
@@ -133,7 +139,8 @@ export function validateShortcutChord(value) {
   const chord = normalizeShortcutChord(value);
   if (!chord) return { valid: false, message: "Press a non-modifier key." };
   const { key, modifiers } = shortcutChordParts(chord);
-  if (FIXED_NAVIGATION_KEYS.has(key)) {
+  const modifiedTab = key === "Tab" && modifiers.some((modifier) => modifier === "Ctrl" || modifier === "Alt" || modifier === "Meta");
+  if (FIXED_NAVIGATION_KEYS.has(key) && !modifiedTab) {
     return { valid: false, message: `${key} is reserved for grid editing and navigation.` };
   }
   if (isPrintableShortcutKey(key) && !modifiers.some((modifier) => modifier === "Ctrl" || modifier === "Alt" || modifier === "Meta")) {
@@ -148,10 +155,11 @@ export function shortcutActionForEvent(event, bindings, {
 } = {}) {
   const chord = shortcutChordFromEvent(event);
   if (!chord) return null;
+  const { key } = shortcutChordParts(chord);
   for (const definition of SHORTCUT_DEFINITIONS) {
     if (definition.context !== context) continue;
     if (editingCell && !definition.allowWhileEditing) continue;
-    if (editingCell && !event.ctrlKey && !event.altKey && !event.metaKey) continue;
+    if (editingCell && !event.ctrlKey && !event.altKey && !event.metaKey && !isFunctionShortcutKey(key)) continue;
     const assigned = Array.isArray(bindings?.[definition.action]) ? bindings[definition.action] : definition.defaults;
     if (assigned.includes(chord)) return definition.action;
   }
@@ -235,4 +243,8 @@ function shortcutChordParts(chord) {
 
 function isPrintableShortcutKey(key) {
   return key.length === 1 || key === "Space" || key === "Plus" || key === "Minus";
+}
+
+function isFunctionShortcutKey(key) {
+  return /^F([1-9]|1\d|2[0-4])$/.test(key);
 }

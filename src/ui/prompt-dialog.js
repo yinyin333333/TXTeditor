@@ -54,7 +54,7 @@ export function askText({ title, message, defaultValue = "", inputMode = "text",
   });
 }
 
-export function promptNumber({ title, message, defaultValue = "", min = null, allowFloat = false, askText }) {
+export function promptNumber({ title, message, defaultValue = "", min = null, max = null, allowFloat = false, askText }) {
   return askText({
     title,
     message,
@@ -66,6 +66,7 @@ export function promptNumber({ title, message, defaultValue = "", min = null, al
       if (text === "" || !Number.isFinite(number)) return { error: "Enter a valid number." };
       if (!allowFloat && String(number) !== text) return { error: "Enter a whole number." };
       if (min !== null && number < min) return { error: `Enter a number ${min} or higher.` };
+      if (max !== null && number > max) return { error: `Enter a number ${max} or lower.` };
       return { value: number };
     }
   });

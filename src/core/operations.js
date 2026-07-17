@@ -218,7 +218,7 @@ export function cloneRowsCommand(doc, rows, insertAt = null) {
     .filter((row) => row > 0 && row < doc.rowCount)
     .sort((a, b) => a - b);
   const values = targets.map((row) => Array.from({ length: doc.columnCount }, (_, column) => doc.getCell(row, column)));
-  const at = clamp(insertAt ?? ((targets.at(-1) ?? 0) + 1), 1, doc.rowCount);
+  const at = clamp(insertAt ?? doc.rowCount, 1, doc.rowCount);
   return makeCustomCommand(`Clone ${targets.length} Row(s)`, {
     empty: targets.length === 0,
     redo(target) {
@@ -278,6 +278,27 @@ export function addColumnsCommand(doc, count = 1) {
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
     undoLspChange: { kind: "deleteColumns", index: at, count: safeCount }
+  });
+}
+
+export function cloneColumnsCommand(doc, columns, insertAt = null) {
+  const targets = [...new Set(columns)]
+    .filter((column) => column >= 0 && column < doc.columnCount)
+    .sort((a, b) => a - b);
+  const values = Array.from({ length: doc.rowCount }, (_, row) => targets.map((column) => doc.getCell(row, column)));
+  const widths = targets.map((column) => doc.columnWidths[column]);
+  const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
+  return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
+    empty: targets.length === 0,
+    redo(target) {
+      target.restoreColumns(at, values, widths);
+    },
+    undo(target) {
+      target.removeColumns(at, targets.length);
+    },
+    contentChanged: true,
+    lspChange: { kind: "insertColumns", index: at, count: targets.length },
+    undoLspChange: { kind: "deleteColumns", index: at, count: targets.length }
   });
 }
 

@@ -136,6 +136,7 @@ export function createJsonEditorController({
     findPrevious: () => run("findPreviousJson"),
     focusActive,
     navigateToDiagnostic,
+    openReplace: () => run("openJsonReplace"),
     openSearch: () => run("openJsonSearch"),
     reconcileDiagnosticHighlight,
     refreshAppearance,
