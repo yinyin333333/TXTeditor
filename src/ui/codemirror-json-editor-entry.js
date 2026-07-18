@@ -21,6 +21,7 @@ import {
 import {
   findNext,
   findPrevious,
+  gotoLine,
   highlightSelectionMatches,
   openSearchPanel,
   searchKeymap
@@ -127,6 +128,7 @@ export function createJsonEditorState({ text = "", lineSeparator = "\n", onChang
       lintGutter(),
       EditorView.lineWrapping,
       keymap.of([
+        { key: "Ctrl-g", run: gotoLine },
         indentWithTab,
         ...defaultKeymap,
         ...historyKeymap,
