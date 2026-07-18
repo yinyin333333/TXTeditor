@@ -75,7 +75,10 @@ export function createJsonEditorController({
         character: diagnostic.endCharacter ?? diagnostic.startCharacter ?? diagnostic.columnIndex ?? 0
       }
     };
-    moduleApi.selectAndReveal(view, lspRangeToJsonOffsets(doc.text, range));
+    moduleApi.selectAndReveal(
+      view,
+      lspRangeToJsonOffsets(view.state.doc.toString(), range)
+    );
     return true;
   }
 
