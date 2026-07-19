@@ -210,6 +210,7 @@ test("large file payloads can parse through a worker before document constructio
 
 test("Tauri command boundary preserves JS invoke names and Rust registrations", () => {
   const platformSources = [
+    "../src/ui/app-runtime-utils.js",
     "../src/core/platform/config.js",
     "../src/core/platform/file-io.js",
     "../src/core/platform/lsp-client.js",
@@ -241,10 +242,12 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "open_files_dialog",
     "open_folder_dialog",
     "pick_file_path",
+    "read_clipboard_text",
     "read_text_files",
     "save_config",
     "save_file_dialog",
     "startup_open_paths",
+    "write_clipboard_text",
     "write_text_file_chunk_safe",
     "write_text_file_safe"
   ]);

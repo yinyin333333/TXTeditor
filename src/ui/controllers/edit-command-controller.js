@@ -24,10 +24,9 @@ export function createEditCommandController({
   promptNumber,
   showError
 }) {
-  async function copySelection() {
-    if (!hasOpenDocument()) return false;
+  async function copyRangesToClipboard(doc, ranges) {
     try {
-      await writeClipboardText(copyRanges(activeDoc(), state.selection.ranges));
+      await writeClipboardText(copyRanges(doc, ranges));
       return true;
     } catch (error) {
       showError(`Clipboard copy failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -35,16 +34,31 @@ export function createEditCommandController({
     }
   }
 
+  async function copySelection() {
+    if (!hasOpenDocument()) return false;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    return copyRangesToClipboard(targetDoc, targetRanges);
+  }
+
   async function cutSelection() {
-    if (!await copySelection()) return;
-    execute(clearRangesCommand(activeDoc(), state.selection.ranges, "Cut"));
+    if (!hasOpenDocument()) return;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    if (!await copyRangesToClipboard(targetDoc, targetRanges)) return;
+    if (activeDoc() !== targetDoc) return;
+    execute(clearRangesCommand(targetDoc, targetRanges, "Cut"));
   }
 
   async function pasteSelection() {
     if (!hasOpenDocument()) return;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    const targetFocus = { ...state.selection.focus };
     try {
       const text = await readClipboardText();
-      execute(pasteTextToRangesCommand(activeDoc(), state.selection.ranges, state.selection.focus, text));
+      if (activeDoc() !== targetDoc) return;
+      execute(pasteTextToRangesCommand(targetDoc, targetRanges, targetFocus, text));
     } catch (error) {
       showError(`Clipboard paste failed: ${error instanceof Error ? error.message : String(error)}`);
     }

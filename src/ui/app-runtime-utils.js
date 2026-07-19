@@ -40,7 +40,7 @@ export function createToastFeedback(els) {
 export async function writeClipboardText(text) {
   if (isTauriRuntime()) {
     const { invoke } = await tauriApi();
-    await invoke("plugin:clipboard-manager|write_text", { text: String(text) });
+    await invoke("write_clipboard_text", { text: String(text) });
     return;
   }
   const clipboard = globalThis.navigator?.clipboard;
@@ -53,7 +53,7 @@ export async function writeClipboardText(text) {
 export async function readClipboardText() {
   if (isTauriRuntime()) {
     const { invoke } = await tauriApi();
-    return invoke("plugin:clipboard-manager|read_text");
+    return invoke("read_clipboard_text");
   }
   const clipboard = globalThis.navigator?.clipboard;
   if (!clipboard?.readText) {
