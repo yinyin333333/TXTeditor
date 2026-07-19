@@ -64,6 +64,22 @@ export function pasteTextToRangesCommand(doc, ranges, focus, text) {
       return makeCellCommand("Paste Selection", doc, cells.map(({ row, column }) => ({ row, column, value })));
     }
   }
+
+  const matrixWidth = rows.reduce((width, row) => Math.max(width, row.length), 0);
+  if (rows.length > 1 || matrixWidth > 1) {
+    const [range] = ranges;
+    const isSingleMultiCellRange = ranges.length === 1
+      && (range.bottom > range.top || range.right > range.left);
+    if (isSingleMultiCellRange) {
+      const rangeHeight = range.bottom - range.top + 1;
+      const rangeWidth = range.right - range.left + 1;
+      if (rows.length > rangeHeight || matrixWidth > rangeWidth) {
+        return makeCellCommand("Paste Range", doc, []);
+      }
+      return pasteTextCommand(doc, { row: range.top, column: range.left }, text);
+    }
+  }
+
   return pasteTextCommand(doc, focus, text);
 }
 

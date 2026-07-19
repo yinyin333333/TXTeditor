@@ -494,27 +494,82 @@ test("single-cell paste fills a contiguous multi-cell selection as one undoable 
 test("single-cell paste fills non-contiguous cells while matrix paste remains focus-based", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
   const selected = [
-    { top: 0, left: 2, bottom: 0, right: 2 },
+    { top: 0, left: 1, bottom: 0, right: 1 },
     { top: 2, left: 0, bottom: 2, right: 0 }
   ];
-  const fill = pasteTextToRangesCommand(doc, selected, { row: 0, column: 2 }, "same");
+  const fill = pasteTextToRangesCommand(doc, selected, { row: 0, column: 1 }, "same");
   fill.redo(doc);
-  assert.equal(doc.getCell(0, 2), "same");
+  assert.equal(doc.getCell(0, 1), "same");
   assert.equal(doc.getCell(2, 0), "same");
   assert.equal(doc.getCell(1, 1), "2");
 
   const matrix = pasteTextToRangesCommand(
     doc,
-    [{ top: 0, left: 0, bottom: 2, right: 2 }],
-    { row: 1, column: 1 },
+    selected,
+    { row: 0, column: 1 },
     "x\ty"
   );
   assert.equal(matrix.label, "Paste Range");
   assert.equal(matrix.changes.length, 2);
   matrix.redo(doc);
-  assert.equal(doc.getCell(1, 1), "x");
-  assert.equal(doc.getCell(1, 2), "y");
+  assert.equal(doc.getCell(0, 1), "x");
+  assert.equal(doc.getCell(0, 2), "y");
   assert.equal(doc.getCell(0, 0), "a");
+});
+
+test("matrix paste into a contiguous selection starts at top-left and remains one undo command", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\td\te\n1\t2\t3\t4\t5\n6\t7\t8\t9\t10\n11\t12\t13\t14\t15", { dirty: false });
+  const undo = new UndoManager();
+  const beforeRevision = tableFileState(doc).revision;
+  const command = pasteTextToRangesCommand(
+    doc,
+    [{ top: 1, left: 1, bottom: 3, right: 4 }],
+    { row: 3, column: 4 },
+    "w\tx\ny\tz"
+  );
+
+  assert.equal(command.label, "Paste Range");
+  assert.equal(command.changes.length, 4);
+  command.redo(doc);
+  undo.push(command);
+
+  assert.equal(tableFileState(doc).revision, beforeRevision + 1);
+  assert.equal(undo.undoStack.length, 1);
+  assert.deepEqual(doc.rows, [
+    ["a", "b", "c", "d", "e"],
+    ["1", "w", "x", "4", "5"],
+    ["6", "y", "z", "9", "10"],
+    ["11", "12", "13", "14", "15"]
+  ]);
+
+  undo.undo(doc);
+  assert.deepEqual(doc.rows, [
+    ["a", "b", "c", "d", "e"],
+    ["1", "2", "3", "4", "5"],
+    ["6", "7", "8", "9", "10"],
+    ["11", "12", "13", "14", "15"]
+  ]);
+});
+
+test("oversized matrix paste into a contiguous selection is a silent no-op", () => {
+  const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6", { dirty: false });
+  const undo = new UndoManager();
+  const beforeRows = doc.rows.map((row) => [...row]);
+  const beforeRevision = tableFileState(doc).revision;
+  const target = [{ top: 1, left: 0, bottom: 2, right: 1 }];
+
+  for (const text of ["w\tx\ty", "w\nx\ny"]) {
+    const command = pasteTextToRangesCommand(doc, target, { row: 2, column: 1 }, text);
+    assert.equal(command.isEmpty, true);
+    if (!command.isEmpty) {
+      command.redo(doc);
+      undo.push(command);
+    }
+  }
+
+  assert.deepEqual(doc.rows, beforeRows);
+  assert.equal(tableFileState(doc).revision, beforeRevision);
+  assert.equal(undo.undoStack.length, 0);
 });
 
 test("fill copies the top-left selected value over the selection", () => {
