@@ -1,16 +1,18 @@
 import { isTauriRuntime, tauriApi } from "./tauri-api.js";
+import { normalizeLocale } from "../i18n.js";
 
 function withGeneration(payload, generation) {
   return generation == null ? payload : { ...payload, generation };
 }
 
-export async function lspStart(workspacePath, generation, contextMode = "workspace", referenceRootPath = "", includeSubfolders = true) {
+export async function lspStart(workspacePath, generation, contextMode = "workspace", referenceRootPath = "", includeSubfolders = true, locale = "enUS") {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();
   const payload = { workspacePath };
   if (contextMode === "sibling") payload.contextMode = contextMode;
   if (referenceRootPath) payload.referenceRootPath = referenceRootPath;
   if (!includeSubfolders) payload.includeSubfolders = false;
+  payload.locale = normalizeLocale(locale);
   return api.invoke("lsp_start", withGeneration(payload, generation));
 }
 

@@ -38,6 +38,7 @@ import {
   documentOpenPlan,
   unsavedDocuments
 } from "../document-lifecycle-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createDocumentController({
   state,
@@ -218,7 +219,7 @@ export function createDocumentController({
         });
         for (const handle of handles) {
           const file = await handle.getFile();
-          if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(`Opening large file: ${file.name}...`);
+          if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(tText("status.openingLargeFile", { file: file.name }));
           const doc = await readFileAsDocument(file, TableDocument);
           doc.handle = handle;
           await addDocument(doc);
@@ -246,7 +247,7 @@ export function createDocumentController({
   }
 
   async function openJsonDocumentPath(path, { requireCurrentMode = true, focus = true } = {}) {
-    if (!isTauriRuntime()) throw new Error("Localization JSON editing is available in the desktop app.");
+    if (!isTauriRuntime()) throw new Error(tText("error.jsonEditingDesktop"));
     if (!isEditableLocalizationJsonPath(path)) {
       throw new Error("Only direct data/local/lng/strings/*.json files can be opened as JSON documents.");
     }
@@ -282,14 +283,14 @@ export function createDocumentController({
   async function openBrowserFiles(files) {
     const textFiles = Array.from(files ?? []).filter(isTextLikeFile);
     for (const file of textFiles) {
-      if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(`Opening large file: ${file.name}...`);
+      if (file.size >= LARGE_FILE_THRESHOLDS.fileSizeBytes) await showOpeningFeedback(tText("status.openingLargeFile", { file: file.name }));
       await addDocument(await readFileAsDocument(file, TableDocument));
     }
   }
 
   async function openFolder() {
     try {
-      if (!isTauriRuntime()) return showError("Open Folder is available in the desktop app.");
+      if (!isTauriRuntime()) return showError(tText("error.openFolderDesktop"));
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
@@ -308,7 +309,7 @@ export function createDocumentController({
 
   async function saveFile() {
     try {
-      if (!hasOpenDocument()) return showError("No file is open."), false;
+      if (!hasOpenDocument()) return showError(tText("error.noOpenFile")), false;
       commitActiveEditor();
       const doc = activeDoc();
       if (!isTauriRuntime() && !doc.handle?.createWritable) return saveAs();
@@ -341,7 +342,7 @@ export function createDocumentController({
 
   async function saveAs() {
     try {
-      if (!hasOpenDocument()) return showError("No file is open."), false;
+      if (!hasOpenDocument()) return showError(tText("error.noOpenFile")), false;
       commitActiveEditor();
       const doc = activeDoc();
       return await queueSave(doc, () => saveAsNow(doc));
@@ -502,7 +503,7 @@ export function createDocumentController({
       await jsonEditorController?.reloadActiveDocument(doc);
       await syncReloadedJsonToLsp(doc, "external-clean-reload");
       renderChrome();
-      showToast(`${doc.name} reloaded after an external change.`);
+      showToast(tText("toast.externalReload", { file: doc.name }));
       return;
     }
     await resolveExternalConflict(doc, { path: payload.path, text, encoding, deleted: false });
@@ -558,8 +559,8 @@ export function createDocumentController({
   function askExternalChangeChoice(doc, payload) {
     if (!els.externalChangeDialog || !els.externalChangeDialogText) return Promise.resolve("keep");
     els.externalChangeDialogText.textContent = payload.deleted
-      ? `${doc.name} was deleted outside TXTeditor. Keep the open buffer or save it to recreate the file.`
-      : `${doc.name} changed on disk while this tab has unsaved edits.`;
+      ? tText("dialog.fileDeletedExternal", { file: doc.name })
+      : tText("dialog.fileChangedUnsaved", { file: doc.name });
     els.externalChangeDialog.classList.remove("hidden");
     return new Promise((resolve) => { pendingExternalResolve = resolve; });
   }

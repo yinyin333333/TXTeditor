@@ -52,6 +52,8 @@ import { createSearchController } from "./ui/controllers/search-controller.js";
 import { createSettingsController } from "./ui/controllers/settings-controller.js";
 import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
+import { createLocaleController, initializeLocale } from "./ui/controllers/locale-controller.js";
+import { t, tText } from "./core/i18n.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
   uiPerfSamples,
@@ -62,10 +64,10 @@ const {
   recordLintEngineEvent
 } = createAppPerf({ state });
 document.documentElement.dataset.theme = savedTheme;
+initializeLocale({ state, storage: localStorage, ownerDocument: document });
 document.documentElement.style.setProperty("--grid-font", savedGridFont);
 document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState.sidebarWidth}px`);
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
-
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
 let documentController = null, documentEditorController = null, lspController = null;
@@ -80,9 +82,7 @@ const jsonEditorController = createJsonEditorController({
 });
 const askText = (options) => askPromptText({ ...options, escapeHtml, host: els.host });
 const promptNumber = (options) => promptForNumber({ ...options, askText });
-
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
-
 const diagnosticsController = createDiagnosticsController({
   state,
   els,
@@ -103,7 +103,6 @@ const diagnosticsController = createDiagnosticsController({
   saveSelectionState,
   storage: localStorage
 });
-
 const EMPTY_DOC = TableDocument.fromText("Empty", "");
 const dockController = createDockController({
   state,
@@ -236,6 +235,7 @@ lspController = createLspController({
     }),
   handleWatchedFilesChanged: (payload) => documentController?.handleWatchedFilesChanged(payload)
 });
+const localeController = createLocaleController({ state, storage: localStorage, ownerDocument: document, legacyActive: isLegacyLintEngine, scheduleLegacyLintFull, lspController, activeDoc, setLintDiagnostics, updateGridDiagnostics, renderChrome, refreshJsonEditorLocale: jsonEditorController.refreshLocale });
 exposeTxteditorPerf(window, {
   uiPerfSamples,
   lintEngineEvents,
@@ -266,6 +266,8 @@ const settingsController = createSettingsController({
   renderChrome,
   reportBackgroundFailure,
   showError,
+  t,
+  setLocale: localeController.setLocale,
   escapeHtml
 });
 const shortcutSettingsController = createShortcutSettingsController({
@@ -519,8 +521,8 @@ function effectiveVectorLspHoverEnabled() {
 }
 
 function execute(command) {
-  if (!hasOpenDocument()) return showError("Open a file before editing.");
-  if (!isTableDocument(activeDoc())) return showError("This command is available only for table documents.");
+  if (!hasOpenDocument()) return showError(tText("error.openDocument"));
+  if (!isTableDocument(activeDoc())) return showError(tText("error.tableOnly"));
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
@@ -678,7 +680,6 @@ function showPalette() {
 function renderPalette() {
   return commandSurfaceController.renderPalette();
 }
-
 function showContextMenu(args) {
   return commandSurfaceController.showContextMenu(args);
 }
@@ -698,7 +699,6 @@ function renderLintControls() {
 function renderChrome() {
   return shellController.renderChrome();
 }
-
 function renderDiagnosticsChrome() {
   return shellController.renderChrome();
 }

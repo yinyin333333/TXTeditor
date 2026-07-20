@@ -400,7 +400,7 @@ test("Stage 1-D bulk start and sync render once per batch without changing didOp
 
     const startCalls = calls.splice(0);
     assert.deepEqual(startCalls.filter(([command]) => command === "lsp_start"), [
-      ["lsp_start", { workspacePath: "E:\\Data", generation: 1 }]
+      ["lsp_start", { workspacePath: "E:\\Data", generation: 1, locale: "enUS" }]
     ]);
     assert.deepEqual(
       startCalls.filter(([command]) => command === "lsp_open_file").map(([, args]) => ({

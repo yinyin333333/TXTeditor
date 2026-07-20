@@ -2,12 +2,13 @@ import { STAT_PARAMETER_TUPLES } from "./lint-stat-data.js";
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { exactOuterUnquote, fixed4Key, referenceTable } from "./lint-reference-semantics.js";
 import { clean, normalizeToken, rowLabelFor } from "./lint-table.js";
+import { legacyMessage, legacyTerm } from "./legacy-lint-i18n.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const ITEM_LINT_RULES = [
-  rule("Items/ValidSockets", "Valid sockets", lintItemSockets, true, PROFILE_OPTIONS, "Checks socket limits from item type, inventory size, level thresholds, and the allowed GemApplyType values 0 through 2."),
-  rule("Items/NoIllegalGambling", "No illegal gambling", lintNoIllegalGambling, true, PROFILE_OPTIONS, "Checks four-character gamble item codes and warns when an item belongs to the character-only type tree."),
-  rule("Items/ValidStatParameters", "Valid stat parameters", lintValidStatParameters, true, PROFILE_OPTIONS, "Checks each property function's value and parameter fields, skill references, charge and time limits, and saved item stat ranges. Unusual number spelling remains a policy warning.")
+  rule("Items/ValidSockets", lintItemSockets, true, PROFILE_OPTIONS),
+  rule("Items/NoIllegalGambling", lintNoIllegalGambling, true, PROFILE_OPTIONS),
+  rule("Items/ValidStatParameters", lintValidStatParameters, true, PROFILE_OPTIONS)
 ];
 
 export function lintItemSockets(index, ctx) {
@@ -22,7 +23,7 @@ export function lintItemSockets(index, ctx) {
     const threshold2 = integerFromRow(row, "maxsocketslevelthreshold2");
     const sockets = ["maxsockets1", "maxsockets2", "maxsockets3"].map((columnName) => [columnName, integerFromRow(row, columnName)]);
     if (threshold1 !== null && threshold2 !== null && threshold1 > threshold2) {
-      ctx.add(itemTypes, row.rowIndex, "maxsocketslevelthreshold1", "Socket thresholds decrease at the next tier. Use ascending thresholds unless this is intentional.", {
+      ctx.add(itemTypes, row.rowIndex, "maxsocketslevelthreshold1", legacyMessage("items.socketThresholdOrder"), {
         severity: "warning",
         d2rMessage: `${itemTypes.displayName}, line ${row.rowIndex + 1}: socket thresholds decrease at the next tier (${threshold1} > ${threshold2}). Use ascending thresholds unless this is intentional.`
       });
@@ -31,14 +32,14 @@ export function lintItemSockets(index, ctx) {
       const [columnName, value] = sockets[socketIndex];
       if (value === null) continue;
       if (value < 0 || value > 6) {
-        ctx.add(itemTypes, row.rowIndex, columnName, `${columnName} is ${value}. Use a value from 0 through 6; the game applies its own socket limit.`, {
+        ctx.add(itemTypes, row.rowIndex, columnName, legacyMessage("items.socketLimit", { column: columnName, value }), {
           severity: "warning",
           d2rMessage: `${itemTypes.displayName}, line ${row.rowIndex + 1}: '${columnName}' is ${value}. Use a value from 0 through 6; the game applies its own socket limit.`
         });
       }
       const next = sockets[socketIndex + 1]?.[1];
       if (next !== undefined && next !== null && value > next) {
-        ctx.add(itemTypes, row.rowIndex, columnName, `Socket thresholds decrease at the next tier (${value} > ${next}). Use ascending thresholds unless this is intentional.`, {
+        ctx.add(itemTypes, row.rowIndex, columnName, legacyMessage("items.socketThresholdPair", { value, next }), {
           severity: "warning",
           d2rMessage: `${itemTypes.displayName}, line ${row.rowIndex + 1}: socket thresholds decrease at the next tier for '${columnName}' (${value} > ${next}). Use ascending thresholds unless this is intentional.`
         });
@@ -57,18 +58,18 @@ export function lintItemSockets(index, ctx) {
       const name = clean(row.get("name")) || rowLabelFor(table, row.rowIndex);
       const d2rLine = row.rowIndex + 1;
       if (gemSockets !== null && typeLimit !== null && gemSockets > typeLimit) {
-        ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds the direct Type socket cap (${typeLimit}); the game clamps the effective socket count.`, {
+        ctx.add(table, row.rowIndex, "gemsockets", legacyMessage("items.typeSocketCap", { gemsockets: gemSockets, typeLimit }), {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${d2rLine}: gemsockets (${gemSockets}) for '${name}' exceeds direct Type's socket cap (${typeLimit}); the game clamps the effective socket count.`
         });
       }
       if (gemApplyType !== null && (gemApplyType < 0 || gemApplyType > 2)) {
-        ctx.add(table, row.rowIndex, "gemapplytype", "GemApplyType supports 0, 1, or 2. Choose one of those values.", {
+        ctx.add(table, row.rowIndex, "gemapplytype", legacyMessage("items.gemApplyType"), {
           d2rMessage: `${table.displayName}, line ${d2rLine}: GemApplyType (${gemApplyType}) for '${name}' is unsupported. Choose 0, 1, or 2.`
         });
       }
       if (gemSockets !== null && invWidth > 0 && invHeight > 0 && gemSockets > invWidth * invHeight) {
-        ctx.add(table, row.rowIndex, "gemsockets", `gemsockets (${gemSockets}) exceeds inventory size ${invWidth} x ${invHeight}; the game clamps the effective socket count.`, {
+        ctx.add(table, row.rowIndex, "gemsockets", legacyMessage("items.inventorySocketCap", { gemsockets: gemSockets, width: invWidth, height: invHeight }), {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${d2rLine}: '${name}' has more gemsockets (${gemSockets}) than inventory spaces (${invWidth} x ${invHeight} = ${invWidth * invHeight}); the game clamps the effective socket count.`
         });
@@ -101,13 +102,13 @@ export function lintNoIllegalGambling(index, ctx) {
     const item = items.get(fixed4Key(code));
     if (!item) {
       if (!hasCompleteItemReferences) return;
-      ctx.add(gamble, row.rowIndex, columnName, `Unknown item code "${code}". Check the four-character code and letter case.`, {
+      ctx.add(gamble, row.rowIndex, columnName, legacyMessage("items.unknownGambleCode", { code }), {
         d2rMessage: `${gamble.displayName}, line ${row.rowIndex + 1}: unknown item code '${code}'; check the four-character code and letter case.`
       });
       return;
     }
     if (itemTypeReaches(itemTypes, item.type, "char") || itemTypeReaches(itemTypes, item.type2, "char")) {
-      ctx.add(gamble, row.rowIndex, columnName, `Item "${code}" belongs to the character-only item type tree. Remove it from gamble.txt unless this is intentional.`, {
+      ctx.add(gamble, row.rowIndex, columnName, legacyMessage("items.characterOnlyGamble", { code }), {
         severity: "warning",
         d2rMessage: `${gamble.displayName}, line ${row.rowIndex + 1}: '${code}' belongs to the character-only item type tree; remove it unless intentional.`
       });
@@ -281,7 +282,12 @@ function warnNoncanonicalNumeric(ctx, table, row, parsed, { namedToken = false }
     : namedToken
       ? "the game tries it as a skill name and uses 0 if no name matches"
       : "the game reads it as 0";
-  ctx.add(table, row.rowIndex, parsed.columnName, `${parsed.columnName} value "${parsed.raw}" is not a normal integer; ${behavior}. Use a plain whole number or valid skill name.`, {
+  const message = parsed.numericPrefix
+    ? legacyMessage("items.statParameterNumericPrefix", { column: parsed.columnName, value: parsed.raw, effective: parsed.value })
+    : namedToken
+      ? legacyMessage("items.statParameterSkillFallback", { column: parsed.columnName, value: parsed.raw })
+      : legacyMessage("items.statParameterZeroFallback", { column: parsed.columnName, value: parsed.raw });
+  ctx.add(table, row.rowIndex, parsed.columnName, message, {
     severity: "warning",
     d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${parsed.columnName}' value '${parsed.raw}' is not a normal integer; ${behavior}. Use a plain whole number or valid skill name.`
   });
@@ -316,7 +322,10 @@ function validateValueAgainstAnySavedRange(ctx, table, row, source, bounds) {
   const upper = Math.max(...bounds.map((bound) => bound.max));
   const label = rowLabelFor(table, row.rowIndex);
   const direction = source.value < lower ? `below the minimum ${lower}` : `above the maximum ${upper}`;
-  ctx.add(table, row.rowIndex, source.columnName, `${source.columnName} value ${source.value} is ${direction} for saved item data. Use ${lower} through ${upper}.`, {
+  const message = source.value < lower
+    ? legacyMessage("items.statParameterBelowRange", { column: source.columnName, value: source.value, lower, upper })
+    : legacyMessage("items.statParameterAboveRange", { column: source.columnName, value: source.value, lower, upper });
+  ctx.add(table, row.rowIndex, source.columnName, message, {
     severity: "error",
     d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${source.columnName}': value (${source.value}) ${direction} for '${label}'`
   });
@@ -357,7 +366,7 @@ function validateSkillReference(ctx, table, row, parsed, statRows, skillContext,
   } else if (skillContext.idsByName.has(raw.toLowerCase())) {
     skillId = skillContext.idsByName.get(raw.toLowerCase());
   } else {
-    ctx.add(table, row.rowIndex, parsed.columnName, `${parsed.columnName} "${raw}" is not a known skill. The game uses skill 0 instead; choose a valid skill name.`, { severity: "error" });
+    ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.unknownSkill", { column: parsed.columnName, value: raw }), { severity: "error" });
     return;
   }
   const bits = saveParamBits(statRows);
@@ -366,7 +375,7 @@ function validateSkillReference(ctx, table, row, parsed, statRows, skillContext,
   const rowMax = Math.max(-1, skillContext.count - 1);
   const maximum = Math.min(rowMax, storedMax);
   if (skillId < 0 || skillId > maximum) {
-    ctx.add(table, row.rowIndex, parsed.columnName, `${parsed.columnName} resolves to skill id ${skillId}, outside the allowed range 0..${maximum}. Choose a skill from skills.txt within this range.`, { severity: "error" });
+    ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.skillOutOfRange", { column: parsed.columnName, skillId, maximum }), { severity: "error" });
   }
 }
 
@@ -376,7 +385,7 @@ function validateDirectSkill(ctx, table, row, param, statRows, skillContext) {
 
 function validateEventSkill(ctx, table, row, values, statRows, skillContext) {
   validateSkillReference(ctx, table, row, values.param, statRows, skillContext, { packedLevel: true });
-  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "event-skill level");
+  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "eventSkillLevel");
 }
 
 function validateRandomSkill(ctx, table, row, values, statRows, skillContext) {
@@ -387,26 +396,37 @@ function validateRandomSkill(ctx, table, row, values, statRows, skillContext) {
 
 function validateChargedSkill(ctx, table, row, values, statRows, skillContext) {
   validateSkillReference(ctx, table, row, values.param, statRows, skillContext, { packedLevel: true });
-  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "charged-skill level");
+  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "chargedSkillLevel");
   if (values.min.value > 255) {
-    ctx.add(table, row.rowIndex, values.min.columnName, `${values.min.columnName} maximum charges ${values.min.value} exceeds 255. The game limits it to 255; enter 255 or less.`, { severity: "error" });
+    ctx.add(table, row.rowIndex, values.min.columnName, legacyMessage("items.chargeCap", { column: values.min.columnName, value: values.min.value }), { severity: "error" });
   }
 }
 
-function validatePackedLevel(ctx, table, row, parsed, levelBits, label) {
+function validatePackedLevel(ctx, table, row, parsed, levelBits, labelTermKey) {
   const maximum = (2 ** levelBits) - 1;
-  if (parsed.value > maximum) ctx.add(table, row.rowIndex, parsed.columnName, `${parsed.columnName} ${label} ${parsed.value} exceeds the maximum ${maximum}. Enter ${maximum} or less.`, { severity: "error" });
+  if (parsed.value > maximum) ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.valueMaximum", {
+    column: parsed.columnName,
+    label: legacyTerm(labelTermKey),
+    value: parsed.value,
+    maximum
+  }), { severity: "error" });
 }
 
 function validateByTimePackedValue(ctx, table, row, values) {
-  validateSemanticRange(ctx, table, row, values.param, 0, 3, "by-time parameter");
-  validateSemanticRange(ctx, table, row, values.min, -256, 767, "by-time minimum");
-  validateSemanticRange(ctx, table, row, values.max, -256, 767, "by-time maximum");
+  validateSemanticRange(ctx, table, row, values.param, 0, 3, "byTimeParameter");
+  validateSemanticRange(ctx, table, row, values.min, -256, 767, "byTimeMinimum");
+  validateSemanticRange(ctx, table, row, values.max, -256, 767, "byTimeMaximum");
 }
 
-function validateSemanticRange(ctx, table, row, parsed, minimum, maximum, label) {
+function validateSemanticRange(ctx, table, row, parsed, minimum, maximum, labelTermKey) {
   if (!parsed.columnName || parsed.value >= minimum && parsed.value <= maximum) return;
-  ctx.add(table, row.rowIndex, parsed.columnName, `${parsed.columnName} ${label} ${parsed.value} is outside ${minimum}..${maximum}. The game limits it to that range; enter a value within it.`, { severity: "error" });
+  ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.valueRange", {
+    column: parsed.columnName,
+    label: legacyTerm(labelTermKey),
+    value: parsed.value,
+    minimum,
+    maximum
+  }), { severity: "error" });
 }
 
 function isIntegerText(value) {

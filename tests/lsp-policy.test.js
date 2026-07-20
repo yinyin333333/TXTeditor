@@ -342,7 +342,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
 
     await controller.startWorkspace("E:\\Mods\\B", { contextMode: "sibling" });
     assert.deepEqual(calls, [
-      ["lsp_start", { workspacePath: "E:\\Mods\\B", contextMode: "sibling", generation: 1 }],
+      ["lsp_start", { workspacePath: "E:\\Mods\\B", contextMode: "sibling", generation: 1, locale: "enUS" }],
       ["lsp_open_file", { uri: docToUri(second), version: 1, text: second.toText(), generation: 1 }]
     ]);
 
@@ -383,7 +383,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
     await documentController.closeTab(1);
     assert.deepEqual(calls.slice(2), [
       ["lsp_close_file", { uri: docToUri(second), generation: 1 }],
-      ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2 }],
+      ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2, locale: "enUS" }],
       ["lsp_open_file", { uri: docToUri(first), version: 1, text: first.toText(), generation: 2 }]
     ]);
     assert.deepEqual(state.docs, [first]);
@@ -696,7 +696,7 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
     assert.equal(hoverCalls.length, 2);
     assert.equal(gridCalls.filter((call) => call[0] === "hover").at(-1)[3], "SECOND");
     assert.deepEqual(tauriCalls, [
-      ["lsp_start", { workspacePath: "E:\\Data", generation: 1 }],
+      ["lsp_start", { workspacePath: "E:\\Data", generation: 1, locale: "enUS" }],
       ["lsp_open_file", { uri, version: 1, text: doc.toText(), generation: 1 }]
     ]);
   } finally {
@@ -2249,7 +2249,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
     });
 
     await assert.rejects(() => controller.startWorkspace("E:\\Workspace"), /spawn failed/);
-    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace", generation: 1 }]]);
+    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace", generation: 1, locale: "enUS" }]]);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
     assert.equal(state.lint.status, "Vector-LSP startup failed");

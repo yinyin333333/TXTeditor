@@ -993,6 +993,25 @@ fn reference_context_mode(value: Option<&str>) -> Result<&'static str, String> {
     }
 }
 
+fn normalize_lsp_locale(value: Option<&str>) -> &'static str {
+    match value.unwrap_or_default().trim() {
+        "enUS" | "en-US" | "en_US" => "enUS",
+        "zhTW" | "zh-TW" | "zh_TW" => "zhTW",
+        "deDE" | "de-DE" | "de_DE" => "deDE",
+        "esES" | "es-ES" | "es_ES" => "esES",
+        "frFR" | "fr-FR" | "fr_FR" => "frFR",
+        "itIT" | "it-IT" | "it_IT" => "itIT",
+        "koKR" | "ko-KR" | "ko_KR" => "koKR",
+        "plPL" | "pl-PL" | "pl_PL" => "plPL",
+        "esMX" | "es-MX" | "es_MX" => "esMX",
+        "jaJP" | "ja-JP" | "ja_JP" => "jaJP",
+        "ptBR" | "pt-BR" | "pt_BR" => "ptBR",
+        "ruRU" | "ru-RU" | "ru_RU" => "ruRU",
+        "zhCN" | "zh-CN" | "zh_CN" => "zhCN",
+        _ => "enUS",
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
@@ -1000,6 +1019,7 @@ pub(crate) async fn lsp_start(
     context_mode: Option<String>,
     reference_root_path: Option<String>,
     include_subfolders: Option<bool>,
+    locale: Option<String>,
     state: tauri::State<'_, LspManager>,
     config_state: tauri::State<'_, AppConfigState>,
     app_handle: tauri::AppHandle,
@@ -1011,6 +1031,7 @@ pub(crate) async fn lsp_start(
         .filter(|value| !value.is_empty())
         .map(path_to_uri);
     let include_subfolders = include_subfolders.unwrap_or(true);
+    let locale = normalize_lsp_locale(locale.as_deref());
     if generation == 0 {
         return Err("LSP generation must be positive".to_string());
     }
@@ -1121,6 +1142,7 @@ pub(crate) async fn lsp_start(
                     "referenceContextMode": reference_context_mode,
                     "referenceRootUri": reference_root_uri,
                     "includeSubfolders": include_subfolders,
+                    "locale": locale,
                     "workspaceDirectoryScopes": true
                 },
                 "capabilities": {
@@ -2091,6 +2113,14 @@ mod tests {
         );
         assert_eq!(reference_context_mode(Some("sibling")).unwrap(), "sibling");
         assert!(reference_context_mode(Some("recursive-sibling")).is_err());
+    }
+
+    #[test]
+    fn lsp_locale_uses_supported_codes_and_defaults_to_en_us() {
+        assert_eq!(normalize_lsp_locale(None), "enUS");
+        assert_eq!(normalize_lsp_locale(Some("koKR")), "koKR");
+        assert_eq!(normalize_lsp_locale(Some("zh-CN")), "zhCN");
+        assert_eq!(normalize_lsp_locale(Some("unsupported")), "enUS");
     }
 
     #[test]

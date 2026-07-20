@@ -10,6 +10,7 @@ import {
 } from "../../core/operations.js";
 import { indexRange } from "../row-operation-policy.js";
 import { persistFreezeState } from "../freeze-state-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createGridCommandController({
   state,
@@ -81,8 +82,8 @@ export function createGridCommandController({
     if (!hasOpenDocument()) return;
     const doc = activeDoc();
     const rowNumber = await promptNumber({
-      title: "Go to Row",
-      message: `Enter a row number from 1 to ${doc.rowCount}.`,
+      title: tText("prompt.goToRow"),
+      message: tText("prompt.rowNumber", { max: doc.rowCount }),
       defaultValue: Math.min(doc.rowCount, state.selection.focus.row + 1),
       min: 1,
       max: doc.rowCount
@@ -118,14 +119,14 @@ export function createGridCommandController({
   function cloneRows() {
     const doc = activeDoc();
     const rows = rowsForContextOperation().filter((row) => row > 0 && row < doc.rowCount);
-    if (!rows.length) return showError("Select one or more body rows to clone.");
+    if (!rows.length) return showError(tText("error.cloneRows"));
     execute(cloneRowsCommand(doc, rows, doc.rowCount));
   }
 
   function cloneColumns() {
     const doc = activeDoc();
     const columns = columnsFromSelection().filter((column) => column >= 0 && column < doc.columnCount);
-    if (!columns.length) return showError("Select one or more columns to clone.");
+    if (!columns.length) return showError(tText("error.cloneColumns"));
     execute(cloneColumnsCommand(doc, columns, doc.columnCount));
   }
 

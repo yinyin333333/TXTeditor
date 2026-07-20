@@ -20,6 +20,7 @@ import { normaliseGridFont } from "./app-settings-policy.js";
 import { readJsonStorage } from "./app-runtime-utils.js";
 import { loadShortcutBindings } from "./shortcut-policy.js";
 import { freezeStateFromStorage } from "./freeze-state-policy.js";
+import { readLocale } from "../core/i18n.js";
 
 export function createInitialAppState({ storage = localStorage } = {}) {
   const savedTheme = storage.getItem("txteditor.theme") === "light" ? "light" : "dark";
@@ -35,6 +36,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedPanelState = panelStateFromStorage(storage, savedDockLayout);
   const savedShortcuts = loadShortcutBindings(storage);
   const savedFreeze = freezeStateFromStorage(storage);
+  const savedLocale = readLocale(storage);
   const state = {
     docs: [],
     active: 0,
@@ -54,6 +56,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     contextMenuActiveGroup: "",
     contextMenuOpen: false,
     theme: savedTheme,
+    locale: savedLocale,
     gridFont: savedGridFont,
     colorizeColumns: savedColorize,
     mouseResizeLocked: savedMouseResizeLocked,

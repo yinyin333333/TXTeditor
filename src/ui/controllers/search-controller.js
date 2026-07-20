@@ -18,6 +18,7 @@ import {
   shouldCloseSearchKey,
   shouldSubmitSearchKey
 } from "../search-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createSearchController({
   state,
@@ -120,7 +121,7 @@ export function createSearchController({
   }
 
   function setReplaceMode(enabled) {
-    if (els.searchTitle) els.searchTitle.textContent = enabled ? "Find and Replace" : "Find";
+    if (els.searchTitle) els.searchTitle.textContent = enabled ? tText("search.findReplace") : tText("search.title");
     setElementHidden(els.searchReplaceRow, !enabled);
     setElementHidden(els.searchReplaceActions, !enabled);
   }
@@ -149,7 +150,7 @@ export function createSearchController({
     const focus = state.selection.focus;
     const found = findInTable(activeDoc(), query, focus, { direction, includeStart, scope });
     if (!found) {
-      els.searchStatus.textContent = "No results";
+      els.searchStatus.textContent = tText("search.noResults");
       return;
     }
     const target = searchTargetForResult(scope, found, focus);
@@ -177,7 +178,7 @@ export function createSearchController({
     const focus = state.selection.focus;
     const result = replaceNextInTable(activeDoc(), query, els.searchReplaceInput?.value ?? "", focus, { scope });
     if (!result.found || !result.replacementCount) {
-      els.searchStatus.textContent = "No results";
+      els.searchStatus.textContent = tText("search.noResults");
       return false;
     }
     applyEdits(result.edits, "Replace");
@@ -188,7 +189,7 @@ export function createSearchController({
     grid.scrollCellToCenter(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();
-    els.searchStatus.textContent = `Replaced 1 match at ${searchStatusText(scope, result.found, target)}`;
+    els.searchStatus.textContent = tText("search.replacedOne", { location: searchStatusText(scope, result.found, target) });
     return true;
   }
 
@@ -198,7 +199,7 @@ export function createSearchController({
     const scope = selectedSearchScope();
     const result = replaceAllInTable(activeDoc(), query, els.searchReplaceInput?.value ?? "", { scope });
     if (!result.replacementCount) {
-      els.searchStatus.textContent = "No results";
+      els.searchStatus.textContent = tText("search.noResults");
       return 0;
     }
     applyEdits(result.edits, "Replace All");
@@ -207,7 +208,7 @@ export function createSearchController({
     grid.draw();
     updateActiveProblemHighlight();
     const cells = result.edits.length;
-    els.searchStatus.textContent = `Replaced ${result.replacementCount} match${result.replacementCount === 1 ? "" : "es"} in ${cells} cell${cells === 1 ? "" : "s"}`;
+    els.searchStatus.textContent = tText("search.replacedMany", { matches: result.replacementCount, matchWord: tText(result.replacementCount === 1 ? "search.match" : "search.matches"), cells, cellWord: tText(cells === 1 ? "search.cell" : "search.cells") });
     return result.replacementCount;
   }
 

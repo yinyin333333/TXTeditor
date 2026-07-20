@@ -1,37 +1,8 @@
 export const SHORTCUT_STORAGE_KEY = "txteditor.shortcuts.v1";
+import { tText } from "../core/i18n.js";
 
 export const SHORTCUT_DEFINITIONS = Object.freeze([
-  shortcut("open-file", "Open File", ["Ctrl+O"]),
-  shortcut("save-file", "Save", ["Ctrl+S"], { allowWhileEditing: true }),
-  shortcut("save-as", "Save As", ["Ctrl+Shift+S"], { allowWhileEditing: true }),
-  shortcut("search", "Find/Search", ["Ctrl+F"]),
-  shortcut("find-next", "Find Next", ["F3"], { allowWhileEditing: true }),
-  shortcut("find-previous", "Find Previous", ["Shift+F3"], { allowWhileEditing: true }),
-  shortcut("replace", "Find and Replace", ["Ctrl+Shift+H"], { allowWhileEditing: true }),
-  shortcut("go-to-row", "Go to Row", ["Ctrl+G"], { allowWhileEditing: true }),
-  shortcut("undo", "Undo", ["Ctrl+Z"]),
-  shortcut("redo", "Redo", ["Ctrl+Y", "Ctrl+Shift+Z"]),
-  shortcut("copy", "Copy", ["Ctrl+C"]),
-  shortcut("cut", "Cut", ["Ctrl+X"]),
-  shortcut("paste", "Paste", ["Ctrl+V"]),
-  shortcut("select-all", "Select All", ["Ctrl+A"]),
-  shortcut("clear-selection", "Clear Cell(s)", ["Delete"]),
-  shortcut("show-palette", "Command Palette", ["Ctrl+P", "Ctrl+Shift+P"]),
-  shortcut("close-tab", "Close Current Tab", ["Ctrl+W"], { allowWhileEditing: true }),
-  shortcut("next-tab", "Next Tab", ["Ctrl+Tab"], { allowWhileEditing: true }),
-  shortcut("previous-tab", "Previous Tab", ["Ctrl+Shift+Tab"], { allowWhileEditing: true }),
-  shortcut("toggle-sidebar", "Toggle Explorer", ["Ctrl+B"]),
-  shortcut("toggle-problems", "Toggle Problems", ["Ctrl+L"], { allowWhileEditing: true }),
-  shortcut("reset-row-heights", "Reset Row Heights", ["Ctrl+H"], { allowWhileEditing: true }),
-  shortcut("zoom-in", "Zoom In", ["Ctrl+Plus", "Ctrl+="]),
-  shortcut("zoom-out", "Zoom Out", ["Ctrl+Minus"]),
-  shortcut("zoom-reset", "Reset Zoom", ["Ctrl+0"]),
-  shortcut("scroll-page-up", "Scroll One Page Up", ["PageUp"], { context: "grid", group: "Grid scrolling" }),
-  shortcut("scroll-page-down", "Scroll One Page Down", ["PageDown"], { context: "grid", group: "Grid scrolling" }),
-  shortcut("scroll-top", "Scroll To Top", ["Home"], { context: "grid", group: "Grid scrolling" }),
-  shortcut("scroll-bottom", "Scroll To Bottom", ["End"], { context: "grid", group: "Grid scrolling" }),
-  shortcut("scroll-left", "Scroll To Left Edge", ["Shift+Home"], { context: "grid", group: "Grid scrolling" }),
-  shortcut("scroll-right", "Scroll To Right Edge", ["Shift+End"], { context: "grid", group: "Grid scrolling" })
+  shortcut("open-file", "command.open-file", ["Ctrl+O"]), shortcut("save-file", "command.save-file", ["Ctrl+S"], { allowWhileEditing: true }), shortcut("save-as", "command.save-as", ["Ctrl+Shift+S"], { allowWhileEditing: true }), shortcut("search", "command.search", ["Ctrl+F"]), shortcut("find-next", "command.find-next", ["F3"], { allowWhileEditing: true }), shortcut("find-previous", "command.find-previous", ["Shift+F3"], { allowWhileEditing: true }), shortcut("replace", "command.replace", ["Ctrl+Shift+H"], { allowWhileEditing: true }), shortcut("go-to-row", "command.go-to-row", ["Ctrl+G"], { allowWhileEditing: true }), shortcut("undo", "command.undo", ["Ctrl+Z"]), shortcut("redo", "command.redo", ["Ctrl+Y", "Ctrl+Shift+Z"]), shortcut("copy", "command.copy", ["Ctrl+C"]), shortcut("cut", "command.cut", ["Ctrl+X"]), shortcut("paste", "command.paste", ["Ctrl+V"]), shortcut("select-all", "command.select-all", ["Ctrl+A"]), shortcut("clear-selection", "command.clear-selection", ["Delete"]), shortcut("show-palette", "shortcut.commandPalette", ["Ctrl+P", "Ctrl+Shift+P"]), shortcut("close-tab", "shortcut.closeCurrentTab", ["Ctrl+W"], { allowWhileEditing: true }), shortcut("next-tab", "command.next-tab", ["Ctrl+Tab"], { allowWhileEditing: true }), shortcut("previous-tab", "command.previous-tab", ["Ctrl+Shift+Tab"], { allowWhileEditing: true }), shortcut("toggle-sidebar", "command.toggle-sidebar", ["Ctrl+B"]), shortcut("toggle-problems", "shortcut.toggleProblems", ["Ctrl+L"], { allowWhileEditing: true }), shortcut("reset-row-heights", "command.reset-row-heights", ["Ctrl+H"], { allowWhileEditing: true }), shortcut("zoom-in", "command.zoom-in", ["Ctrl+Plus", "Ctrl+="]), shortcut("zoom-out", "command.zoom-out", ["Ctrl+Minus"]), shortcut("zoom-reset", "command.zoom-reset", ["Ctrl+0"]), shortcut("scroll-page-up", "shortcut.scrollPageUp", ["PageUp"], { context: "grid", group: "shortcut.groupGrid" }), shortcut("scroll-page-down", "shortcut.scrollPageDown", ["PageDown"], { context: "grid", group: "shortcut.groupGrid" }), shortcut("scroll-top", "shortcut.scrollTop", ["Home"], { context: "grid", group: "shortcut.groupGrid" }), shortcut("scroll-bottom", "shortcut.scrollBottom", ["End"], { context: "grid", group: "shortcut.groupGrid" }), shortcut("scroll-left", "shortcut.scrollLeft", ["Shift+Home"], { context: "grid", group: "shortcut.groupGrid" }), shortcut("scroll-right", "shortcut.scrollRight", ["Shift+End"], { context: "grid", group: "shortcut.groupGrid" })
 ]);
 
 const DEFINITION_BY_ACTION = new Map(SHORTCUT_DEFINITIONS.map((definition) => [definition.action, definition]));
@@ -39,14 +10,15 @@ const MODIFIER_KEYS = new Set(["Alt", "AltGraph", "Control", "Meta", "OS", "Shif
 const FIXED_NAVIGATION_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Enter", "Escape", "F2", "Tab"]);
 const MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Meta"];
 
-function shortcut(action, label, defaults, {
+function shortcut(action, labelKey, defaults, {
   allowWhileEditing = false,
   context = "global",
-  group = "Commands"
+  group = "shortcut.groupCommands"
 } = {}) {
   return Object.freeze({
     action,
-    label,
+    labelKey,
+    get label() { return tText(labelKey); },
     defaults: Object.freeze([...defaults]),
     allowWhileEditing,
     context,
@@ -137,14 +109,14 @@ export function normalizeShortcutChord(value) {
 
 export function validateShortcutChord(value) {
   const chord = normalizeShortcutChord(value);
-  if (!chord) return { valid: false, message: "Press a non-modifier key." };
+  if (!chord) return { valid: false, message: tText("shortcut.validationNonModifier") };
   const { key, modifiers } = shortcutChordParts(chord);
   const modifiedTab = key === "Tab" && modifiers.some((modifier) => modifier === "Ctrl" || modifier === "Alt" || modifier === "Meta");
   if (FIXED_NAVIGATION_KEYS.has(key) && !modifiedTab) {
-    return { valid: false, message: `${key} is reserved for grid editing and navigation.` };
+    return { valid: false, message: tText("shortcut.validationReserved", { key }) };
   }
   if (isPrintableShortcutKey(key) && !modifiers.some((modifier) => modifier === "Ctrl" || modifier === "Alt" || modifier === "Meta")) {
-    return { valid: false, message: "Use Ctrl, Alt, or Meta with letters, numbers, and symbols." };
+    return { valid: false, message: tText("shortcut.validationModifier") };
   }
   return { valid: true, message: "", chord };
 }
@@ -193,6 +165,10 @@ export function shortcutConflicts(bindings) {
 
 export function shortcutDefinition(action) {
   return DEFINITION_BY_ACTION.get(action) ?? null;
+}
+
+export function shortcutLabelForAction(action) {
+  return DEFINITION_BY_ACTION.get(action)?.label ?? "";
 }
 
 function normalizeModifier(value) {

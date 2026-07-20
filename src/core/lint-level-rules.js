@@ -1,11 +1,12 @@
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { referenceTable } from "./lint-reference-semantics.js";
 import { clean, rowLabelFor } from "./lint-table.js";
+import { legacyMessage } from "./legacy-lint-i18n.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const LEVEL_LINT_RULES = [
-  rule("Level/ValidWarp", "Valid warps", lintValidWarp, true, PROFILE_OPTIONS, "Checks that each Levels Vis index and LvlWarp Id exists, without requiring an unconfirmed reciprocal link."),
-  rule("Level/ValidWPs", "Valid waypoints", lintValidWaypoints, true, PROFILE_OPTIONS, "Checks that waypoint numbers remain unique after the game reads them as values from 0 through 255."),
+  rule("Level/ValidWarp", lintValidWarp, true, PROFILE_OPTIONS),
+  rule("Level/ValidWPs", lintValidWaypoints, true, PROFILE_OPTIONS),
 ];
 
 export function lintValidWarp(index, ctx) {
@@ -29,12 +30,12 @@ export function lintValidWarp(index, ctx) {
       const warp = warpRaw ? integerValue(warpRaw) : 0;
       if (vis === null || vis <= 0) continue;
       if (vis >= levels.rows.length - 1) {
-        ctx.add(levels, row.rowIndex, visColumn, `${visColumn} points to missing level index ${vis}.`, {
+        ctx.add(levels, row.rowIndex, visColumn, legacyMessage("level.missingVis", { column: visColumn, vis }), {
           d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: invalid ${visColumn} for level '${clean(row.get("name"))}'`
         });
       }
       if (canValidateWarp && (warp === null || (warp >= 0 && !warpIds.has(warp)))) {
-        ctx.add(levels, row.rowIndex, warpColumn, `${warpColumn} does not resolve to a lvlwarp.txt Id/variant record.`, {
+        ctx.add(levels, row.rowIndex, warpColumn, legacyMessage("level.missingWarp", { column: warpColumn }), {
           d2rMessage: `${levels.displayName}, line ${row.rowIndex + 1}: invalid ${warpColumn} for level '${clean(row.get("name"))}'`
         });
       }
@@ -52,7 +53,7 @@ export function lintValidWaypoints(index, ctx) {
     const waypoint = storedUnsignedByte(rawWaypoint);
     if (waypoint === null || waypoint === 255) return;
     if (seen.has(waypoint)) {
-      ctx.add(table, row.rowIndex, "waypoint", `Waypoint ${waypoint} is also used by ${seen.get(waypoint).label}. Choose a unique waypoint number.`, {
+      ctx.add(table, row.rowIndex, "waypoint", legacyMessage("level.duplicateWaypoint", { waypoint, label: seen.get(waypoint).label }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: waypoint ${waypoint} is already used by '${seen.get(waypoint).label}'. Choose a unique number.`
       });
     } else {

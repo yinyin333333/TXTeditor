@@ -1,4 +1,4 @@
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -39,6 +39,67 @@ import {
 import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { lintGutter, linter } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
+import { tText } from "../core/i18n.js";
+
+const jsonLocalePhrases = new Compartment();
+const JSON_EDITOR_PHRASE_KEYS = {
+  Find: "search.title",
+  Replace: "search.replace",
+  next: "search.next",
+  previous: "search.previous",
+  all: "search.all",
+  "match case": "json.matchCase",
+  regexp: "json.regexp",
+  "by word": "json.byWord",
+  replace: "search.replace",
+  "replace all": "search.replaceAll",
+  close: "common.close",
+  "Go to line": "json.goToLine",
+  go: "common.go",
+  "current match": "json.currentMatch",
+  "on line": "json.onLine",
+  "replaced match on line $": "json.replacedMatchOnLine",
+  "replaced $ matches": "json.replacedMatches"
+};
+
+function jsonEditorPhrases() {
+  return Object.fromEntries(Object.entries(JSON_EDITOR_PHRASE_KEYS).map(([phrase, key]) => [phrase, tText(key)]));
+}
+
+function localizeOpenJsonPanels(view) {
+  const searchPanel = view?.dom?.querySelector?.(".cm-search");
+  if (searchPanel) {
+    const searchInput = searchPanel.querySelector("input[name='search']");
+    const replaceInput = searchPanel.querySelector("input[name='replace']");
+    if (searchInput) {
+      searchInput.placeholder = tText("search.title");
+      searchInput.setAttribute("aria-label", tText("search.title"));
+    }
+    if (replaceInput) {
+      replaceInput.placeholder = tText("search.replace");
+      replaceInput.setAttribute("aria-label", tText("search.replace"));
+    }
+    const buttonKeys = { next: "search.next", prev: "search.previous", select: "search.all", replace: "search.replace", replaceAll: "search.replaceAll" };
+    for (const [name, key] of Object.entries(buttonKeys)) {
+      const button = searchPanel.querySelector(`button[name='${name}']`);
+      if (button) button.textContent = tText(key);
+    }
+    const checkboxKeys = { case: "json.matchCase", re: "json.regexp", word: "json.byWord" };
+    for (const [name, key] of Object.entries(checkboxKeys)) {
+      const input = searchPanel.querySelector(`input[name='${name}']`);
+      const textNode = input?.parentElement?.lastChild;
+      if (textNode?.nodeType === 3) textNode.nodeValue = tText(key);
+    }
+    searchPanel.querySelector("button[name='close']")?.setAttribute("aria-label", tText("common.close"));
+  }
+  const lineInput = view?.dom?.querySelector?.(".cm-dialog input[name='line']");
+  if (lineInput) {
+    const labelText = lineInput.parentElement?.firstChild;
+    if (labelText?.nodeType === 3) labelText.nodeValue = `${tText("json.goToLine")}: `;
+    const submit = lineInput.closest("form")?.querySelector("button[type='submit']");
+    if (submit) submit.textContent = tText("common.go");
+  }
+}
 
 const setDiagnosticHighlight = StateEffect.define();
 const diagnosticHighlightField = StateField.define({
@@ -235,6 +296,7 @@ export function createJsonEditorState({ text = "", lineSeparator = "\n", onChang
     doc: String(text),
     extensions: [
       EditorState.lineSeparator.of(outputLineSeparator),
+      jsonLocalePhrases.of(EditorState.phrases.of(jsonEditorPhrases())),
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightSpecialChars(),
@@ -297,6 +359,12 @@ export function clearDiagnosticHighlight(view) {
 
 export function refreshJsonEditorAppearance(view) {
   view?.requestMeasure();
+}
+
+export function refreshJsonEditorLocale(view) {
+  if (!view) return;
+  view.dispatch({ effects: jsonLocalePhrases.reconfigure(EditorState.phrases.of(jsonEditorPhrases())) });
+  localizeOpenJsonPanels(view);
 }
 
 export function focusJsonEditor(view) {

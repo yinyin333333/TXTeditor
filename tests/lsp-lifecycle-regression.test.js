@@ -743,7 +743,7 @@ test("V-TXT-07 different workspace restarts while same workspace reuses bindings
     };
     const restartController = createLspHarness(restartState, null);
     await restartController.startWorkspace("E:\\B");
-    assert.deepEqual(calls.splice(0), [["lsp_start", { workspacePath: "E:\\B", generation: 2 }]]);
+    assert.deepEqual(calls.splice(0), [["lsp_start", { workspacePath: "E:\\B", generation: 2, locale: "enUS" }]]);
     assert.equal(restartState.lsp.workspacePath, "E:\\B");
     assert.equal(restartState.lsp.openFileCount, 0);
 

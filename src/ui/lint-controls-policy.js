@@ -1,7 +1,9 @@
+import { tText } from "../core/i18n.js";
+
 export function lintToggleControl(lintEnabled = false) {
   return {
     id: "toggle-lint",
-    label: lintEnabled ? "Lint: On" : "Lint: Off",
+    label: lintEnabled ? tText("lint.on") : tText("lint.offSummary"),
     active: Boolean(lintEnabled)
   };
 }
@@ -22,7 +24,7 @@ export function lintControlsModel({
       profileSelect: {
         id: "lintProfileSelect",
         className: "profile-select",
-        title: "D2R lint profile",
+        title: tText("lint.profileTitle"),
         options: profiles.map((profile) => ({
           value: profile,
           label: profile,
@@ -32,16 +34,16 @@ export function lintControlsModel({
       referenceSelect: {
         id: "lintReferenceVersionSelect",
         className: "profile-select",
-        title: "Bundled reference data version",
+        title: tText("lint.referenceTitle"),
         options: ["", "3.2", "3.1", "2.4", "1.13c"].map((version) => ({
           value: version,
-          label: version || "Profile",
+          label: version || tText("lint.profile"),
           selected: version === activeReferenceVersion
         }))
       },
       rulesButton: {
         id: "toggle-lint-rules",
-        label: "Rules",
+        label: tText("lint.rulesButton"),
         active: Boolean(rulesOpen)
       },
       settingsButton: null,
@@ -56,8 +58,8 @@ export function lintControlsModel({
     rulesButton: null,
     settingsButton: {
       id: "open-settings",
-      label: "Lint Options",
-      title: "Lint options"
+      label: tText("command.open-settings"),
+      title: tText("lint.optionsTitle")
     },
     hideRulesPanel: true
   };

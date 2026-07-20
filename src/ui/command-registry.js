@@ -1,60 +1,17 @@
+import { tText } from "../core/i18n.js";
+
 export const COMMAND_LABELS_BASE = [
-  ["open-file", "Open File"],
-  ["open-folder", "Open Folder / Workspace"],
-  ["save-file", "Save"],
-  ["save-as", "Save As"],
-  ["search", "Find/Search"],
-  ["find-next", "Find Next"],
-  ["find-previous", "Find Previous"],
-  ["replace", "Find and Replace"],
-  ["go-to-row", "Go to Row"],
-  ["next-tab", "Next Tab"],
-  ["previous-tab", "Previous Tab"],
-  ["undo", "Undo"],
-  ["redo", "Redo"],
-  ["copy", "Copy"],
-  ["paste", "Paste"],
-  ["cut", "Cut"],
-  ["clear-selection", "Clear Cell(s)"],
-  ["select-all", "Select All"],
-  ["add-row", "Add Row"],
-  ["insert-row", "Insert Rows..."],
-  ["clone-row", "Clone Row"],
-  ["delete-row", "Delete Row"],
-  ["clear-row", "Clear Row"],
-  ["hide-row", "Hide Row"],
-  ["unhide-all", "Unhide All"],
-  ["add-column", "Add Column"],
-  ["insert-column", "Insert Columns..."],
-  ["clone-column", "Clone Column(s)"],
-  ["delete-column", "Delete Column"],
-  ["clear-column", "Clear Column"],
-  ["hide-column", "Hide Column"],
-  ["fill", "Fill"],
-  ["increment-fill", "Increment Fill"],
-  ["math-add", "Math Add"],
-  ["math-subtract", "Math Subtract"],
-  ["math-multiply", "Math Multiply"],
-  ["math-divide", "Math Divide"],
-  ["toggle-freeze-row", "Freeze First Row"],
-  ["toggle-freeze-column", "Freeze First Column"],
-  ["toggle-colorize", "Colorize Columns"],
-  ["toggle-vector-lsp-hover", "Vector-LSP Hover"],
-  ["toggle-lint", "Toggle Lint"],
-  ["toggle-lint-rules", "Lint Rules"],
-  ["show-explorer", "Show Explorer"],
-  ["show-problems", "Show Problems"],
-  ["zoom-in", "Zoom In"],
-  ["zoom-out", "Zoom Out"],
-  ["zoom-reset", "Reset Zoom"],
-  ["resize-fit", "Resize To Fit"],
-  ["resize-selected-fit", "Resize Selected To Fit"],
-  ["reset-row-heights", "Reset Row Heights"],
-  ["toggle-sidebar", "Toggle Explorer"],
-  ["toggle-theme", "Toggle Light/Dark Mode"],
-  ["open-app-settings", "Settings"],
-  ["open-shortcut-settings", "Keyboard Shortcuts"],
-  ["open-settings", "Lint Options"]
+  ["open-file", "command.open-file"], ["open-folder", "command.open-folder"], ["save-file", "command.save-file"], ["save-as", "command.save-as"],
+  ["search", "command.search"], ["find-next", "command.find-next"], ["find-previous", "command.find-previous"], ["replace", "command.replace"],
+  ["go-to-row", "command.go-to-row"], ["next-tab", "command.next-tab"], ["previous-tab", "command.previous-tab"], ["undo", "command.undo"], ["redo", "command.redo"],
+  ["copy", "command.copy"], ["paste", "command.paste"], ["cut", "command.cut"], ["clear-selection", "command.clear-selection"], ["select-all", "command.select-all"],
+  ["add-row", "command.add-row"], ["insert-row", "command.insert-row"], ["clone-row", "command.clone-row"], ["delete-row", "command.delete-row"], ["clear-row", "command.clear-row"], ["hide-row", "command.hide-row"], ["unhide-all", "command.unhide-all"],
+  ["add-column", "command.add-column"], ["insert-column", "command.insert-column"], ["clone-column", "command.clone-column"], ["delete-column", "command.delete-column"], ["clear-column", "command.clear-column"], ["hide-column", "command.hide-column"],
+  ["fill", "command.fill"], ["increment-fill", "command.increment-fill"], ["math-add", "command.math-add"], ["math-subtract", "command.math-subtract"], ["math-multiply", "command.math-multiply"], ["math-divide", "command.math-divide"],
+  ["toggle-freeze-row", "command.toggle-freeze-row"], ["toggle-freeze-column", "command.toggle-freeze-column"], ["toggle-colorize", "command.toggle-colorize"], ["toggle-vector-lsp-hover", "command.toggle-vector-lsp-hover"], ["toggle-lint", "command.toggle-lint"], ["toggle-lint-rules", "command.toggle-lint-rules"],
+  ["show-explorer", "command.show-explorer"], ["show-problems", "command.show-problems"], ["zoom-in", "command.zoom-in"], ["zoom-out", "command.zoom-out"], ["zoom-reset", "command.zoom-reset"],
+  ["resize-fit", "command.resize-fit"], ["resize-selected-fit", "command.resize-selected-fit"], ["reset-row-heights", "command.reset-row-heights"], ["toggle-sidebar", "command.toggle-sidebar"], ["toggle-theme", "command.toggle-theme"],
+  ["open-app-settings", "command.open-app-settings"], ["open-shortcut-settings", "command.open-shortcut-settings"], ["open-settings", "command.open-settings"]
 ];
 
 export const DEVELOPMENT_COMMAND_LABELS = [
@@ -147,7 +104,7 @@ export function commandLabelsForEnvironment({ isDevelopmentMode = false } = {}) 
   return [
     ...COMMAND_LABELS_BASE,
     ...(isDevelopmentMode ? DEVELOPMENT_COMMAND_LABELS : [])
-  ];
+  ].map(([id, key]) => [id, tText(key)]);
 }
 
 export function createCommandRunners(commandLabels, runCommand) {
@@ -166,37 +123,37 @@ export function commandActionForId(id) {
 
 export function rowCommandItems({ cloneDisabled = false } = {}) {
   return [
-    { id: "add-row", label: "Add Rows..." },
-    { id: "insert-row", label: "Insert Rows..." },
-    { id: "hide-row", label: "Hide Row(s)" },
-    { id: "delete-row", label: "Delete Row(s)" },
-    { id: "clone-row", label: "Clone Row", disabled: cloneDisabled }
+    { id: "add-row", label: tText("command.add-rows") },
+    { id: "insert-row", label: tText("command.insert-row") },
+    { id: "hide-row", label: tText("command.hide-rows") },
+    { id: "delete-row", label: tText("command.delete-rows") },
+    { id: "clone-row", label: tText("command.clone-row"), disabled: cloneDisabled }
   ];
 }
 
 export function columnCommandItems({ cloneDisabled = false } = {}) {
   return [
-    { id: "add-column", label: "Add Columns..." },
-    { id: "insert-column", label: "Insert Columns..." },
-    { id: "hide-column", label: "Hide Column(s)" },
-    { id: "delete-column", label: "Delete Column(s)" },
-    { id: "clone-column", label: "Clone Column(s)", disabled: cloneDisabled }
+    { id: "add-column", label: tText("command.add-columns") },
+    { id: "insert-column", label: tText("command.insert-columns") },
+    { id: "hide-column", label: tText("command.hide-columns") },
+    { id: "delete-column", label: tText("command.delete-columns") },
+    { id: "clone-column", label: tText("command.clone-columns"), disabled: cloneDisabled }
   ];
 }
 
 export function fillCommandItems() {
   return [
-    { id: "fill", label: "Fill" },
-    { id: "increment-fill", label: "Increment Fill" }
+    { id: "fill", label: tText("menu.fill") },
+    { id: "increment-fill", label: tText("command.increment-fill") }
   ];
 }
 
 export function mathCommandItems() {
   return [
-    { id: "math-add", label: "Add" },
-    { id: "math-subtract", label: "Subtract" },
-    { id: "math-multiply", label: "Multiply" },
-    { id: "math-divide", label: "Divide" }
+    { id: "math-add", label: tText("command.math-add-short") },
+    { id: "math-subtract", label: tText("command.math-subtract-short") },
+    { id: "math-multiply", label: tText("command.math-multiply-short") },
+    { id: "math-divide", label: tText("command.math-divide-short") }
   ];
 }
 

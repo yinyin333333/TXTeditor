@@ -122,6 +122,10 @@ export function createJsonEditorController({
     moduleApi?.refreshJsonEditorAppearance?.(view);
   }
 
+  function refreshLocale() {
+    moduleApi?.refreshJsonEditorLocale?.(view);
+  }
+
   function editorOwnsTarget(target) {
     const ElementCtor = globalThis.Element;
     return Boolean(ElementCtor && target instanceof ElementCtor && target.closest(".cm-editor"));
@@ -143,6 +147,7 @@ export function createJsonEditorController({
     openSearch: () => run("openJsonSearch"),
     reconcileDiagnosticHighlight,
     refreshAppearance,
+    refreshLocale,
     redo: () => run("redoJsonEditor"),
     reloadActiveDocument,
     selectAll: () => run("selectAllJson"),

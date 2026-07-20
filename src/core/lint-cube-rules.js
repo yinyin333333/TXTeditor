@@ -3,14 +3,15 @@ import { CUBE_OUTPUT_MOD_COLUMNS } from "./lint-stat-data.js";
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { asciiLower, fitsFixed4cc, fixed4ccValues, fixed4Key, propertyGroupsEnabled, referenceTable } from "./lint-reference-semantics.js";
 import { clean } from "./lint-table.js";
+import { legacyMessage } from "./legacy-lint-i18n.js";
 
 const CUBE_OUTPUT_BYTE_MODIFIERS = new Set(["qty", "sock", "lvl"]);
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const CUBE_LINT_RULES = [
-  rule("Cube/ValidInputs", "Valid cube inputs", lintCubeInputs, true, PROFILE_OPTIONS, "Checks input modifiers, qty=N/qty,N forms, quantities from 0 through 255, text ignored after an unknown modifier, and matching numinputs values."),
-  rule("Cube/ValidOutputs", "Valid cube outputs", lintCubeOutputs, true, PROFILE_OPTIONS, "Checks cubemain output item references, output qualifiers, and output property codes."),
-  rule("Cube/ValidOp", "Valid cube op", lintCubeOp, true, PROFILE_OPTIONS, "Checks the supported op values and their required number or ItemStatCost name parameters. Letter case does not matter for stat names.")
+  rule("Cube/ValidInputs", lintCubeInputs, true, PROFILE_OPTIONS),
+  rule("Cube/ValidOutputs", lintCubeOutputs, true, PROFILE_OPTIONS),
+  rule("Cube/ValidOp", lintCubeOp, true, PROFILE_OPTIONS)
 ];
 
 export function lintCubeInputs(index, ctx) {
@@ -23,13 +24,13 @@ export function lintCubeInputs(index, ctx) {
     const declared = clean(row.get("numinputs"));
     const description = rawRowValue(table, row.rowIndex, "description");
     if (!declared || declared === "0") {
-      ctx.add(table, row.rowIndex, "numinputs", `No inputs for recipe "${clean(row.get("description"))}".`, {
+      ctx.add(table, row.rowIndex, "numinputs", legacyMessage("cube.noInputs", { description: clean(row.get("description")) }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: no inputs for recipe '${description}'`
       });
       return;
     }
     if (!isUnsignedDecimal(declared)) {
-      ctx.add(table, row.rowIndex, "numinputs", `Invalid numinputs value "${declared}".`, {
+      ctx.add(table, row.rowIndex, "numinputs", legacyMessage("cube.invalidNumInputs", { value: declared }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid value for 'numinputs' for recipe '${description}'`
       });
       return;
@@ -37,7 +38,7 @@ export function lintCubeInputs(index, ctx) {
     const declaredNumber = Number(declared);
     const actual = inputs.reduce((sum, entry) => sum + cubeInputCount(entry.parsed.raw), 0);
     if (declaredNumber !== actual) {
-      ctx.add(table, row.rowIndex, "numinputs", `numinputs is ${declared}, but the recipe contains ${actual} input item(s).`, {
+      ctx.add(table, row.rowIndex, "numinputs", legacyMessage("cube.numInputsMismatch", { declared, actual }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: wrong numinputs. expected ${actual}, found ${declaredNumber} in recipe '${description}'`
       });
     }
@@ -70,7 +71,7 @@ export function lintCubeOutputs(index, ctx) {
       const property = String(row.get(propColumn) ?? "");
       const propertyExists = lookup.properties.has(asciiLower(property));
       if (property && lookup.hasPropertyReferences && !propertyExists) {
-        ctx.add(table, row.rowIndex, propColumn, `Unknown cube output property "${property}".`, {
+        ctx.add(table, row.rowIndex, propColumn, legacyMessage("cube.unknownOutputProperty", { property }), {
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid property '${property}' for '${propColumn}' in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
         });
       }
@@ -86,14 +87,14 @@ export function lintCubeOp(index, ctx) {
     const description = rawRowValue(table, row.rowIndex, "description");
     if (!op || op === "0" || op === "28") return;
     if (!isUnsignedDecimal(op)) {
-      ctx.add(table, row.rowIndex, "op", "Cube op must be an integer from 0 through 28.", {
+      ctx.add(table, row.rowIndex, "op", legacyMessage("cube.invalidOp"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid opcode for '${description}'`
       });
       return;
     }
     const opNumber = Number(op);
     if (opNumber < 0 || opNumber > 28) {
-      ctx.add(table, row.rowIndex, "op", "Cube op must be an integer from 0 through 28.", {
+      ctx.add(table, row.rowIndex, "op", legacyMessage("cube.invalidOp"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid opcode for '${description}'`
       });
       return;
@@ -103,16 +104,16 @@ export function lintCubeOp(index, ctx) {
     const value = clean(row.get("value"));
     const needsParam = opNumber === 1 || (opNumber >= 3 && opNumber <= 26);
     if (needsParam && !param) {
-      ctx.add(table, row.rowIndex, "param", "Cube op requires a param value.", {
+      ctx.add(table, row.rowIndex, "param", legacyMessage("cube.opRequiresParam"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: opcode '${opNumber}' for recipe '${description}' requires a param, but none set`
       });
     } else if (needsParam && validCubeStatParam(index, param) === false) {
-        ctx.add(table, row.rowIndex, "param", `Cube op param "${param}" is not a valid item stat index or stat name.`, {
+        ctx.add(table, row.rowIndex, "param", legacyMessage("cube.invalidOpParam", { param }), {
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid param for recipe '${description}'`
         });
     }
     if (!value) {
-      ctx.add(table, row.rowIndex, "value", "Cube op requires a value.", {
+      ctx.add(table, row.rowIndex, "value", legacyMessage("cube.opRequiresValue"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: opcode '${opNumber}' for recipe '${description}' requires a value, but none set`
       });
     }
@@ -122,7 +123,7 @@ export function lintCubeOp(index, ctx) {
 function validateCubeInputReference(lookup, ctx, table, rowIndex, columnName, parsed) {
   const code = parsed.code;
   if (!code) {
-    ctx.add(table, rowIndex, columnName, "Cube input has an empty base item.", {
+    ctx.add(table, rowIndex, columnName, legacyMessage("cube.emptyInput"), {
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: empty base for ${columnName} in recipe '${rawRowValue(table, rowIndex, "description")}'`
     });
     return false;
@@ -131,7 +132,7 @@ function validateCubeInputReference(lookup, ctx, table, rowIndex, columnName, pa
   if (!lookup.hasReferences) return null;
   const valid = lookup.exactItems.has(fixed4Key(code)) || lookup.namedItems.has(asciiLower(code));
   if (valid) return true;
-  ctx.add(table, rowIndex, columnName, `Unknown cube input "${code}".`, {
+  ctx.add(table, rowIndex, columnName, legacyMessage("cube.unknownInput", { code }), {
     d2rMessage: `${table.displayName}, line ${rowIndex + 1}: couldn't find '${code}' for ${columnName} in recipe '${rawRowValue(table, rowIndex, "description")}'`
   });
   return false;
@@ -140,7 +141,7 @@ function validateCubeInputReference(lookup, ctx, table, rowIndex, columnName, pa
 function validateCubeOutputReference(lookup, ctx, table, row, columnName, parsed) {
   const code = parsed.code;
   if (!code) {
-    ctx.add(table, row.rowIndex, columnName, "Cube output has an empty base item.", {
+    ctx.add(table, row.rowIndex, columnName, legacyMessage("cube.emptyOutput"), {
       d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: empty base for ${columnName} in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
     });
     return false;
@@ -149,7 +150,7 @@ function validateCubeOutputReference(lookup, ctx, table, row, columnName, parsed
   if (code === "useitem" || code === "usetype") {
     const inputColumn = outputInputColumn(columnName);
     if (!inputColumn || !table.hasColumn(inputColumn) || !String(row.get(inputColumn) ?? "")) {
-      ctx.add(table, row.rowIndex, columnName, `${code} requires a matching ${inputColumn ?? "input"} value for this output position.`, {
+      ctx.add(table, row.rowIndex, columnName, legacyMessage("cube.outputNeedsInput", { code, inputColumn: inputColumn ?? "input" }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${code}' for '${columnName}' has no matching '${inputColumn ?? "input"}' in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
       });
     }
@@ -161,7 +162,7 @@ function validateCubeOutputReference(lookup, ctx, table, row, columnName, parsed
 
   if ((fitsFixed4cc(code) && lookup.exactItems.has(fixed4Key(code))) || lookup.namedItems.has(asciiLower(code))) return true;
 
-  ctx.add(table, row.rowIndex, columnName, `Unknown cube output "${code}".`, {
+  ctx.add(table, row.rowIndex, columnName, legacyMessage("cube.unknownOutput", { code }), {
     d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: could not find '${code}' for ${columnName} in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
   });
   return false;
@@ -170,7 +171,7 @@ function validateCubeOutputReference(lookup, ctx, table, row, columnName, parsed
 function validateInputQualifiers(ctx, table, rowIndex, columnName, parsed) {
   if (parsed.ignoredSuffix) {
     const stoppedAt = parsed.ignoredSuffix.raw || "(empty modifier)";
-    ctx.add(table, rowIndex, columnName, `The game stops at '${stoppedAt}'. The base and modifiers before it still work; '${stoppedAt}' and everything after it are ignored.`, {
+    ctx.add(table, rowIndex, columnName, legacyMessage("cube.stopsAfterModifier", { stoppedAt }), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: The game stops at '${stoppedAt}' for '${columnName}' in recipe '${rawRowValue(table, rowIndex, "description")}'. The base and modifiers before it still work; '${stoppedAt}' and everything after it are ignored.`
     });
@@ -179,7 +180,7 @@ function validateInputQualifiers(ctx, table, rowIndex, columnName, parsed) {
 
 function validateInputStorage(ctx, table, rowIndex, columnName, parsed) {
   if (parsed.qty === null || isUnsignedByte(parsed.qty)) return;
-  ctx.add(table, rowIndex, columnName, `Cube input quantity "${parsed.qty}" is outside 0 through 255. The game reads it as ${parsed.storedQty || 0} and uses ${parsed.effectiveQty} item(s). Enter a value from 0 through 255.`, {
+  ctx.add(table, rowIndex, columnName, legacyMessage("cube.inputQtyRange", { qty: parsed.qty, storedQty: parsed.storedQty || 0, effectiveQty: parsed.effectiveQty }), {
     severity: "warning",
     d2rMessage: `${table.displayName}, line ${rowIndex + 1}: input quantity '${parsed.qty}' for '${columnName}' is outside 0..255; the game reads it as ${parsed.storedQty || 0} and uses ${parsed.effectiveQty} item(s) in recipe '${rawRowValue(table, rowIndex, "description")}'. Enter 0..255.`
   });
@@ -190,7 +191,7 @@ function validateOutputQualifiers(ctx, table, rowIndex, columnName, parsed, base
   for (const modifier of parsed.modifiers) {
     if (!CUBE_OUTPUT_BYTE_MODIFIERS.has(modifier.name)) continue;
     if (isUnsignedByte(modifier.value)) continue;
-    ctx.add(table, rowIndex, columnName, `Cube output modifier "${modifier.raw}" is outside 0 through 255, so the game truncates it. Enter a value from 0 through 255.`, {
+    ctx.add(table, rowIndex, columnName, legacyMessage("cube.outputModifierRange", { modifier: modifier.raw }), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: '${modifier.raw}' for '${columnName}' is outside 0..255, so the game truncates it. Enter 0..255 in recipe '${rawRowValue(table, rowIndex, "description")}'`
     });
@@ -199,8 +200,8 @@ function validateOutputQualifiers(ctx, table, rowIndex, columnName, parsed, base
     const suffixLabel = parsed.ignoredSuffix.token === "" ? "an empty modifier" : `'${parsed.ignoredSuffix.raw}'`;
     const stoppedAt = parsed.ignoredSuffix.raw || "(empty modifier)";
     const message = baseState === true
-      ? `The game stops at '${stoppedAt}'. The base and modifiers before it still work; '${stoppedAt}' and everything after it are ignored.`
-      : `If the base is valid, the game stops at ${suffixLabel}. The base and modifiers before it still work; ${suffixLabel} and everything after it are ignored.`;
+      ? legacyMessage("cube.stopsAfterModifier", { stoppedAt })
+      : legacyMessage("cube.stopsAfterModifierConditional", { suffixLabel });
     ctx.add(table, rowIndex, columnName, message, {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: ${message} Column '${columnName}', recipe '${rawRowValue(table, rowIndex, "description")}'.`
@@ -213,7 +214,7 @@ function validateOutputStorageColumns(ctx, table, row, columnName) {
     if (!table.hasColumn(storageColumn)) continue;
     const value = String(row.get(storageColumn) ?? "");
     if (!value || isUnsignedByte(value)) continue;
-    ctx.add(table, row.rowIndex, storageColumn, `Cube ${columnName} ${storageColumn} value "${value}" is outside 0 through 255, so the game truncates it. Enter a value from 0 through 255.`, {
+    ctx.add(table, row.rowIndex, storageColumn, legacyMessage("cube.storageRange", { column: columnName, storageColumn, value }), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${storageColumn}' value '${value}' for '${columnName}' is outside 0..255, so the game truncates it. Enter 0..255 in recipe '${rawRowValue(table, row.rowIndex, "description")}'`
     });

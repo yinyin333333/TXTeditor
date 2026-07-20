@@ -830,7 +830,7 @@ test("context menu command item registries preserve expected command groups", ()
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
   const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
-  assert.match(commandSurfaceController, /label: "Fill"[\s\S]*label: "Math"[\s\S]*id: "go-to-definition"/);
+  assert.match(commandSurfaceController, /tText\("menu\.fill"\)[\s\S]*tText\("menu\.math"\)[\s\S]*id: "go-to-definition"/);
 });
 
 test("Resize To Fit keeps the existing all-column command behavior", () => {
@@ -841,8 +841,8 @@ test("Resize To Fit keeps the existing all-column command behavior", () => {
 test("Open File and Open Folder sidebar buttons are constrained to one line", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(html, /<button data-command="open-file">Open File<\/button>/);
-  assert.match(html, /<button data-command="open-folder">Open Folder<\/button>/);
+  assert.match(html, /<button data-command="open-file" data-i18n="toolbar\.openFile">Open File<\/button>/);
+  assert.match(html, /<button data-command="open-folder" data-i18n="toolbar\.openFolder">Open Folder<\/button>/);
   assert.match(css, /--sidebar-width:\s*260px/);
   assert.match(css, /\.layout-root\s*\{[\s\S]*grid-template-columns:\s*var\(--dock-left-width\) minmax\(var\(--editor-min-width\), 1fr\) var\(--dock-right-width\)/);
   assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*0/);

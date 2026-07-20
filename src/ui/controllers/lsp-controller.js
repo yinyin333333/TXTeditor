@@ -61,6 +61,7 @@ import { reportBackgroundTaskFailure } from "../../core/background-task-status.j
 import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
+import { tText } from "../../core/i18n.js";
 import { jsonDocumentCanOpen, resyncSavedJsonDocument, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
 export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 const HOVER_READY_FALLBACK_MS = 1200;
@@ -203,7 +204,6 @@ export function createLspController({
       includeSubfolders
     });
   }
-
   function documentCanOpenInSession(
     doc,
     workspacePath = state.lsp.workspacePath,
@@ -256,7 +256,7 @@ export function createLspController({
     diagnosticsEventController.clearPending();
     state.lspLogs = [];
     if (els.logList) els.logList.innerHTML = "";
-    state.lint.status = "Connecting to linter...";
+    state.lint.status = tText("lint.connecting");
     state.lsp.started = false;
     state.lsp.generation = generation;
     state.lsp.readiness = "starting";
@@ -271,7 +271,8 @@ export function createLspController({
         generation,
         requestedContextMode,
         referenceRootPath,
-        includeSubfolders
+        includeSubfolders,
+        state.locale
       );
       if (state.lsp.generation !== generation) return;
       if (stoppedGenerations.has(generation)) return;
@@ -562,7 +563,6 @@ export function createLspController({
     docState.updatePromise = trackedPromise;
     return trackedPromise;
   }
-
   function isIncrementalRowChange(change) {
     return change?.kind === "replaceRows";
   }
@@ -775,7 +775,7 @@ export function createLspController({
     if (definitionFailed) return;
     if (state.lsp.generation !== generation || !state.lsp.started) return;
     if (!result) {
-      showToast("No definition found.");
+      showToast(tText("lsp.noDefinition"));
       return;
     }
     const targetPath = pathFromUri(result.uri);

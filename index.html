@@ -8,26 +8,26 @@
   </head>
   <body>
     <div id="app" class="shell">
-      <aside class="activity" aria-label="Activity">
-        <button class="activity-button active" data-command="show-explorer" title="Explorer">E</button>
-        <button class="activity-button" data-command="show-problems" title="Problems">P</button>
+      <aside class="activity" aria-label="Activity" data-i18n-aria-label="aria.activity">
+        <button class="activity-button active" data-command="show-explorer" data-i18n-title="activity.explorer" title="Explorer">E</button>
+        <button class="activity-button" data-command="show-problems" data-i18n-title="activity.problems" title="Problems">P</button>
       </aside>
 
       <div id="layoutRoot" class="layout-root">
-        <section id="dockTop" class="dock dock-top" data-dock-edge="top" aria-label="Top dock"></section>
+        <section id="dockTop" class="dock dock-top" data-dock-edge="top" aria-label="Top dock" data-i18n-aria-label="aria.topDock"></section>
 
-        <section id="dockLeft" class="dock dock-left" data-dock-edge="left" aria-label="Left dock">
-          <aside id="sidebar" class="sidebar" aria-label="Workspace" data-dock-panel="explorer">
+        <section id="dockLeft" class="dock dock-left" data-dock-edge="left" aria-label="Left dock" data-i18n-aria-label="aria.leftDock">
+          <aside id="sidebar" class="sidebar" aria-label="Workspace" data-i18n-aria-label="aria.workspace" data-dock-panel="explorer">
             <div id="sidebarResizer" class="sidebar-resizer pane-resizer" aria-hidden="true"></div>
-            <header class="sidebar-header">TXTeditor</header>
+            <header class="sidebar-header" data-i18n="app.title">TXTeditor</header>
             <div class="sidebar-actions">
-              <button data-command="open-file">Open File</button>
-              <button data-command="open-folder">Open Folder</button>
+              <button data-command="open-file" data-i18n="toolbar.openFile">Open File</button>
+              <button data-command="open-folder" data-i18n="toolbar.openFolder">Open Folder</button>
             </div>
             <div class="sidebar-search">
               <span class="sidebar-search-icon" aria-hidden="true"></span>
-              <input id="explorerFilter" class="sidebar-filter" type="search" placeholder="Search file" aria-label="Search file" autocomplete="off" spellcheck="false" />
-              <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files"></div>
+              <input id="explorerFilter" class="sidebar-filter" type="search" data-i18n-placeholder="explorer.search" data-i18n-aria-label="explorer.search" placeholder="Search file" aria-label="Search file" autocomplete="off" spellcheck="false" />
+              <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files" data-i18n-aria-label="aria.matchingFiles"></div>
             </div>
             <div id="fileList" class="file-list"></div>
           </aside>
@@ -36,41 +36,41 @@
         <main class="main">
           <div id="tabs" class="tabs"></div>
           <section class="toolbar">
-            <button data-command="open-file">Open</button>
-            <button data-command="save-file">Save</button>
-            <button data-command="save-as">Save As</button>
-            <button data-command="undo">Undo</button>
-            <button data-command="redo">Redo</button>
-            <button data-command="search">Find</button>
-            <button class="toggle-button" data-command="toggle-freeze-row">Freeze Row</button>
-            <button class="toggle-button" data-command="toggle-freeze-column">Freeze Column</button>
-            <button data-command="open-shortcut-settings">Shortcuts</button>
-            <button data-command="open-app-settings">Settings</button>
+            <button data-command="open-file" data-i18n="toolbar.open">Open</button>
+            <button data-command="save-file" data-i18n="toolbar.save">Save</button>
+            <button data-command="save-as" data-i18n="toolbar.saveAs">Save As</button>
+            <button data-command="undo" data-i18n="toolbar.undo">Undo</button>
+            <button data-command="redo" data-i18n="toolbar.redo">Redo</button>
+            <button data-command="search" data-i18n="toolbar.find">Find</button>
+            <button class="toggle-button" data-command="toggle-freeze-row" data-i18n="toolbar.freezeRow">Freeze Row</button>
+            <button class="toggle-button" data-command="toggle-freeze-column" data-i18n="toolbar.freezeColumn">Freeze Column</button>
+            <button data-command="open-shortcut-settings" data-i18n="toolbar.shortcuts">Shortcuts</button>
+            <button data-command="open-app-settings" data-i18n="toolbar.settings">Settings</button>
           </section>
-          <section id="gridHost" class="grid-host editor-surface" tabindex="0" aria-label="Virtual table editor">
+          <section id="gridHost" class="grid-host editor-surface" tabindex="0" aria-label="Virtual table editor" data-i18n-aria-label="aria.tableEditor">
             <canvas id="gridCanvas"></canvas>
             <canvas id="frozenCanvas"></canvas>
             <div id="scrollSurface" class="scroll-surface"></div>
             <input id="cellEditor" class="cell-editor" autocomplete="off" spellcheck="false" />
-            <div id="emptyState" class="empty-state">Open a file or folder to begin</div>
+            <div id="emptyState" class="empty-state" data-i18n="empty.open">Open a file or folder to begin</div>
             <div id="overviewRuler" class="overview-ruler"></div>
           </section>
-          <section id="jsonEditorHost" class="json-editor-host editor-surface hidden" aria-label="JSON code editor"></section>
+          <section id="jsonEditorHost" class="json-editor-host editor-surface hidden" aria-label="JSON code editor" data-i18n-aria-label="aria.jsonEditor"></section>
         </main>
 
-        <section id="dockRight" class="dock dock-right" data-dock-edge="right" aria-label="Right dock"></section>
+        <section id="dockRight" class="dock dock-right" data-dock-edge="right" aria-label="Right dock" data-i18n-aria-label="aria.rightDock"></section>
 
-        <section id="dockBottom" class="dock dock-bottom" data-dock-edge="bottom" aria-label="Bottom dock">
-          <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems" data-dock-panel="problems">
+        <section id="dockBottom" class="dock dock-bottom" data-dock-edge="bottom" aria-label="Bottom dock" data-i18n-aria-label="aria.bottomDock">
+          <section id="problemsPanel" class="problems-panel hidden" aria-label="Problems" data-i18n-aria-label="activity.problems" data-dock-panel="problems">
             <div id="problemsResizer" class="problems-resizer pane-resizer" aria-hidden="true"></div>
             <header class="problems-header">
               <div class="bottom-tabs">
-                <button class="bottom-tab active" data-bottom-tab="problems">Problems <span id="lintSummary" class="lint-summary"></span></button>
-                <button class="bottom-tab" data-bottom-tab="log">Log</button>
+                <button class="bottom-tab active" data-bottom-tab="problems"><span data-i18n="activity.problems">Problems</span> <span id="lintSummary" class="lint-summary"></span></button>
+                <button class="bottom-tab" data-bottom-tab="log" data-i18n="problems.log">Log</button>
               </div>
               <div id="lintControls" class="lint-controls"></div>
             </header>
-            <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules"></div>
+            <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules" data-i18n-aria-label="lint.rules"></div>
             <div id="problemsList" class="problems-list"></div>
             <div id="logList" class="log-list hidden"></div>
           </section>
@@ -80,32 +80,32 @@
 
     <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
       <div class="modal search-modal">
-        <h2 id="searchTitle" data-search-drag-handle>Find</h2>
-        <input id="searchInput" class="modal-input" type="search" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
+        <h2 id="searchTitle" data-search-drag-handle data-i18n="search.title">Find</h2>
+        <input id="searchInput" class="modal-input" type="search" data-i18n-placeholder="search.placeholder" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
         <div id="searchReplaceRow" class="search-replace-row hidden">
-          <label for="searchReplaceInput">Replace with</label>
+          <label for="searchReplaceInput" data-i18n="search.replaceWith">Replace with</label>
           <input id="searchReplaceInput" class="modal-input" type="text" autocomplete="off" spellcheck="false" />
         </div>
-        <fieldset class="search-scope" aria-label="Search scope">
-          <label><input type="radio" name="searchScope" value="all" checked /> All cells</label>
-          <label><input type="radio" name="searchScope" value="column-titles" /> Column only</label>
-          <label><input type="radio" name="searchScope" value="row-titles" /> Row only</label>
+        <fieldset class="search-scope" aria-label="Search scope" data-i18n-aria-label="search.scope">
+          <label><input type="radio" name="searchScope" value="all" checked /> <span data-i18n="search.allCells">All cells</span></label>
+          <label><input type="radio" name="searchScope" value="column-titles" /> <span data-i18n="search.columnOnly">Column only</span></label>
+          <label><input type="radio" name="searchScope" value="row-titles" /> <span data-i18n="search.rowOnly">Row only</span></label>
         </fieldset>
         <div id="searchStatus" class="search-status"></div>
         <div id="searchReplaceActions" class="modal-actions search-replace-actions hidden">
-          <button data-search-replace>Replace</button>
-          <button data-search-replace-all>Replace All</button>
+          <button data-search-replace data-i18n="search.replace">Replace</button>
+          <button data-search-replace-all data-i18n="search.replaceAll">Replace All</button>
         </div>
         <div class="modal-actions">
-          <button data-search-previous aria-keyshortcuts="Shift+Enter">Find Prev</button>
-          <button data-command="find-next" aria-keyshortcuts="Enter">Find Next</button>
-          <button data-search-close>Close</button>
+          <button data-search-previous aria-keyshortcuts="Shift+Enter" data-i18n="search.previous">Find Prev</button>
+          <button data-command="find-next" aria-keyshortcuts="Enter" data-i18n="search.next">Find Next</button>
+          <button data-search-close data-i18n="common.close">Close</button>
         </div>
       </div>
     </div>
 
     <div id="palette" class="palette hidden">
-      <input id="paletteInput" placeholder="Type a command" />
+      <input id="paletteInput" data-i18n-placeholder="palette.placeholder" placeholder="Type a command" />
       <div id="paletteResults" class="palette-results"></div>
     </div>
 
@@ -113,23 +113,23 @@
     <div id="contextMenu" class="context-menu hidden"></div>
     <div id="closeDialog" class="modal-backdrop hidden">
       <div class="modal">
-        <h2>Save changes?</h2>
-        <p id="closeDialogText">This file has unsaved changes.</p>
+        <h2 data-i18n="dialog.saveChanges">Save changes?</h2>
+        <p id="closeDialogText" data-i18n="dialog.unsavedChanges">This file has unsaved changes.</p>
         <div class="modal-actions">
-          <button data-close-choice="save">Save</button>
-          <button data-close-choice="discard">Don't Save</button>
-          <button data-close-choice="cancel">Cancel</button>
+          <button data-close-choice="save" data-i18n="toolbar.save">Save</button>
+          <button data-close-choice="discard" data-i18n="dialog.dontSave">Don't Save</button>
+          <button data-close-choice="cancel" data-i18n="common.cancel">Cancel</button>
         </div>
       </div>
     </div>
 
     <div id="externalChangeDialog" class="modal-backdrop hidden">
       <div class="modal">
-        <h2>File changed outside TXTeditor</h2>
-        <p id="externalChangeDialogText">This JSON file changed on disk.</p>
+        <h2 data-i18n="dialog.externalChanged">File changed outside TXTeditor</h2>
+        <p id="externalChangeDialogText" data-i18n="dialog.jsonChanged">This JSON file changed on disk.</p>
         <div class="modal-actions">
-          <button data-external-change-choice="reload">Reload</button>
-          <button data-external-change-choice="keep">Keep My Changes</button>
+          <button data-external-change-choice="reload" data-i18n="dialog.reload">Reload</button>
+          <button data-external-change-choice="keep" data-i18n="dialog.keepChanges">Keep My Changes</button>
         </div>
       </div>
     </div>

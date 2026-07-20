@@ -12,6 +12,7 @@ import {
   contextMenuOpenTransition
 } from "../context-menu-policy.js";
 import { shortcutDisplayForAction } from "../shortcut-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createCommandSurfaceController({
   state,
@@ -37,7 +38,7 @@ export function createCommandSurfaceController({
   function renderPalette() {
     const q = els.paletteInput.value.toLowerCase();
     const kind = activeDoc()?.kind ?? "table";
-    const labels = commandLabels.filter(([id, label]) =>
+    const labels = (typeof commandLabels === "function" ? commandLabels() : commandLabels).filter(([id, label]) =>
       canRunCommandForDocument(id, kind) && label.toLowerCase().includes(q)
     );
     els.paletteResults.innerHTML = labels.map(([id, label]) => `<button data-run="${id}">${label}</button>`).join("");
@@ -57,17 +58,17 @@ export function createCommandSurfaceController({
     const focusRow = hit?.row ?? state.selection.focus.row;
     const focusCol = hit?.column ?? state.selection.focus.column;
     const entries = [
-      { type: "submenu", label: "Column Operations", items: columnItems() },
-      { type: "submenu", label: "Row Operations", items: rowItems() },
-      { id: "resize-fit", label: "Resize To Fit" },
-      { id: "resize-selected-fit", label: "Resize Selected To Fit" },
-      { id: "unhide-all", label: "Unhide All", disabled: !canUnhide },
-      { type: "submenu", label: "Fill", items: fillCommandItems() },
-      { type: "submenu", label: "Math", items: mathCommandItems() },
-      { id: "go-to-definition", label: "Go To Definition", disabled: !cellHasReference(focusRow, focusCol) },
-      { id: "cut", label: "Cut", shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
-      { id: "copy", label: "Copy", shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
-      { id: "paste", label: "Paste", shortcut: shortcutDisplayForAction("paste", state.shortcuts) }
+      { type: "submenu", label: tText("menu.columnOperations"), items: columnItems() },
+      { type: "submenu", label: tText("menu.rowOperations"), items: rowItems() },
+      { id: "resize-fit", label: tText("menu.resizeToFit") },
+      { id: "resize-selected-fit", label: tText("menu.resizeSelectedToFit") },
+      { id: "unhide-all", label: tText("menu.unhideAll"), disabled: !canUnhide },
+      { type: "submenu", label: tText("menu.fill"), items: fillCommandItems() },
+      { type: "submenu", label: tText("menu.math"), items: mathCommandItems() },
+      { id: "go-to-definition", label: tText("menu.goToDefinition"), disabled: !cellHasReference(focusRow, focusCol) },
+      { id: "cut", label: tText("command.cut"), shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
+      { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
+      { id: "paste", label: tText("command.paste"), shortcut: shortcutDisplayForAction("paste", state.shortcuts) }
     ];
     els.contextMenu.innerHTML = entries.map(menuEntry).join("");
     for (const button of els.contextMenu.querySelectorAll("button[data-run]")) {
@@ -93,6 +94,19 @@ export function createCommandSurfaceController({
     els.contextMenu.dataset.y = String(y);
     positionContextMenu();
   }
+
+  function rerenderOpenSurface() {
+    if (!els.palette.classList.contains("hidden")) renderPalette();
+    if (!els.contextMenu.classList.contains("hidden")) {
+      showContextMenu({
+        x: Number(els.contextMenu.dataset.x),
+        y: Number(els.contextMenu.dataset.y),
+        hit: state.contextHit
+      });
+    }
+  }
+
+  globalThis.document?.addEventListener?.("txteditor-locale-changed", rerenderOpenSurface);
 
   function positionContextMenu() {
     if (els.contextMenu.classList.contains("hidden")) return;
@@ -183,6 +197,7 @@ export function createCommandSurfaceController({
   return {
     hideContextMenu,
     positionContextMenu,
+    rerenderOpenSurface,
     renderPalette,
     setContextMenuOpen,
     showContextMenu,
