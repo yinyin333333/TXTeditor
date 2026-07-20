@@ -99,7 +99,7 @@ test("locale changes re-run Legacy lint and force a Vector-LSP restart without e
 
   await controller.setLocale("zhCN");
   assert.equal(state.locale, "zhCN");
-  assert.equal(ownerDocument.documentElement.lang, "zhCN");
+  assert.equal(ownerDocument.documentElement.lang, "zh-CN");
   assert.equal(readLocale(memory), "zhCN");
   assert.deepEqual(calls.find(([kind]) => kind === "start"), ["start", "E:\\Workspace", {
     forceRestart: true,

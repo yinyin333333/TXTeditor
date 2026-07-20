@@ -4,6 +4,22 @@ export const SUPPORTED_LOCALES = Object.freeze([
   "enUS", "zhTW", "deDE", "esES", "frFR", "itIT", "koKR", "plPL", "esMX", "jaJP", "ptBR", "ruRU", "zhCN"
 ]);
 
+const DOCUMENT_LANGUAGE_TAGS = Object.freeze({
+  enUS: "en-US",
+  zhTW: "zh-TW",
+  deDE: "de-DE",
+  esES: "es-ES",
+  frFR: "fr-FR",
+  itIT: "it-IT",
+  koKR: "ko-KR",
+  plPL: "pl-PL",
+  esMX: "es-MX",
+  jaJP: "ja-JP",
+  ptBR: "pt-BR",
+  ruRU: "ru-RU",
+  zhCN: "zh-CN"
+});
+
 export const LOCALE_OPTIONS = Object.freeze([
   ["enUS", "English (US)"], ["zhTW", "繁體中文"], ["deDE", "Deutsch"], ["esES", "Español (España)"],
   ["frFR", "Français"], ["itIT", "Italiano"], ["koKR", "한국어"], ["plPL", "Polski"],
@@ -425,7 +441,7 @@ function formatMessage(key, params, locale, escapeParameters) {
 
 export function applyDocumentLocale(ownerDocument = document, locale = activeLocale) {
   const normalized = normalizeLocale(locale);
-  ownerDocument.documentElement.lang = normalized;
+  ownerDocument.documentElement.lang = DOCUMENT_LANGUAGE_TAGS[normalized];
   for (const element of ownerDocument.querySelectorAll("[data-i18n]")) {
     element.textContent = tText(element.dataset.i18n, {}, normalized);
   }
