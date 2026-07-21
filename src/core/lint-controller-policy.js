@@ -13,8 +13,8 @@ export function isLegacyLintEngineValue(engine) {
   return engine === LINT_ENGINE_LEGACY;
 }
 
-export function effectiveVectorLspHover({ engine, vectorLspHover }) {
-  return isVectorLintEngineValue(engine) && Boolean(vectorLspHover);
+export function effectiveVectorLspHover({ engine, lintEnabled = true, vectorLspHover }) {
+  return isVectorLintEngineValue(engine) && Boolean(lintEnabled) && Boolean(vectorLspHover);
 }
 
 export function vectorLspHoverFromStorage(value) {
@@ -25,11 +25,13 @@ export function vectorLspHoverStorageValue(enabled) {
   return enabled ? "on" : "off";
 }
 
-export function documentChangeSyncRoute(engine) {
+export function documentChangeSyncRoute(engine, lintEnabled = true) {
+  if (!lintEnabled) return "disabled";
   return isVectorLintEngineValue(engine) ? "vector-update" : "legacy-lint-edit";
 }
 
-export function documentOpenSyncRoute(engine) {
+export function documentOpenSyncRoute(engine, lintEnabled = true) {
+  if (!lintEnabled) return "disabled";
   return isVectorLintEngineValue(engine) ? "vector-open" : "legacy-lint-open";
 }
 

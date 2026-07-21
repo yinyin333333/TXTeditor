@@ -1205,6 +1205,22 @@ test("Vector-LSP tooltip does not repeat guidance already present in the message
   }), "Invalid calculation: Function 'min()' expects 2 arguments, got 1\n\nWhat to do:\nUse exactly 2 arguments.");
 });
 
+test("localized keyed diagnostics show localized structured guidance", () => {
+  const message = "SkillDesc 계산식에 소수가 포함되어 있습니다 (`-6.25`). 게임은 정수 부분만 사용하고 소수 부분은 무시합니다 (사용: `-6`, 무시: `.25`).";
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message,
+    data: {
+      localizedMessage: true,
+      localizedGuidanceHeading: "수정 방법",
+      localizedGuidance: "의도에 맞는 정수 계산식으로 바꾸세요.",
+      messageKey: "plugin.calc.skilldesc-decimal-prefix",
+      kind: "decimal-policy",
+      hint: "Use an integer expression that matches your intent."
+    }
+  }), `${message}\n\n수정 방법:\n의도에 맞는 정수 계산식으로 바꾸세요.`);
+});
+
 test("Vector-LSP tooltip uses structured missing-token data for insertion hints", () => {
   const formula = "min(5,1";
   const diagnostic = {
@@ -1642,6 +1658,7 @@ test("Vector-LSP hover can be disabled without clearing baseline hover behavior"
   assert.equal(vectorLspHoverStorageValue(true), "on");
   assert.equal(vectorLspHoverStorageValue(false), "off");
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, vectorLspHover: true }), true);
+  assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, lintEnabled: false, vectorLspHover: true }), false);
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, vectorLspHover: false }), false);
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_LEGACY, vectorLspHover: true }), false);
   const target = makeVectorHoverTarget({ uri: "file:///skills.txt", fileName: "skills.txt", row: 2, column: 0, cellValue: "cap" });
@@ -1724,6 +1741,8 @@ test("lint engine selector defaults to Vector-LSP and persists separately from l
   assert.equal(documentChangeSyncRoute(LINT_ENGINE_LEGACY), "legacy-lint-edit");
   assert.equal(documentOpenSyncRoute(LINT_ENGINE_VECTOR), "vector-open");
   assert.equal(documentOpenSyncRoute(LINT_ENGINE_LEGACY), "legacy-lint-open");
+  assert.equal(documentChangeSyncRoute(LINT_ENGINE_VECTOR, false), "disabled");
+  assert.equal(documentOpenSyncRoute(LINT_ENGINE_VECTOR, false), "disabled");
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_VECTOR, lspStarted: true }), true);
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_VECTOR, lspStarted: false }), false);
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_LEGACY, lspStarted: true }), false);

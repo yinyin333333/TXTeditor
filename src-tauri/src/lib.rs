@@ -37,6 +37,7 @@ pub fn run() {
             config::pick_file_path,
             reference_data::load_lint_reference_dataset,
             lsp_service::lsp_start,
+            lsp_service::lsp_stop,
             lsp_service::lsp_open_file,
             lsp_service::lsp_update_file,
             lsp_service::lsp_update_file_incremental,

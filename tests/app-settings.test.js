@@ -104,7 +104,7 @@ function makeSettingsController({
     resetDockLayout: () => { state.dockLayout = DEFAULT_DOCK_LAYOUT; },
     isLegacyLintEngine: () => state.lint.engine === "legacy",
     isVectorLintEngine: () => state.lint.engine === LINT_ENGINE_VECTOR,
-    effectiveVectorLspHoverEnabled: () => true,
+    effectiveVectorLspHoverEnabled: () => state.lint.enabled && state.lint.engine === LINT_ENGINE_VECTOR,
     cancelLegacyLintJobs: () => calls.push("cancel-legacy"),
     scheduleLegacyLintFull: (reason, delay) => calls.push(["schedule-legacy", reason, delay]),
     legacyLintDisplayActive: () => state.lint.engine === "legacy",
@@ -116,6 +116,7 @@ function makeSettingsController({
       lspStarts.push(args);
       calls.push("lsp-start");
     },
+    stopVectorSession: async (reason) => calls.push(["stop-vector-session", reason]),
     ensureDocumentSession: async (options) => calls.push(["ensure-document-session", options]),
     resetLegacyWorkspaceIndex: () => calls.push("reset-legacy-workspace-index"),
     recordLintEngineEvent: (name) => calls.push(["lint-event", name]),
@@ -461,10 +462,10 @@ test("Legacy reference changes force a fresh Vector session while lint reactivat
   assert.equal(engineSwitch.calls.includes("lsp-start"), false);
 
   const lintEnable = makeSettingsController({ lintEnabled: false });
-  lintEnable.controller.toggleLint();
+  await lintEnable.controller.toggleLint();
   assert.equal(lintEnable.state.lint.enabled, true);
   assert.deepEqual(lintEnable.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
-    ["ensure-document-session", {}]
+    ["ensure-document-session", { forceRestart: true }]
   ]);
 
   const workspaceSwitch = makeSettingsController({
@@ -478,6 +479,28 @@ test("Legacy reference changes force a fresh Vector session while lint reactivat
     && entry[0] === "ensure-document-session"), [
     ["ensure-document-session", { forceRestart: true }]
   ]);
+});
+
+test("Lint Off stops Vector-LSP and Lint On rebuilds the workspace session", async () => {
+  const disabled = makeSettingsController({
+    lintEnabled: true,
+    lspStarted: true,
+    workspace: { path: "E:\\Workspace" },
+    diagnostics: [{ id: "old" }]
+  });
+
+  await disabled.controller.toggleLint();
+  assert.equal(disabled.state.lint.enabled, false);
+  assert.deepEqual(disabled.state.lint.diagnostics, []);
+  assert.deepEqual(disabled.calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "stop-vector-session"), [
+    ["stop-vector-session", "lint-disabled"]
+  ]);
+  assert.equal(disabled.calls.includes("lsp-start"), false);
+
+  await disabled.controller.toggleLint();
+  assert.equal(disabled.state.lint.enabled, true);
+  assert.deepEqual(disabled.lspStarts, [["E:\\Workspace", { includeSubfolders: true }]]);
 });
 
 test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {

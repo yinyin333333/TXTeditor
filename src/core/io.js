@@ -34,6 +34,7 @@ export {
   lspOpenFile,
   lspReadyListen,
   lspStart,
+  lspStop,
   lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental,

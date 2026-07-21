@@ -97,6 +97,7 @@ export function createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
+  stopVectorSession = async () => {},
   ensureDocumentSession = async () => {},
   resetLegacyWorkspaceIndex = () => {},
   refreshJsonEditorAppearance = () => {},
@@ -212,25 +213,42 @@ export function createSettingsController({
     grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
     recordLintEngineEvent("engine-switch", { previous, next });
     if (isLegacyLintEngine()) {
+      stopVectorSession("lint-engine-legacy").catch(showError);
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else {
+    } else if (state.lint.enabled) {
       ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
     renderChrome();
   }
 
-  function toggleLint() {
+  async function toggleLint() {
     state.lint.enabled = !state.lint.enabled;
     if (!state.lint.enabled) {
       cancelLegacyLintJobs({ clearDiagnostics: false });
+      invalidateLspHover(true, "lint-disabled");
       setLintDiagnostics([]);
       updateGridDiagnostics();
+      grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+      const stopping = isVectorLintEngine()
+        ? stopVectorSession("lint-disabled")
+        : Promise.resolve();
+      saveLintSettings();
+      renderChrome();
+      await stopping;
+      return;
     } else if (isLegacyLintEngine() && state.problemsVisible) {
       const schedule = legacyLintImmediateSchedule("lint-enabled");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (isVectorLintEngine() && !state.lsp.started) {
-      ensureDocumentSession({}).catch(showError);
+    } else if (isVectorLintEngine()) {
+      grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+      if (state.workspace?.path) {
+        await lspStartWorkspace(state.workspace.path, {
+          includeSubfolders: !state.excludeWorkspaceSubfolders
+        });
+      } else {
+        await ensureDocumentSession({ forceRestart: true });
+      }
     }
     saveLintSettings();
     renderChrome();

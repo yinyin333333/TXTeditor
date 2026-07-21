@@ -84,6 +84,57 @@ function createState(doc, engine = "vector-lsp") {
   };
 }
 
+test("stopping a Vector session invalidates in-flight work and stops only its native generation", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("states.txt", "state\nnone", {
+    path: "E:\\excel\\states.txt",
+    dirty: false
+  });
+  const state = createState(doc);
+  state.lsp = {
+    started: true,
+    generation: 7,
+    workspacePath: "E:\\excel",
+    workspaceKey: "workspace",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true,
+    readiness: "ready",
+    openFileCount: 1
+  };
+  Object.assign(lspDocumentState(doc), {
+    opened: true,
+    openedUri: docToUri(doc),
+    sessionGeneration: 7,
+    version: 2
+  });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          return command === "lsp_stop" ? 1 : undefined;
+        }
+      }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    assert.equal(await controller.stopSession("lint-disabled"), 1);
+    assert.deepEqual(calls, [["lsp_stop", { generation: 7 }]]);
+    assert.equal(state.lsp.started, false);
+    assert.equal(state.lsp.generation, 8);
+    assert.equal(state.lsp.readiness, "stopped");
+    assert.equal(state.lsp.workspacePath, "");
+    assert.equal(lspDocumentState(doc).opened, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("V-TXT-05 Legacy edits receive one full Vector resync without duplicate didOpen", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("skills.txt", "id\nOLD", {
@@ -710,6 +761,139 @@ test("V-TXT-07 workspace session policy distinguishes start, restart, and canoni
     activeWorkspacePath: "E:\\DATA\\",
     requestedWorkspacePath: "e:/data"
   }).action, "sync");
+});
+
+test("tab activation in the current workspace opens only the selected document", async () => {
+  const originalWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "id\n1", {
+    path: "E:\\Data\\skills.txt"
+  });
+  const state = createState(doc);
+  state.lsp = {
+    started: true,
+    generation: 17,
+    readiness: "ready",
+    workspacePath: "E:\\Data",
+    workspaceKey: "e:/data",
+    contextMode: "workspace",
+    referenceRootPath: "",
+    includeSubfolders: true,
+    openFileCount: 1
+  };
+  resetLspDocumentState(doc, { version: 1 });
+  Object.assign(lspDocumentState(doc), {
+    opened: true,
+    openedUri: docToUri(doc),
+    openedVersion: 1,
+    syncedRevision: tableFileState(doc).revision,
+    sessionGeneration: 17,
+    ready: true,
+    diagnosticsReady: true,
+    hoverReady: true
+  });
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, doc);
+    await controller.ensureStandaloneSession(doc);
+    assert.deepEqual(calls, []);
+  } finally {
+    resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("diagnostic events arriving during a batch drain without overlapping getters", async () => {
+  const originalWindow = globalThis.window;
+  const docs = ["a", "b"].map((stem) => TableDocument.fromText(
+    `${stem}.txt`,
+    "id\n1",
+    { path: `E:\\Data\\${stem}.txt` }
+  ));
+  const state = createState(docs[0]);
+  state.docs = docs;
+  state.lsp = { started: true, generation: 18, readiness: "ready", openFileCount: 2 };
+  for (const doc of docs) {
+    resetLspDocumentState(doc, { version: 1 });
+    Object.assign(lspDocumentState(doc), {
+      opened: true,
+      openedUri: docToUri(doc),
+      openedVersion: 1,
+      syncedRevision: tableFileState(doc).revision,
+      sessionGeneration: 18,
+      ready: true,
+      diagnosticsReady: true,
+      hoverReady: true
+    });
+  }
+  const firstGetterGate = deferred();
+  const firstGetterStarted = deferred();
+  let getterCalls = 0;
+  let gettersInFlight = 0;
+  let maximumInFlight = 0;
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          if (command !== "lsp_get_diagnostics_batch") {
+            throw new Error(`unexpected invoke: ${command}`);
+          }
+          getterCalls += 1;
+          gettersInFlight += 1;
+          maximumInFlight = Math.max(maximumInFlight, gettersInFlight);
+          if (getterCalls === 1) {
+            firstGetterStarted.resolve();
+            await firstGetterGate.promise;
+          }
+          gettersInFlight -= 1;
+          return args.requests.map((request) => ({
+            generation: 18,
+            uri: request.uri,
+            version: 1,
+            sequence: request.sequence,
+            diagnostics: []
+          }));
+        }
+      },
+      event: { listen: async () => () => {} }
+    }
+  };
+
+  try {
+    const controller = createLspHarness(state, docs[0]);
+    const first = controller.handleDiagnosticsChanged({
+      uri: docToUri(docs[0]), generation: 18, version: 1, sequence: 1
+    });
+    await firstGetterStarted.promise;
+    const second = controller.handleDiagnosticsChanged({
+      uri: docToUri(docs[1]), generation: 18, version: 1, sequence: 2
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(getterCalls, 1);
+
+    firstGetterGate.resolve();
+    await Promise.all([first, second]);
+    assert.equal(getterCalls, 2);
+    assert.equal(maximumInFlight, 1);
+    assert.equal(controller.perf.diagnosticsPerf().getterMaxInFlight, 1);
+  } finally {
+    firstGetterGate.resolve();
+    for (const doc of docs) resetLspDocumentState(doc);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("V-TXT-07 different workspace restarts while same workspace reuses bindings and cached diagnostics", async () => {

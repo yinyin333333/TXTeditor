@@ -22,11 +22,13 @@ use tokio::sync::oneshot;
 
 type PendingResponse = oneshot::Sender<Result<Option<Value>, String>>;
 type PendingRequests = Mutex<HashMap<u64, PendingResponse>>;
+const LSP_OUTBOUND_QUEUE_CAPACITY: usize = 256;
 
 struct LspProcess {
     generation: u64,
     workspace_root: PathBuf,
-    outbound: Mutex<OutboundState>,
+    writer: Mutex<Option<mpsc::SyncSender<Value>>>,
+    documents: Mutex<HashMap<String, DocumentMirror>>,
     next_id: AtomicU64,
     pending: PendingRequests,
     diagnostics: Mutex<HashMap<String, DiagnosticSnapshot>>,
@@ -39,11 +41,6 @@ struct LspProcess {
 struct DocumentMirror {
     version: u32,
     lines: Arc<Vec<String>>,
-}
-
-struct OutboundState {
-    stdin: ChildStdin,
-    documents: HashMap<String, DocumentMirror>,
 }
 
 #[derive(Clone)]
@@ -427,6 +424,24 @@ fn shutdown_lsp_manager(core: &LspManagerCore) -> usize {
     stopped
 }
 
+fn stop_lsp_through_generation(core: &LspManagerCore, generation: u64) -> usize {
+    core.latest_requested_generation
+        .fetch_max(generation.saturating_add(1), Ordering::SeqCst);
+    let mut manager = core
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stopped = 0;
+    if manager
+        .active
+        .as_ref()
+        .is_some_and(|active| active.generation <= generation)
+    {
+        stopped += stop_active_session(&mut manager, "LSP session stopped");
+    }
+    stopped + stop_starting_sessions(&mut manager, |candidate| candidate <= generation)
+}
+
 fn is_latest_request(core: &LspManagerCore, generation: u64) -> bool {
     !core.shutdown_requested.load(Ordering::SeqCst)
         && core.latest_requested_generation.load(Ordering::SeqCst) == generation
@@ -454,6 +469,7 @@ fn drain_pending_requests(pending: &PendingRequests, reason: &str) -> usize {
 
 fn deactivate_lsp_process(proc: &LspProcess) {
     proc.watchers_active.store(false, Ordering::SeqCst);
+    proc.writer.lock().unwrap().take();
     proc.watchers.lock().unwrap().clear();
 }
 
@@ -551,6 +567,35 @@ fn json_rpc_error_message(error: &Value) -> String {
     }
 }
 
+fn queue_lsp_msg(proc: &LspProcess, msg: Value) -> Result<(), String> {
+    let writer = proc.writer.lock().unwrap();
+    let sender = writer
+        .as_ref()
+        .ok_or_else(|| "LSP writer is stopped".to_string())?;
+    sender.try_send(msg).map_err(|error| match error {
+        mpsc::TrySendError::Full(_) => "LSP writer queue is full".to_string(),
+        mpsc::TrySendError::Disconnected(_) => "LSP writer is stopped".to_string(),
+    })
+}
+
+fn run_lsp_writer(
+    mut stdin: ChildStdin,
+    receiver: mpsc::Receiver<Value>,
+    proc: Arc<LspProcess>,
+    core: Arc<LspManagerCore>,
+    app: tauri::AppHandle,
+) {
+    while let Ok(msg) = receiver.recv() {
+        if !is_current_process(&core, &proc) {
+            return;
+        }
+        if let Err(error) = send_lsp_msg(&mut stdin, &msg) {
+            finish_lsp_reader(&core, &proc, &format!("writer failed: {error}"), &app);
+            return;
+        }
+    }
+}
+
 fn watched_file_sinks(
     proc: &Arc<LspProcess>,
     app: &tauri::AppHandle,
@@ -564,20 +609,22 @@ fn watched_file_sinks(
         if !proc.watchers_active.load(Ordering::SeqCst) {
             return;
         }
-        let mut outbound = proc.outbound.lock().unwrap();
-        if !proc.watchers_active.load(Ordering::SeqCst) {
-            return;
-        }
         let event_changes = changes.clone();
-        let _ = send_lsp_msg(
-            &mut outbound.stdin,
-            &json!({
+        let queued = queue_lsp_msg(
+            &proc,
+            json!({
                 "jsonrpc": "2.0",
                 "method": WATCHED_FILES_METHOD,
                 "params": { "changes": changes }
             }),
         );
-        drop(outbound);
+        if let Err(error) = queued {
+            let _ = app_for_changes.emit(
+                "lsp-log",
+                format!("Could not queue watched-file notification: {error}"),
+            );
+            return;
+        }
         if proc.watchers_active.load(Ordering::SeqCst) {
             let _ = app_for_changes.emit(
                 "lsp-watched-files-changed",
@@ -608,8 +655,7 @@ fn send_server_request_response(
     result: Result<(), (i64, String)>,
 ) -> Result<(), String> {
     let response = server_request_response(id, result);
-    let mut outbound = proc.outbound.lock().unwrap();
-    send_lsp_msg(&mut outbound.stdin, &response)
+    queue_lsp_msg(proc, response)
 }
 
 fn server_request_response(id: Value, result: Result<(), (i64, String)>) -> Value {
@@ -737,8 +783,8 @@ fn lines_for_diagnostics(
     version: Option<u32>,
 ) -> Option<Arc<Vec<String>>> {
     {
-        let outbound = proc.outbound.lock().unwrap();
-        match (outbound.documents.get(uri), version) {
+        let documents = proc.documents.lock().unwrap();
+        match (documents.get(uri), version) {
             (Some(document), Some(version)) if document.version == version => {
                 return Some(Arc::clone(&document.lines));
             }
@@ -759,16 +805,16 @@ fn lines_for_diagnostics(
 }
 
 fn diagnostics_source_is_current(proc: &LspProcess, uri: &str, version: Option<u32>) -> bool {
-    let outbound = proc.outbound.lock().unwrap();
-    diagnostics_source_is_current_in(&outbound, uri, version)
+    let documents = proc.documents.lock().unwrap();
+    diagnostics_source_is_current_in(&documents, uri, version)
 }
 
 fn diagnostics_source_is_current_in(
-    outbound: &OutboundState,
+    documents: &HashMap<String, DocumentMirror>,
     uri: &str,
     version: Option<u32>,
 ) -> bool {
-    match (outbound.documents.get(uri), version) {
+    match (documents.get(uri), version) {
         (Some(document), Some(version)) => document.version == version,
         (Some(_), None) | (None, Some(_)) => false,
         (None, None) => true,
@@ -815,8 +861,8 @@ fn handle_publish_diagnostics_before_commit(
     if !is_current_process(core, proc) {
         return None;
     }
-    let outbound = proc.outbound.lock().unwrap();
-    if !diagnostics_source_is_current_in(&outbound, &uri, version) {
+    let documents = proc.documents.lock().unwrap();
+    if !diagnostics_source_is_current_in(&documents, &uri, version) {
         return None;
     }
     before_commit();
@@ -844,7 +890,7 @@ fn handle_publish_diagnostics_before_commit(
         },
     );
     drop(snapshots);
-    drop(outbound);
+    drop(documents);
     Some(LspDiagnosticsChanged {
         generation: proc.generation,
         uri,
@@ -855,17 +901,12 @@ fn handle_publish_diagnostics_before_commit(
 
 fn install_open_document(
     proc: &LspProcess,
-    outbound: &mut OutboundState,
+    documents: &mut HashMap<String, DocumentMirror>,
     uri: String,
     document: DocumentMirror,
 ) {
-    outbound.documents.insert(uri.clone(), document);
+    documents.insert(uri.clone(), document);
     proc.diagnostics.lock().unwrap().remove(&uri);
-}
-
-fn remove_open_document(proc: &LspProcess, outbound: &mut OutboundState, uri: &str) {
-    outbound.documents.remove(uri);
-    proc.diagnostics.lock().unwrap().remove(uri);
 }
 
 #[cfg(test)]
@@ -1198,13 +1239,12 @@ pub(crate) async fn lsp_start(
         ));
     }
 
+    let (writer, writer_receiver) = mpsc::sync_channel(LSP_OUTBOUND_QUEUE_CAPACITY);
     let proc = Arc::new(LspProcess {
         generation,
         workspace_root: PathBuf::from(&workspace_path),
-        outbound: Mutex::new(OutboundState {
-            stdin,
-            documents: HashMap::new(),
-        }),
+        writer: Mutex::new(Some(writer)),
+        documents: Mutex::new(HashMap::new()),
         next_id: AtomicU64::new(100),
         pending: Mutex::new(HashMap::new()),
         diagnostics: Mutex::new(HashMap::new()),
@@ -1228,6 +1268,13 @@ pub(crate) async fn lsp_start(
             });
         }
     }
+
+    let writer_core = Arc::clone(&state.core);
+    let writer_proc = Arc::clone(&proc);
+    let writer_app = app_handle.clone();
+    std::thread::spawn(move || {
+        run_lsp_writer(stdin, writer_receiver, writer_proc, writer_core, writer_app)
+    });
 
     let app_clone = app_handle.clone();
     let reader_core = Arc::clone(&state.core);
@@ -1260,7 +1307,18 @@ pub(crate) async fn lsp_start(
 }
 
 #[tauri::command]
-pub(crate) fn lsp_open_file(
+pub(crate) async fn lsp_stop(
+    generation: u64,
+    state: tauri::State<'_, LspManager>,
+) -> Result<usize, String> {
+    let core = Arc::clone(&state.core);
+    tauri::async_runtime::spawn_blocking(move || stop_lsp_through_generation(&core, generation))
+        .await
+        .map_err(|error| format!("LSP stop task failed: {error}"))
+}
+
+#[tauri::command]
+pub(crate) async fn lsp_open_file(
     uri: String,
     version: u32,
     text: String,
@@ -1268,34 +1326,45 @@ pub(crate) fn lsp_open_file(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state, generation)?;
-    let mut outbound = proc.outbound.lock().unwrap();
-    if outbound.documents.contains_key(&uri) {
-        return Err(format!("LSP document is already open: {uri}"));
-    }
-    send_lsp_msg(
-        &mut outbound.stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": { "uri": &uri, "languageId": "plaintext", "version": version, "text": &text }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut documents = proc.documents.lock().unwrap();
+        if documents.contains_key(&uri) {
+            return Err(format!("LSP document is already open: {uri}"));
+        }
+        let previous_diagnostics = proc.diagnostics.lock().unwrap().remove(&uri);
+        install_open_document(
+            &proc,
+            &mut documents,
+            uri.clone(),
+            DocumentMirror {
+                version,
+                lines: Arc::new(text.lines().map(String::from).collect()),
+            },
+        );
+        if let Err(error) = queue_lsp_msg(
+            &proc,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": { "uri": &uri, "languageId": "plaintext", "version": version, "text": &text }
+                }
+            }),
+        ) {
+            documents.remove(&uri);
+            if let Some(snapshot) = previous_diagnostics {
+                proc.diagnostics.lock().unwrap().insert(uri, snapshot);
             }
-        }),
-    )?;
-    install_open_document(
-        &proc,
-        &mut outbound,
-        uri.clone(),
-        DocumentMirror {
-            version,
-            lines: Arc::new(text.lines().map(String::from).collect()),
-        },
-    );
-    Ok(())
+            return Err(error);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("LSP open task failed: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn lsp_update_file(
+pub(crate) async fn lsp_update_file(
     uri: String,
     version: u32,
     text: String,
@@ -1303,36 +1372,42 @@ pub(crate) fn lsp_update_file(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state, generation)?;
-    let mut outbound = proc.outbound.lock().unwrap();
-    let current_version = outbound
-        .documents
-        .get(&uri)
-        .ok_or_else(|| format!("LSP document is not open: {uri}"))?
-        .version;
-    require_newer_document_version(&uri, current_version, version)?;
-    send_lsp_msg(
-        &mut outbound.stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didChange",
-            "params": {
-                "textDocument": { "uri": &uri, "version": version },
-                "contentChanges": [{ "text": &text }]
-            }
-        }),
-    )?;
-    outbound.documents.insert(
-        uri,
-        DocumentMirror {
-            version,
-            lines: Arc::new(text.lines().map(String::from).collect()),
-        },
-    );
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut documents = proc.documents.lock().unwrap();
+        let previous = documents
+            .get(&uri)
+            .cloned()
+            .ok_or_else(|| format!("LSP document is not open: {uri}"))?;
+        require_newer_document_version(&uri, previous.version, version)?;
+        documents.insert(
+            uri.clone(),
+            DocumentMirror {
+                version,
+                lines: Arc::new(text.lines().map(String::from).collect()),
+            },
+        );
+        if let Err(error) = queue_lsp_msg(
+            &proc,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": &uri, "version": version },
+                    "contentChanges": [{ "text": &text }]
+                }
+            }),
+        ) {
+            documents.insert(uri, previous);
+            return Err(error);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("LSP update task failed: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn lsp_update_file_incremental(
+pub(crate) async fn lsp_update_file_incremental(
     uri: String,
     version: u32,
     changes: Vec<LspContentChange>,
@@ -1340,70 +1415,87 @@ pub(crate) fn lsp_update_file_incremental(
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state, generation)?;
-    let mut outbound = proc.outbound.lock().unwrap();
-    let document = outbound
-        .documents
-        .get(&uri)
-        .ok_or_else(|| format!("LSP document is not open: {uri}"))?;
-    require_newer_document_version(&uri, document.version, version)?;
-    let mut next_lines = document.lines.as_ref().clone();
-    for change in &changes {
-        apply_line_change(&mut next_lines, &change.range, &change.text);
-    }
-    let content_changes: Vec<Value> = changes
-        .iter()
-        .map(|c| {
-            json!({
-                "range": {
-                    "start": { "line": c.range.start.line, "character": c.range.start.character },
-                    "end":   { "line": c.range.end.line,   "character": c.range.end.character }
-                },
-                "text": c.text
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut documents = proc.documents.lock().unwrap();
+        let previous = documents
+            .get(&uri)
+            .cloned()
+            .ok_or_else(|| format!("LSP document is not open: {uri}"))?;
+        require_newer_document_version(&uri, previous.version, version)?;
+        let mut next_lines = previous.lines.as_ref().clone();
+        for change in &changes {
+            apply_line_change(&mut next_lines, &change.range, &change.text);
+        }
+        let content_changes: Vec<Value> = changes
+            .iter()
+            .map(|c| {
+                json!({
+                    "range": {
+                        "start": { "line": c.range.start.line, "character": c.range.start.character },
+                        "end":   { "line": c.range.end.line,   "character": c.range.end.character }
+                    },
+                    "text": c.text
+                })
             })
-        })
-        .collect();
-    send_lsp_msg(
-        &mut outbound.stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didChange",
-            "params": {
-                "textDocument": { "uri": &uri, "version": version },
-                "contentChanges": content_changes
-            }
-        }),
-    )?;
-    outbound.documents.insert(
-        uri,
-        DocumentMirror {
-            version,
-            lines: Arc::new(next_lines),
-        },
-    );
-    Ok(())
+            .collect();
+        documents.insert(
+            uri.clone(),
+            DocumentMirror {
+                version,
+                lines: Arc::new(next_lines),
+            },
+        );
+        if let Err(error) = queue_lsp_msg(
+            &proc,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": &uri, "version": version },
+                    "contentChanges": content_changes
+                }
+            }),
+        ) {
+            documents.insert(uri, previous);
+            return Err(error);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("LSP incremental update task failed: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn lsp_close_file(
+pub(crate) async fn lsp_close_file(
     uri: String,
     generation: u64,
     state: tauri::State<'_, LspManager>,
 ) -> Result<(), String> {
     let proc = get_lsp_proc(&state, generation)?;
-    let mut outbound = proc.outbound.lock().unwrap();
-    if !outbound.documents.contains_key(&uri) {
-        return Err(format!("LSP document is not open: {uri}"));
-    }
-    send_lsp_msg(
-        &mut outbound.stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didClose",
-            "params": { "textDocument": { "uri": &uri } }
-        }),
-    )?;
-    remove_open_document(&proc, &mut outbound, &uri);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut documents = proc.documents.lock().unwrap();
+        let previous = documents
+            .remove(&uri)
+            .ok_or_else(|| format!("LSP document is not open: {uri}"))?;
+        let previous_diagnostics = proc.diagnostics.lock().unwrap().remove(&uri);
+        if let Err(error) = queue_lsp_msg(
+            &proc,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didClose",
+                "params": { "textDocument": { "uri": &uri } }
+            }),
+        ) {
+            documents.insert(uri.clone(), previous);
+            if let Some(snapshot) = previous_diagnostics {
+                proc.diagnostics.lock().unwrap().insert(uri, snapshot);
+            }
+            return Err(error);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("LSP close task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1474,23 +1566,21 @@ pub(crate) async fn lsp_hover(
     let id = proc.next_id.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = oneshot::channel();
     proc.pending.lock().unwrap().insert(id, tx);
-    {
-        let mut outbound = proc.outbound.lock().unwrap();
-        if let Err(error) = send_lsp_msg(
-            &mut outbound.stdin,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "textDocument/hover",
-                "params": {
-                    "textDocument": { "uri": uri },
-                    "position": { "line": line, "character": character }
-                }
-            }),
-        ) {
-            proc.pending.lock().unwrap().remove(&id);
-            return Err(error);
-        }
+    let send_result = queue_lsp_msg(
+        &proc,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        }),
+    );
+    if let Err(error) = send_result {
+        proc.pending.lock().unwrap().remove(&id);
+        return Err(error);
     }
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
         .await
@@ -1529,23 +1619,21 @@ pub(crate) async fn lsp_definition(
     let id = proc.next_id.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = oneshot::channel();
     proc.pending.lock().unwrap().insert(id, tx);
-    {
-        let mut outbound = proc.outbound.lock().unwrap();
-        if let Err(error) = send_lsp_msg(
-            &mut outbound.stdin,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "textDocument/definition",
-                "params": {
-                    "textDocument": { "uri": uri },
-                    "position": { "line": line, "character": character }
-                }
-            }),
-        ) {
-            proc.pending.lock().unwrap().remove(&id);
-            return Err(error);
-        }
+    let send_result = queue_lsp_msg(
+        &proc,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        }),
+    );
+    if let Err(error) = send_result {
+        proc.pending.lock().unwrap().remove(&id);
+        return Err(error);
     }
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
         .await
@@ -1611,15 +1699,21 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn test LSP child");
-        let stdin = child.stdin.take().expect("test child stdin");
+        let mut stdin = child.stdin.take().expect("test child stdin");
+        let (writer, receiver) = mpsc::sync_channel(LSP_OUTBOUND_QUEUE_CAPACITY);
+        std::thread::spawn(move || {
+            while let Ok(message) = receiver.recv() {
+                if send_lsp_msg(&mut stdin, &message).is_err() {
+                    return;
+                }
+            }
+        });
         (
             Arc::new(LspProcess {
                 generation,
                 workspace_root: std::env::temp_dir(),
-                outbound: Mutex::new(OutboundState {
-                    stdin,
-                    documents: HashMap::new(),
-                }),
+                writer: Mutex::new(Some(writer)),
+                documents: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(100),
                 pending: Mutex::new(HashMap::new()),
                 diagnostics: Mutex::new(HashMap::new()),
@@ -1637,6 +1731,59 @@ mod tests {
             latest_requested_generation: AtomicU64::new(latest_generation),
             shutdown_requested: AtomicBool::new(false),
         }
+    }
+
+    #[test]
+    fn diagnostics_reader_does_not_wait_for_the_writer_lock() {
+        let (process, mut child) = test_lsp_process(1);
+        let uri = "file:///E:/workspace/items.txt".to_string();
+        process.documents.lock().unwrap().insert(
+            uri.clone(),
+            DocumentMirror {
+                version: 1,
+                lines: Arc::new(vec!["id".to_string(), "OPEN".to_string()]),
+            },
+        );
+        let writer = process.writer.lock().unwrap();
+        let reader_process = Arc::clone(&process);
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            tx.send(diagnostics_source_is_current(
+                &reader_process,
+                &uri,
+                Some(1),
+            ))
+            .unwrap();
+        });
+
+        assert!(rx.recv_timeout(Duration::from_millis(250)).unwrap());
+        drop(writer);
+        reader.join().unwrap();
+        kill_and_wait_child(&mut child);
+    }
+
+    #[test]
+    fn outbound_queue_rejects_backpressure_without_blocking() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let proc = LspProcess {
+            generation: 1,
+            workspace_root: std::env::temp_dir(),
+            writer: Mutex::new(Some(sender)),
+            documents: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(100),
+            pending: Mutex::new(HashMap::new()),
+            diagnostics: Mutex::new(HashMap::new()),
+            next_diagnostic_sequence: AtomicU64::new(0),
+            watchers_active: AtomicBool::new(true),
+            watchers: Mutex::new(WatchRegistry::new()),
+        };
+
+        queue_lsp_msg(&proc, json!({ "method": "first" })).unwrap();
+        assert_eq!(
+            queue_lsp_msg(&proc, json!({ "method": "second" })).unwrap_err(),
+            "LSP writer queue is full"
+        );
+        assert_eq!(receiver.recv().unwrap()["method"], "first");
     }
 
     #[test]
@@ -1726,7 +1873,7 @@ mod tests {
         let core = test_core(3);
         let (process, child) = test_lsp_process(3);
         let uri = "file:///E:/workspace/items.txt".to_string();
-        process.outbound.lock().unwrap().documents.insert(
+        process.documents.lock().unwrap().insert(
             uri.clone(),
             DocumentMirror {
                 version: 3,
@@ -1797,10 +1944,10 @@ mod tests {
             let process = Arc::clone(&process_for_open);
             let uri = uri_for_open.clone();
             *open_thread.lock().unwrap() = Some(std::thread::spawn(move || {
-                let mut outbound = process.outbound.lock().unwrap();
+                let mut documents = process.documents.lock().unwrap();
                 install_open_document(
                     &process,
-                    &mut outbound,
+                    &mut documents,
                     uri,
                     DocumentMirror {
                         version: 1,
@@ -1814,14 +1961,7 @@ mod tests {
         assert!(event.is_some());
         assert!(process.diagnostics.lock().unwrap().get(&uri).is_none());
         assert_eq!(
-            process
-                .outbound
-                .lock()
-                .unwrap()
-                .documents
-                .get(&uri)
-                .unwrap()
-                .version,
+            process.documents.lock().unwrap().get(&uri).unwrap().version,
             1
         );
         let mut active = take_current_session(&core, &process).unwrap();
@@ -1997,6 +2137,42 @@ mod tests {
         }
         assert_eq!(rx.try_recv().unwrap().unwrap_err(), "LSP manager stopped");
         assert_eq!(manager.shutdown(), 0);
+    }
+
+    #[test]
+    fn generation_stop_does_not_terminate_a_newer_session() {
+        let manager = LspManager::new();
+        let (process, child) = test_lsp_process(3);
+        {
+            let mut state = manager.core.state.lock().unwrap();
+            state.active = Some(ActiveSession {
+                generation: 3,
+                workspace_path: "newer".to_string(),
+                process,
+                child,
+            });
+            state.starting.insert(2, spawn_long_running_child());
+        }
+
+        assert_eq!(stop_lsp_through_generation(&manager.core, 2), 1);
+        {
+            let state = manager.core.state.lock().unwrap();
+            assert_eq!(
+                state.active.as_ref().map(|active| active.generation),
+                Some(3)
+            );
+            assert!(state.starting.is_empty());
+        }
+        assert_eq!(
+            manager
+                .core
+                .latest_requested_generation
+                .load(Ordering::SeqCst),
+            3
+        );
+        assert_eq!(stop_lsp_through_generation(&manager.core, 3), 1);
+        assert!(manager.core.state.lock().unwrap().active.is_none());
+        assert!(!manager.core.shutdown_requested.load(Ordering::SeqCst));
     }
 
     #[test]

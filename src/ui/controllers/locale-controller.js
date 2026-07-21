@@ -25,7 +25,7 @@ export function createLocaleController({
     refreshJsonEditorLocale();
     if (legacyActive()) {
       scheduleLegacyLintFull("locale-changed", 0);
-    } else {
+    } else if (state.lint?.enabled !== false) {
       lspController.invalidateHover(true, "locale-changed");
       setLintDiagnostics([]);
       updateGridDiagnostics();

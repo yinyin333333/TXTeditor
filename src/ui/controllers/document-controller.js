@@ -182,7 +182,7 @@ export function createDocumentController({
   }
 
   async function syncOpenedTable(doc) {
-    if (documentOpenSyncRoute(state.lint.engine) === "vector-open") {
+    if (documentOpenSyncRoute(state.lint.engine, state.lint.enabled) === "vector-open") {
       const referenceRootPath = state.workspace?.path ?? "";
       const siblingParent = isTauriRuntime()
         ? lspStandaloneParentPath(doc.path, referenceRootPath, {
@@ -296,8 +296,11 @@ export function createDocumentController({
       if (!workspace) return;
       state.workspace = workspace;
       resetLegacyWorkspaceIndex();
-      if (isVectorLintEngine()) lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
-      else {
+      if (isVectorLintEngine()) {
+        if (state.lint.enabled) {
+          lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
+        }
+      } else {
         const schedule = legacyLintImmediateSchedule("workspace-opened");
         scheduleLegacyLintFull(schedule.reason, schedule.delay);
       }

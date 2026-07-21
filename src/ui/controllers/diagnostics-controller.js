@@ -119,15 +119,19 @@ export function createDiagnosticsController({
     rebuildDiagnosticIndex();
   }
 
-  function updateGridDiagnostics() {
+  function updateGridDiagnostics({ redraw = true, updateRuler = true } = {}) {
     const started = perfNow();
     const doc = activeDoc();
     const diagnosticsByCell = lintActive() && isTableDocument(doc)
       ? groupDiagnosticsByCell(diagnosticsForDoc(doc))
       : new Map();
-    currentGrid().setDiagnostics(diagnosticsByCell);
-    updateOverviewRuler();
-    recordUiPerf("update-grid-diagnostics", started, { cellMarkers: diagnosticsByCell.size });
+    currentGrid().setDiagnostics(diagnosticsByCell, { redraw });
+    if (updateRuler) updateOverviewRuler();
+    recordUiPerf("update-grid-diagnostics", started, {
+      cellMarkers: diagnosticsByCell.size,
+      redraw,
+      updateRuler
+    });
   }
 
   function updateOverviewRuler() {

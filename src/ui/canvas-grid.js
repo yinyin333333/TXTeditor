@@ -169,9 +169,9 @@ export class CanvasGrid {
   clearLspHovers() { return clearGridLspHovers(this); }
   hideVectorTooltip() { return hideGridVectorTooltip(this); }
 
-  setDiagnostics(diagnosticsByCell) {
+  setDiagnostics(diagnosticsByCell, { redraw = true } = {}) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
-    this.draw();
+    if (redraw) this.draw();
   }
 
   notifySelectionChanged(reason = "selection") {

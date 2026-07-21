@@ -16,6 +16,12 @@ export async function lspStart(workspacePath, generation, contextMode = "workspa
   return api.invoke("lsp_start", withGeneration(payload, generation));
 }
 
+export async function lspStop(generation) {
+  if (!isTauriRuntime()) return 0;
+  const api = await tauriApi();
+  return api.invoke("lsp_stop", { generation });
+}
+
 export async function lspOpenFile(uri, version, text, generation) {
   if (!isTauriRuntime()) return;
   const api = await tauriApi();

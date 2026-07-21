@@ -45,22 +45,14 @@ import {
   lspWorkspaceKey,
   lspWorkspaceSessionPolicy
 } from "../../core/lsp-session-policy.js";
-import {
-  createLspReadinessState,
-  createLspTrafficState,
-  recordLspReadinessSample,
-  recordLspTrafficSample
-} from "../../core/perf-instrumentation.js";
+import { createLspReadinessState, createLspTrafficState, recordLspReadinessSample, recordLspTrafficSample } from "../../core/perf-instrumentation.js";
 import { vectorSessionAvailable } from "../../core/lint-controller-policy.js";
-import {
-  clearLspUpdateFailureStatus,
-  reportLspRequestFailure,
-  reportLspUpdateFailure
-} from "../../core/lsp-update-status.js";
+import { clearLspUpdateFailureStatus, reportLspRequestFailure, reportLspUpdateFailure } from "../../core/lsp-update-status.js";
 import { reportBackgroundTaskFailure } from "../../core/background-task-status.js";
 import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
+import { stopLspSession } from "./lsp-session-stop.js";
 import { tText } from "../../core/i18n.js";
 import { jsonDocumentCanOpen, resyncSavedJsonDocument, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
 export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
@@ -228,7 +220,7 @@ export function createLspController({
     referenceRootPath = "",
     includeSubfolders = !state.excludeWorkspaceSubfolders
   } = {}) {
-    if (!isVectorLintEngine()) {
+    if (!isVectorLintEngine() || state.lint.enabled === false) {
       recordLintEngineEvent("vector-start-skipped", { workspacePath });
       return;
     }
@@ -320,7 +312,8 @@ export function createLspController({
     }
   }
   async function syncOpenDocs() {
-    if (!vectorSessionAvailable({ engine: state.lint.engine, lspStarted: state.lsp.started })) return;
+    if (state.lint.enabled === false
+      || !vectorSessionAvailable({ engine: state.lint.engine, lspStarted: state.lsp.started })) return;
     const generation = state.lsp.generation;
     const diagnosticsRefreshes = [];
     let openFileCount = 0;
@@ -362,6 +355,7 @@ export function createLspController({
     renderChrome();
   }
   async function openDoc(doc, { deferRender = false } = {}) {
+    if (state.lint.enabled === false) return;
     if (isTableDocument(doc) && doc?.largeFileMode) {
       recordLintEngineEvent("vector-open-skipped-large-file", {
         fileName: doc?.name, reasons: doc?.largeFileReasons ?? []
@@ -442,8 +436,8 @@ export function createLspController({
     return trackedPromise;
   }
   async function ensureStandaloneSession(doc = activeDoc(), { forceRestart = false } = {}) {
-    if (doc?.kind === "json") return;
-    if (!isVectorLintEngine() || !isTauriRuntime()) return;
+    if (doc?.kind === "json" || state.lint.enabled === false || !isVectorLintEngine() || !isTauriRuntime()) return;
+    if (!forceRestart && state.lsp.started && documentCanOpenInSession(doc)) return openDoc(doc);
     const referenceRootPath = state.workspace?.path ?? "";
     const parent = lspStandaloneParentPath(doc?.path, referenceRootPath, {
       includeSubfolders: !state.excludeWorkspaceSubfolders
@@ -470,6 +464,7 @@ export function createLspController({
     });
   }
   async function updateDoc(doc, changedRows = null) {
+    if (state.lint.enabled === false) return;
     if (isJsonDocument(doc)) {
       return updateJsonLspDocument({
         state,
@@ -624,6 +619,10 @@ export function createLspController({
     });
     pendingCloses.set(closeKey, trackedPromise);
     return trackedPromise;
+  }
+  function stopSession(reason = "lint-disabled") {
+    return stopLspSession({ state, reason, readyGenerations, stoppedGenerations,
+      diagnosticsEventController, hoverController, pendingCloses });
   }
   async function rebindSavedDoc(doc, previousUri, { deferRender = false, expectedGeneration = null } = {}) {
     const nextUri = docToUri(doc);
@@ -892,6 +891,7 @@ export function createLspController({
     scheduleHoverPrewarm: hoverController.scheduleHoverPrewarm,
     startListeners,
     startWorkspace,
+    stopSession,
     syncOpenDocs,
     updateDoc,
     uriToFileKey

@@ -259,6 +259,7 @@ const settingsController = createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
+  stopVectorSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: (options) => lspController.ensureStandaloneSession(activeDoc(), options),
   resetLegacyWorkspaceIndex,
   refreshJsonEditorAppearance: jsonEditorController.refreshAppearance,
@@ -517,7 +518,7 @@ function legacyLintDisplayActive() {
 }
 
 function effectiveVectorLspHoverEnabled() {
-  return effectiveVectorLspHover({ engine: state.lint.engine, vectorLspHover: state.vectorLspHover });
+  return effectiveVectorLspHover({ engine: state.lint.engine, lintEnabled: state.lint.enabled, vectorLspHover: state.vectorLspHover });
 }
 
 function execute(command) {
@@ -539,9 +540,10 @@ function finishCommand(doc, command, context = "edit", started = perfNow()) {
   saveSelectionState(doc);
   grid.layout();
   const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange : command.lspChange;
-  if (contentChanged && documentChangeSyncRoute(state.lint.engine) === "vector-update") {
+  const syncRoute = documentChangeSyncRoute(state.lint.engine, state.lint.enabled);
+  if (contentChanged && syncRoute === "vector-update") {
     lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
-  } else if (contentChanged && !doc.largeFileMode) {
+  } else if (contentChanged && syncRoute === "legacy-lint-edit" && !doc.largeFileMode) {
     scheduleLegacyLintForEdit(doc);
   }
   recordUiPerf("row-command", started, { changedRows: Array.isArray(lspChange) ? lspChange.length : lspChange?.rows?.length ?? 0, contentChanged });
@@ -643,9 +645,9 @@ function scheduleHoverPrewarm(reason = "schedule") {
   return lspController.scheduleHoverPrewarm(reason);
 }
 
-function updateGridDiagnostics() {
+function updateGridDiagnostics(options) {
   jsonEditorController.reconcileDiagnosticHighlight(state.lint.diagnostics);
-  return diagnosticsController.updateGridDiagnostics();
+  return diagnosticsController.updateGridDiagnostics(options);
 }
 
 function docDiagnosticSeverity(_doc) {
@@ -677,9 +679,7 @@ function showPalette() {
   return commandSurfaceController.showPalette();
 }
 
-function renderPalette() {
-  return commandSurfaceController.renderPalette();
-}
+function renderPalette() { return commandSurfaceController.renderPalette(); }
 function showContextMenu(args) {
   return commandSurfaceController.showContextMenu(args);
 }
@@ -700,7 +700,7 @@ function renderChrome() {
   return shellController.renderChrome();
 }
 function renderDiagnosticsChrome() {
-  return shellController.renderChrome();
+  return shellController.renderDiagnosticsChrome();
 }
 
 function renderProblemsPanelIfNeeded() {
@@ -710,7 +710,6 @@ function renderProblemsPanelIfNeeded() {
 function updateActiveProblemHighlight({ scroll = false } = {}) {
   return diagnosticsController.updateActiveProblemHighlight({ scroll });
 }
-
 function lintSummaryText() {
   return diagnosticsController.lintSummaryText();
 }
