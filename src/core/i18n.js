@@ -37,6 +37,7 @@ const CATALOG_ROWS = {
   "toolbar.open": ["Open", "開啟", "Öffnen", "Abrir", "Ouvrir", "Apri", "열기", "Otwórz", "Abrir", "開く", "Abrir", "Открыть", "打开"],
   "toolbar.openFile": ["Open File", "開啟檔案", "Datei öffnen", "Abrir archivo", "Ouvrir un fichier", "Apri file", "파일 열기", "Otwórz plik", "Abrir archivo", "ファイルを開く", "Abrir arquivo", "Открыть файл", "打开文件"],
   "toolbar.openFolder": ["Open Folder", "開啟資料夾", "Ordner öffnen", "Abrir carpeta", "Ouvrir un dossier", "Apri cartella", "폴더 열기", "Otwórz folder", "Abrir carpeta", "フォルダーを開く", "Abrir pasta", "Открыть папку", "打开文件夹"],
+  "toolbar.closeAll": ["Close All", "全部關閉", "Alle schließen", "Cerrar todo", "Tout fermer", "Chiudi tutto", "모두 닫기", "Zamknij wszystko", "Cerrar todo", "すべて閉じる", "Fechar tudo", "Закрыть всё", "全部关闭"],
   "toolbar.save": ["Save", "儲存", "Speichern", "Guardar", "Enregistrer", "Salva", "저장", "Zapisz", "Guardar", "保存", "Salvar", "Сохранить", "保存"],
   "toolbar.saveAs": ["Save As", "另存新檔", "Speichern unter", "Guardar como", "Enregistrer sous", "Salva con nome", "다른 이름으로 저장", "Zapisz jako", "Guardar como", "名前を付けて保存", "Salvar como", "Сохранить как", "另存为"],
   "toolbar.undo": ["Undo", "復原", "Rückgängig", "Deshacer", "Annuler", "Annulla", "실행 취소", "Cofnij", "Deshacer", "元に戻す", "Desfazer", "Отменить", "撤销"],

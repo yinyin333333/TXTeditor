@@ -300,7 +300,7 @@ documentController = createDocumentController({
   handleLspUpdateError,
   reportLspCloseFailure,
   lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
-  lspStartWorkspace,
+  lspStartWorkspace, lspStopSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: lspController.ensureStandaloneSession,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -310,7 +310,8 @@ documentController = createDocumentController({
   cancelLegacyLintJobs,
   isVectorLintEngine,
   isLegacyLintEngine,
-  updateGridDiagnostics,
+  setLintDiagnostics, updateGridDiagnostics,
+  resetWorkspaceView: () => shellController?.resetWorkspaceView(),
   scrollProblemsToActiveFile
 });
 const searchController = createSearchController({
@@ -358,7 +359,7 @@ const commandController = createCommandController({
   showError,
   handlers: {
     openFile: documentController.openFile,
-    openFolder: documentController.openFolder,
+    openFolder: documentController.openFolder, closeAll: documentController.closeAll,
     saveFile: documentController.saveFile,
     saveAs: documentController.saveAs,
     undo,

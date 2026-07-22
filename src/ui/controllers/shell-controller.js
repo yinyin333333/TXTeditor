@@ -107,6 +107,9 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
     }
+    for (const button of documentRef.querySelectorAll("[data-command='close-all']")) {
+      button.disabled = !state.workspace && !state.docs.length;
+    }
     const tableDocumentOpen = documentOpen && isTableDocument(activeDoc());
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
       button.disabled = !tableDocumentOpen;
@@ -260,7 +263,9 @@ export function createShellController({
     els.explorerFilter.value = "";
     renderExplorerSearchResults([]);
     if (result.index != null) return selectTab(result.index);
-    openDroppedNativePaths([result.path], { requireCurrentJsonMode: true }).catch(showError);
+    openDroppedNativePaths([result.path], {
+      requireCurrentJsonMode: true
+    }).catch(showError);
   }
 
   function explorerSearchResults() {
@@ -291,10 +296,18 @@ export function createShellController({
     return String(value || "").trim().toLowerCase();
   }
 
+  function resetWorkspaceView() {
+    collapsedFileGroups.clear();
+    explorerSearchActiveIndex = 0;
+    if (els.explorerFilter) els.explorerFilter.value = "";
+    renderExplorerSearchResults([]);
+  }
+
   return {
     collapsedFileGroups,
     renderDiagnosticsChrome,
     renderChrome,
+    resetWorkspaceView,
     selectTab,
     switchTab
   };

@@ -64,6 +64,7 @@ export function createDocumentController({
   reportLspCloseFailure,
   lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
+  lspStopSession = async () => 0,
   ensureDocumentSession = async () => {},
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -73,7 +74,9 @@ export function createDocumentController({
   cancelLegacyLintJobs,
   isVectorLintEngine,
   isLegacyLintEngine,
+  setLintDiagnostics = () => {},
   updateGridDiagnostics,
+  resetWorkspaceView = () => {},
   scrollProblemsToActiveFile
 }) {
   let pendingCloseResolve = null;
@@ -308,6 +311,62 @@ export function createDocumentController({
     } catch (error) {
       showError(error);
     }
+  }
+
+  async function closeAll() {
+    if (!state.workspace?.path && !state.docs.length) return false;
+
+    if (state.docs.length) {
+      commitActiveEditor();
+      saveSelectionState();
+    }
+    const saveDocs = [];
+
+    for (const doc of state.docs.filter((candidate) => candidate.dirty)) {
+      const choice = await askCloseChoice(doc);
+      if (choice === "cancel") return false;
+      if (choice === "save") saveDocs.push(doc);
+    }
+
+    for (const doc of saveDocs) {
+      try {
+        const saved = await queueSave(doc, () => saveFileNow(doc));
+        if (!saved || doc.dirty) return false;
+      } catch (error) {
+        showError(error);
+        return false;
+      }
+    }
+
+    cancelLegacyLintJobs({ clearDiagnostics: false });
+    resetLegacyWorkspaceIndex();
+
+    let stopPromise;
+    try {
+      stopPromise = Promise.resolve(lspStopSession("all-documents-closed"));
+    } catch (error) {
+      stopPromise = Promise.reject(error);
+    }
+
+    setLintDiagnostics([]);
+    state.lint.status = "";
+    state.workspace = null;
+    resetWorkspaceView();
+    state.docs.splice(0, state.docs.length);
+    state.active = -1;
+    await activateDocument(emptyDoc, { focus: false });
+
+    updateGridDiagnostics();
+    renderChrome();
+
+    try {
+      await stopPromise;
+    } catch (error) {
+      showError(error);
+    }
+
+    focusActiveEditor();
+    return true;
   }
 
   async function saveFile() {
@@ -617,6 +676,7 @@ export function createDocumentController({
   return {
     addDocument,
     askCloseChoice,
+    closeAll,
     closeTab,
     handleCloseDialogClick,
     handleExternalChangeDialogClick,

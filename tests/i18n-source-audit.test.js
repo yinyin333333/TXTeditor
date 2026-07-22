@@ -10,6 +10,7 @@ const PRODUCT_SURFACE_AUDIT = [
   ["index.html", [
     'data-command="open-file" data-i18n="toolbar.openFile"',
     'data-command="open-folder" data-i18n="toolbar.openFolder"',
+    'data-command="close-all" data-i18n="toolbar.closeAll"',
     'data-i18n-aria-label="aria.tableEditor"',
     'data-i18n-placeholder="palette.placeholder"',
     'data-i18n="dialog.saveChanges"'

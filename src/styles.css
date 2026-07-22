@@ -1006,7 +1006,7 @@ button.active {
 .empty-state {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;

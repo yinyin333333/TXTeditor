@@ -1,7 +1,7 @@
 import { tText } from "../core/i18n.js";
 
 export const COMMAND_LABELS_BASE = [
-  ["open-file", "command.open-file"], ["open-folder", "command.open-folder"], ["save-file", "command.save-file"], ["save-as", "command.save-as"],
+  ["open-file", "command.open-file"], ["open-folder", "command.open-folder"], ["close-all", "toolbar.closeAll"], ["save-file", "command.save-file"], ["save-as", "command.save-as"],
   ["search", "command.search"], ["find-next", "command.find-next"], ["find-previous", "command.find-previous"], ["replace", "command.replace"],
   ["go-to-row", "command.go-to-row"], ["next-tab", "command.next-tab"], ["previous-tab", "command.previous-tab"], ["undo", "command.undo"], ["redo", "command.redo"],
   ["copy", "command.copy"], ["paste", "command.paste"], ["cut", "command.cut"], ["clear-selection", "command.clear-selection"], ["select-all", "command.select-all"],
@@ -22,6 +22,7 @@ export const DEVELOPMENT_COMMAND_LABELS = [
 export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
   "open-file",
   "open-folder",
+  "close-all",
   "open-settings",
   "open-app-settings",
   "open-shortcut-settings",
@@ -43,6 +44,7 @@ export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
 const COMMAND_ACTIONS = new Map([
   ["open-file", { type: "handler", name: "openFile" }],
   ["open-folder", { type: "handler", name: "openFolder" }],
+  ["close-all", { type: "handler", name: "closeAll" }],
   ["save-file", { type: "handler", name: "saveFile" }],
   ["save-as", { type: "handler", name: "saveAs" }],
   ["load-fixture-20k", { type: "fixture", size: 20000 }],
@@ -158,7 +160,7 @@ export function mathCommandItems() {
 }
 
 const JSON_DOCUMENT_COMMANDS = new Set([
-  "open-file", "open-folder", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
+  "open-file", "open-folder", "close-all", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
   "next-tab", "previous-tab",
   "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",
   "open-app-settings", "open-shortcut-settings", "open-settings",
