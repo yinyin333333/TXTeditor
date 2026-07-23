@@ -26,6 +26,7 @@ export {
 export {
   lspCloseFile,
   lspDefinition,
+  lspFieldMetadata,
   lspGetDiagnostics,
   lspGetDiagnosticsBatch,
   lspHover,

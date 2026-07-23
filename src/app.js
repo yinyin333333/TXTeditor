@@ -36,6 +36,7 @@ import {
   askText as askPromptText,
   promptNumber as promptForNumber
 } from "./ui/prompt-dialog.js";
+import { createCellInputController } from "./ui/controllers/cell-input-controller.js";
 import { createCommandController } from "./ui/controllers/command-controller.js";
 import { createCommandSurfaceController } from "./ui/controllers/command-surface-controller.js";
 import { createDiagnosticsController } from "./ui/controllers/diagnostics-controller.js";
@@ -70,7 +71,7 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
@@ -175,6 +176,7 @@ const grid = new CanvasGrid({
   onSelectionChanged: () => {
     saveSelectionState();
     diagnosticsController.handleSelectionChanged();
+    cellInputController?.refresh();
   }
 });
 
@@ -234,6 +236,16 @@ lspController = createLspController({
       desktop: isTauriRuntime()
     }),
   handleWatchedFilesChanged: (payload) => documentController?.handleWatchedFilesChanged(payload)
+});
+cellInputController = createCellInputController({
+  els,
+  grid,
+  activeDoc,
+  hasOpenDocument,
+  applyEdits,
+  resolveFieldMetadata: (doc, columnName) => lspController.fieldMetadata(doc, columnName),
+  metadataRevision: () => state.lsp.started ? state.lsp.generation : "offline",
+  focusGrid: () => els.host.focus()
 });
 const localeController = createLocaleController({ state, storage: localStorage, ownerDocument: document, legacyActive: isLegacyLintEngine, scheduleLegacyLintFull, lspController, activeDoc, setLintDiagnostics, updateGridDiagnostics, renderChrome, refreshJsonEditorLocale: jsonEditorController.refreshLocale });
 exposeTxteditorPerf(window, {
@@ -498,8 +510,15 @@ startupOpenPathsNative()
 
 function activeDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
 
-function activateDocument(doc = activeDoc(), options) { return documentEditorController.activateDocument(doc, options); }
-function commitActiveEditor() { documentEditorController.commitDocument(activeDoc()); }
+function activateDocument(doc = activeDoc(), options) {
+  const result = documentEditorController.activateDocument(doc, options);
+  cellInputController?.refresh({ force: true });
+  return result;
+}
+function commitActiveEditor() {
+  cellInputController?.commit();
+  documentEditorController.commitDocument(activeDoc());
+}
 function focusActiveEditor() { documentEditorController.focusDocument(activeDoc()); }
 
 function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
@@ -648,7 +667,9 @@ function scheduleHoverPrewarm(reason = "schedule") {
 
 function updateGridDiagnostics(options) {
   jsonEditorController.reconcileDiagnosticHighlight(state.lint.diagnostics);
-  return diagnosticsController.updateGridDiagnostics(options);
+  const result = diagnosticsController.updateGridDiagnostics(options);
+  cellInputController?.drawDiagnostics();
+  return result;
 }
 
 function docDiagnosticSeverity(_doc) {
@@ -698,7 +719,9 @@ function renderLintControls() {
 }
 
 function renderChrome() {
-  return shellController.renderChrome();
+  const result = shellController.renderChrome();
+  cellInputController?.refresh();
+  return result;
 }
 function renderDiagnosticsChrome() {
   return shellController.renderDiagnosticsChrome();

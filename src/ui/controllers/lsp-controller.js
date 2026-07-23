@@ -3,6 +3,7 @@ import {
   isTauriRuntime,
   lspCloseFile,
   lspDefinition,
+  lspFieldMetadata,
   lspHover,
   lspListen,
   lspLogListen,
@@ -808,6 +809,16 @@ export function createLspController({
     els.host.focus();
   }
 
+  async function fieldMetadata(doc, columnName) {
+    if (!state.lsp.started || state.lsp.readiness !== "ready" || !isTableDocument(doc) || !columnName) return undefined;
+    const uri = docToUri(doc);
+    if (!uri) return undefined;
+    const generation = state.lsp.generation ?? 0;
+    const metadata = await lspFieldMetadata(uri, columnName, generation).catch(() => undefined);
+    if (!state.lsp.started || state.lsp.generation !== generation) return undefined;
+    return metadata;
+  }
+
   function cellHasReference(_row, _col) {
     if (!isVectorLintEngine() || !state.lsp.started || activeDoc()?.kind === "json") return false;
     return Boolean(docToUri(activeDoc()));
@@ -869,6 +880,7 @@ export function createLspController({
     handleDiagnosticsChanged,
     handleUpdateError,
     ensureStandaloneSession,
+    fieldMetadata,
     invalidateHover: hoverController.invalidateHover,
     openDoc,
     pathFromUri,

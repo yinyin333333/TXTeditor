@@ -45,6 +45,7 @@ pub fn run() {
             lsp_service::lsp_get_diagnostics,
             lsp_service::lsp_get_diagnostics_batch,
             lsp_service::lsp_hover,
+            lsp_service::lsp_field_metadata,
             lsp_service::lsp_definition,
             app_bootstrap::close_window,
         ])

@@ -708,7 +708,7 @@ button.active {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 34px auto minmax(0, 1fr);
+  grid-template-rows: 34px auto auto minmax(0, 1fr);
 }
 
 .tabs {
@@ -792,6 +792,108 @@ button.active {
 
 .toolbar .toggle-button {
   min-width: 88px;
+}
+
+.cell-input-bar {
+  min-width: 0;
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.cell-input-bar.hidden {
+  display: none;
+}
+
+.cell-input-address {
+  min-width: 84px;
+  max-width: min(240px, 30vw);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font: 12px var(--grid-font);
+}
+
+.cell-input-field {
+  position: relative;
+  min-width: 0;
+  min-height: 34px;
+}
+
+.cell-input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  padding: 0 8px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: 12px var(--grid-font);
+}
+
+.cell-input:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.cell-input-diagnostics {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.cell-input-count {
+  min-width: 64px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface-3);
+  font: 12px var(--grid-font);
+  white-space: nowrap;
+}
+
+.cell-input-count.hidden {
+  display: none;
+}
+
+.cell-input-count.over-limit {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+@media (max-width: 640px) {
+  .cell-input-bar {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+  }
+
+  .cell-input-address {
+    min-width: 72px;
+    max-width: 22vw;
+    padding-inline: 6px;
+  }
+
+  .cell-input-count {
+    min-width: 54px;
+    padding-inline: 6px;
+  }
 }
 
 .font-select,

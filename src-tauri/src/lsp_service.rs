@@ -1600,6 +1600,42 @@ pub(crate) async fn lsp_hover(
     Ok(text.map(|t| strip_markdown_for_tooltip(&t)))
 }
 
+#[tauri::command]
+pub(crate) async fn lsp_field_metadata(
+    uri: String,
+    column_name: String,
+    generation: u64,
+    state: tauri::State<'_, LspManager>,
+) -> Result<Option<Value>, String> {
+    let proc = get_lsp_proc(&state, generation)?;
+    let id = proc.next_id.fetch_add(1, Ordering::SeqCst);
+    let (tx, rx) = oneshot::channel();
+    proc.pending.lock().unwrap().insert(id, tx);
+    let send_result = queue_lsp_msg(
+        &proc,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "vectorLsp.fieldMetadata",
+                "arguments": [{ "uri": uri, "columnName": column_name }]
+            }
+        }),
+    );
+    if let Err(error) = send_result {
+        proc.pending.lock().unwrap().remove(&id);
+        return Err(error);
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| {
+            proc.pending.lock().unwrap().remove(&id);
+            "field metadata timeout".to_string()
+        })?
+        .map_err(|_| "field metadata channel closed".to_string())?
+}
+
 #[derive(Serialize)]
 pub(crate) struct DefinitionLocation {
     uri: String,

@@ -316,9 +316,73 @@ pub(crate) fn apply_line_change(lines: &mut Vec<String>, range: &LspRange, new_t
     lines.splice(sl..=el, replacement);
 }
 
+fn protect_fenced_code_blocks(text: &str) -> (String, Vec<String>) {
+    let mut protected = String::with_capacity(text.len());
+    let mut blocks = Vec::new();
+    let mut cursor = 0;
+
+    while cursor < text.len() {
+        let at_line_start = cursor == 0 || text.as_bytes().get(cursor.wrapping_sub(1)) == Some(&b'\n');
+        let remaining = &text[cursor..];
+        let fence_len = if at_line_start {
+            remaining.bytes().take_while(|byte| *byte == b'`').count()
+        } else {
+            0
+        };
+        if fence_len < 3 {
+            let ch = remaining.chars().next().unwrap();
+            protected.push(ch);
+            cursor += ch.len_utf8();
+            continue;
+        }
+        let Some(open_line_end_offset) = remaining.find('\n') else {
+            protected.push_str(remaining);
+            break;
+        };
+        let content_start = cursor + open_line_end_offset + 1;
+        let mut line_start = content_start;
+        let mut closing = None;
+        while line_start <= text.len() {
+            let line_end = text[line_start..]
+                .find('\n')
+                .map(|offset| line_start + offset)
+                .unwrap_or(text.len());
+            let line = text[line_start..line_end].trim_end_matches('\r');
+            let ticks = line.bytes().take_while(|byte| *byte == b'`').count();
+            if ticks >= fence_len && line[ticks..].trim().is_empty() {
+                closing = Some((line_start, line_end));
+                break;
+            }
+            if line_end == text.len() {
+                break;
+            }
+            line_start = line_end + 1;
+        }
+        let Some((closing_start, closing_end)) = closing else {
+            protected.push_str(&text[cursor..content_start]);
+            cursor = content_start;
+            continue;
+        };
+        let mut content_end = closing_start;
+        if content_end > content_start && text.as_bytes()[content_end - 1] == b'\n' {
+            content_end -= 1;
+            if content_end > content_start && text.as_bytes()[content_end - 1] == b'\r' {
+                content_end -= 1;
+            }
+        }
+        let token = format!("\u{e000}{}\u{e001}", blocks.len());
+        protected.push_str(&token);
+        blocks.push(text[content_start..content_end].to_string());
+        cursor = closing_end;
+    }
+
+    (protected, blocks)
+}
+
 pub(crate) fn strip_markdown_for_tooltip(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut remaining = text;
+    let (protected_text, fenced_blocks) = protect_fenced_code_blocks(text);
+    let mut result = String::with_capacity(protected_text.len());
+    let mut remaining = protected_text.as_str();
     loop {
         let d = remaining.find("$!");
         let b = remaining.find("**");
@@ -370,7 +434,11 @@ pub(crate) fn strip_markdown_for_tooltip(text: &str) -> String {
             }
         }
     }
-    result.trim().to_string()
+    let mut plain = result.trim().to_string();
+    for (index, block) in fenced_blocks.into_iter().enumerate() {
+        plain = plain.replace(&format!("\u{e000}{index}\u{e001}"), &block);
+    }
+    plain
 }
 
 #[cfg(test)]
@@ -777,6 +845,14 @@ mod tests {
             "Damage $!min!$"
         );
         assert_eq!(strip_markdown_for_tooltip("plain tooltip"), "plain tooltip");
+    }
+
+    #[test]
+    fn strip_markdown_for_tooltip_preserves_fenced_cell_values_verbatim() {
+        let text = "**Cell value**\n\n````text\n a```$!b!$**c** \n````\n\n**Character count: 16/255**";
+        let plain = strip_markdown_for_tooltip(text);
+        assert!(plain.contains(" a```$!b!$**c** "));
+        assert!(plain.contains("Character count: 16/255"));
     }
     #[test]
     fn diagnostics_preserve_the_lsp_end_line_for_json_ranges() {

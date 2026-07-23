@@ -233,7 +233,9 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
     ctx.lineTo(x + width - .5, y + height);
     ctx.stroke();
   }
-  const value = grid.doc.getCell(row, column);
+  const value = typeof grid.cellDisplayValue === "function"
+    ? grid.cellDisplayValue(row, column)
+    : grid.doc.getCell(row, column);
   if (shouldDrawCellText(row, column, editing)) {
     ctx.fillStyle = activeColumnHeader && !selected ? GRID_COLORS.activeHeaderText : cellTextColor(row, column, value, selected, grid.colorizeColumns, firstColumnLabel);
     ctx.textBaseline = "middle";

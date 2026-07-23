@@ -72,6 +72,7 @@ export class CanvasGrid {
     this.vectorLspHoverEnabled = true;
     this.hoverSuspended = false;
     this.diagnosticsByCell = new Map();
+    this._cellInputPreview = null;
     this.metrics = new GridMetrics();
     this.raf = 0;
     this.renderStats = createGridRenderStats();
@@ -115,6 +116,7 @@ export class CanvasGrid {
     if (this._tooltip && shouldClearHoverForInteraction({ documentChanged: true })) this.clearHoverState();
     else this.hideFirstColumnHoverPreview();
     this.doc = doc;
+    this._cellInputPreview = null;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
     typeof this.selection.restore === "function" ? this.selection.restore(doc.selectionState, doc.rowCount, doc.columnCount) : this.selection.set(0, 0);
@@ -174,6 +176,19 @@ export class CanvasGrid {
     if (redraw) this.draw();
   }
 
+  setCellInputPreview(preview) {
+    this._cellInputPreview = preview && Number.isInteger(preview.row) && Number.isInteger(preview.column)
+      ? { row: preview.row, column: preview.column, value: String(preview.value ?? "") }
+      : null;
+    this.draw();
+  }
+
+  cellDisplayValue(row, column) {
+    const preview = this._cellInputPreview;
+    if (preview?.row === row && preview?.column === column) return preview.value;
+    return this.doc.getCell(row, column);
+  }
+
   notifySelectionChanged(reason = "selection") {
     this.onSelectionChanged?.({
       reason,
@@ -210,6 +225,10 @@ export class CanvasGrid {
     }, { passive: false });
     window.addEventListener("mouseup", () => this.onMouseUp());
     this.editor.addEventListener("keydown", (event) => this.onEditorKeyDown(event));
+    this.editor.addEventListener("input", () => {
+      this.draw();
+      this.notifySelectionChanged("edit-input");
+    });
     this.editor.addEventListener("blur", () => this.commitEdit());
     for (const eventName of ["pointerdown", "mousedown", "mousemove", "mouseup", "click", "dblclick", "selectstart"]) {
       this.editor.addEventListener(eventName, (event) => event.stopPropagation());

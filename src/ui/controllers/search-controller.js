@@ -157,6 +157,7 @@ export function createSearchController({
     Object.assign(state.search, searchStateAfterFind(query, scope));
     state.selection.set(target.row, target.column);
     saveSelectionState();
+    grid.notifySelectionChanged?.("search-result");
     grid.scrollCellToCenter(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();
@@ -186,6 +187,7 @@ export function createSearchController({
     Object.assign(state.search, searchStateAfterFind(query, scope));
     state.selection.set(target.row, target.column);
     saveSelectionState();
+    grid.notifySelectionChanged?.("search-result");
     grid.scrollCellToCenter(target.row, target.column, searchScrollOptionsForScope(scope));
     grid.draw();
     updateActiveProblemHighlight();

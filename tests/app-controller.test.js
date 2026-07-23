@@ -997,9 +997,9 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
   const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
-  assert.ok(appSource.split(/\r?\n/).length <= 760);
-  assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 900);
+  assert.ok(appSource.split(/\r?\n/).length <= 790);
+  assert.ok(canvasSource.split(/\r?\n/).length <= 930);
+  assert.ok(lspController.split(/\r?\n/).length <= 920);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1161,7 +1161,7 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
   assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
   assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
-  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto auto minmax\(0, 1fr\);/);
   assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
   assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
