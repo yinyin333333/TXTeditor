@@ -35,6 +35,7 @@ export function createAppEventController({
   selectAll,
   jsonEditorOwnsTarget = () => false,
   handleExternalChangeDialogClick = () => {},
+  commitActiveEditor = () => {},
   focusActiveEditor = () => els.host.focus()
 }) {
   function wireEvents() {
@@ -114,11 +115,14 @@ export function createAppEventController({
     if (!editingCell && jsonEditorOwnsTarget(event.target)) {
       const appOwned = new Set([
         "open-file", "save-file", "save-as", "toggle-sidebar", "toggle-problems",
-        "show-palette", "close-tab"
+        "show-palette", "close-tab", "next-tab", "previous-tab",
+        "search", "find-next", "find-previous", "replace"
       ]);
       if (!shortcutAction || !appOwned.has(shortcutAction)) return;
     } else if (!editingCell && isTextInputTarget(event.target)) {
-      return;
+      const findInOpenSearch = !els.searchPanel.classList.contains("hidden")
+        && (shortcutAction === "find-next" || shortcutAction === "find-previous");
+      if (!findInOpenSearch) return;
     }
     if (shortcutAction) return runGlobalShortcutAction(event, shortcutAction);
   }
@@ -151,6 +155,12 @@ export function createAppEventController({
     if (action === "save-as") return prevent(event, saveAs);
     if (action === "save-file") return prevent(event, saveFile);
     if (action === "search") return prevent(event, searchController.showSearch);
+    if (action === "find-next") return prevent(event, () => runEditorNavigationCommand("find-next"));
+    if (action === "find-previous") return prevent(event, () => runEditorNavigationCommand("find-previous"));
+    if (action === "replace") return prevent(event, () => runEditorNavigationCommand("replace"));
+    if (action === "go-to-row") return prevent(event, () => runEditorNavigationCommand("go-to-row"));
+    if (action === "next-tab") return prevent(event, () => runEditorNavigationCommand("next-tab"));
+    if (action === "previous-tab") return prevent(event, () => runEditorNavigationCommand("previous-tab"));
     if (action === "redo") return prevent(event, redo);
     if (action === "undo") return prevent(event, undo);
     if (action === "show-palette") return prevent(event, showPalette);
@@ -161,6 +171,11 @@ export function createAppEventController({
     if (action === "select-all") return prevent(event, selectAll);
     if (action === "clear-selection") return prevent(event, () => runCommand("clear-selection"));
     return undefined;
+  }
+
+  function runEditorNavigationCommand(action) {
+    commitActiveEditor();
+    return runCommand(action);
   }
 
   function prevent(event, fn) {

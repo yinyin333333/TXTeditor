@@ -207,8 +207,8 @@ test("command registry preserves public command labels and availability policy",
   const developmentIds = developmentLabels.map(([id]) => id);
 
   assert.deepEqual(
-    ["open-file", "open-folder", "save-file", "toggle-lint", "show-problems"].map((id) => productionIds.includes(id)),
-    [true, true, true, true, true]
+    ["open-file", "open-folder", "close-all", "save-file", "toggle-lint", "show-problems"].map((id) => productionIds.includes(id)),
+    [true, true, true, true, true, true]
   );
   assert.equal(new Set(productionIds).size, productionIds.length);
   assert.equal(productionIds.includes("load-fixture-20k"), false);
@@ -222,10 +222,12 @@ test("command registry preserves public command labels and availability policy",
   assert.deepEqual(calls, ["open-file", "show-problems"]);
 
   assert.equal(canRunCommandWithoutDocument("open-file"), true);
+  assert.equal(canRunCommandWithoutDocument("close-all"), true);
   assert.equal(canRunCommandWithoutDocument("show-problems"), true);
   assert.equal(canRunCommandWithoutDocument("save-file"), false);
   assert.equal(canRunCommandWithoutDocument("go-to-definition"), false);
   assert.deepEqual(commandActionForId("open-file"), { type: "handler", name: "openFile" });
+  assert.deepEqual(commandActionForId("close-all"), { type: "handler", name: "closeAll" });
   assert.deepEqual(commandActionForId("load-fixture-20k"), { type: "fixture", size: 20000 });
   assert.deepEqual(commandActionForId("insert-row"), { type: "handler", name: "insertRows" });
   assert.deepEqual(commandActionForId("insert-column"), { type: "handler", name: "insertColumns" });
@@ -732,6 +734,100 @@ test("closing the active tab commits editor changes before checking dirty state"
   assert.equal(state.docs.length, 1);
 });
 
+test("Close All removes workspace and standalone tabs after stopping Vector-LSP", async () => {
+  const workspaceDoc = TableDocument.fromText("skills.txt", "skill\nworkspace", {
+    path: "E:\\Mods\\Example\\TXT\\skills.txt"
+  });
+  const standaloneDoc = TableDocument.fromText("notes.txt", "id\nstandalone", {
+    path: "E:\\Notes\\notes.txt"
+  });
+  const events = [];
+  const { controller, state } = testDocumentController([], {}, {
+    workspace: { path: "E:\\Mods\\Example\\TXT", files: [] },
+    lintEngine: "vector-lsp",
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    lspOpenDoc: async () => {},
+    lspStopSession: async (reason) => events.push(["stop", reason]),
+    resetWorkspaceView: () => events.push(["reset-view"])
+  });
+
+  await controller.addDocument(workspaceDoc);
+  await controller.addDocument(standaloneDoc);
+  state.active = 0;
+  state.lint.diagnostics = [{ id: "workspace-diagnostic" }];
+
+  assert.equal(await controller.closeAll(), true);
+  assert.equal(state.workspace, null);
+  assert.deepEqual(state.docs, []);
+  assert.equal(state.active, -1);
+  assert.deepEqual(state.lint.diagnostics, []);
+  assert.deepEqual(events, [
+    ["stop", "all-documents-closed"],
+    ["reset-view"]
+  ]);
+});
+
+test("cancelling Close All preserves the workspace and documents without stopping LSP", async () => {
+  const workspaceDoc = TableDocument.fromText("skills.txt", "skill\nchanged", {
+    path: "E:\\Mods\\Example\\TXT\\skills.txt",
+    dirty: true
+  });
+  const stops = [];
+  const workspace = { path: "E:\\Mods\\Example\\TXT", files: [] };
+  const { controller, state } = testDocumentController([], {}, {
+    workspace,
+    lspStopSession: async (reason) => stops.push(reason)
+  });
+  await controller.addDocument(workspaceDoc);
+
+  const closing = controller.closeAll();
+  await waitFor(() => state.docs.length === 1);
+  controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+
+  assert.equal(await closing, false);
+  assert.equal(state.workspace, workspace);
+  assert.deepEqual(state.docs, [workspaceDoc]);
+  assert.deepEqual(stops, []);
+});
+
+test("Close All applies discard and save choices before removing every tab", async () => {
+  const discarded = TableDocument.fromText("discard.txt", "id\ndiscard", {
+    path: "E:\\Mods\\Example\\TXT\\discard.txt",
+    dirty: true
+  });
+  const saved = TableDocument.fromText("save.txt", "id\nsave", {
+    path: "E:\\Mods\\Example\\TXT\\save.txt",
+    dirty: true
+  });
+  const writes = [];
+  saved.handle = {
+    async createWritable() {
+      return {
+        write: async (text) => writes.push(text),
+        close: async () => {}
+      };
+    }
+  };
+  const { controller, state } = testDocumentController([], {}, {
+    workspace: { path: "E:\\Mods\\Example\\TXT", files: [] }
+  });
+  await controller.addDocument(discarded);
+  await controller.addDocument(saved);
+
+  const closing = controller.closeAll();
+  await waitFor(() => state.docs.length === 2);
+  controller.handleCloseDialogClick(closeChoiceEvent("discard"));
+  await waitFor(() => state.docs.length === 2);
+  controller.handleCloseDialogClick(closeChoiceEvent("save"));
+
+  assert.equal(await closing, true);
+  assert.deepEqual(writes, ["id\nsave"]);
+  assert.deepEqual(state.docs, []);
+  assert.equal(state.active, -1);
+  assert.equal(state.workspace, null);
+});
+
 test("closing another tab commits the active editor before switching documents", async () => {
   const activeDoc = TableDocument.fromText("active.txt", "id\nactive", { dirty: false });
   const closingDoc = TableDocument.fromText("closing.txt", "id\nclosing", { dirty: true });
@@ -826,11 +922,11 @@ test("closing an active Vector tab waits for didClose before rebinding the revea
 });
 
 test("context menu command item registries preserve expected command groups", () => {
-  assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column"]);
+  assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column", "clone-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
   const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
-  assert.match(commandSurfaceController, /label: "Fill"[\s\S]*label: "Math"[\s\S]*id: "go-to-definition"/);
+  assert.match(commandSurfaceController, /tText\("menu\.fill"\)[\s\S]*tText\("menu\.math"\)[\s\S]*id: "go-to-definition"/);
 });
 
 test("Resize To Fit keeps the existing all-column command behavior", () => {
@@ -838,15 +934,17 @@ test("Resize To Fit keeps the existing all-column command behavior", () => {
   assert.match(gridCommandController, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
 });
 
-test("Open File and Open Folder sidebar buttons are constrained to one line", () => {
+test("file actions use localized labels and Close All appears in the main toolbar", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(html, /<button data-command="open-file">Open File<\/button>/);
-  assert.match(html, /<button data-command="open-folder">Open Folder<\/button>/);
+  assert.match(html, /<button data-command="open-file" data-i18n="toolbar\.openFile">Open File<\/button>/);
+  assert.match(html, /<button data-command="open-folder" data-i18n="toolbar\.openFolder">Open Folder<\/button>/);
+  assert.match(html, /<button data-command="save-as" data-i18n="toolbar\.saveAs">Save As<\/button>\s*<button data-command="close-all" data-i18n="toolbar\.closeAll" disabled>Close All<\/button>/);
   assert.match(css, /--sidebar-width:\s*260px/);
   assert.match(css, /\.layout-root\s*\{[\s\S]*grid-template-columns:\s*var\(--dock-left-width\) minmax\(var\(--editor-min-width\), 1fr\) var\(--dock-right-width\)/);
   assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*0/);
   assert.match(css, /\.sidebar-actions button\s*\{[\s\S]*white-space:\s*nowrap/);
+  assert.match(css, /\.empty-state\s*\{[\s\S]*z-index:\s*6/);
   assert.equal(MIN_SIDEBAR_WIDTH, 260);
   assert.equal(MAX_SIDEBAR_WIDTH, 520);
 });
@@ -1082,7 +1180,7 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
 
-test("context menu uses one explicit active submenu and exposes Clone Row only", () => {
+test("context menu uses one explicit active submenu and exposes row and column cloning", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const activeGroup = { dataset: { menuGroup: "Row Operations" } };
   const inactiveGroup = { dataset: { menuGroup: "Column Operations" } };
@@ -1092,8 +1190,10 @@ test("context menu uses one explicit active submenu and exposes Clone Row only",
   assert.equal(contextMenuGroupIsActive(inactiveGroup, activeGroup), false);
   assert.deepEqual(contextMenuHiddenState(), { contextMenuActiveGroup: "", contextMenuOpen: false });
   assert.equal(rowCommandItems().some((item) => item.id === "clone-row" && item.label === "Clone Row"), true);
+  assert.equal(columnCommandItems().some((item) => item.id === "clone-column" && item.label === "Clone Column(s)"), true);
   assert.equal(rowCommandItems().some((item) => item.label === "Swap Rows"), false);
   assert.match(css, /\.menu-group\.active > \.submenu\s*\{\s*display: block;/);
+  assert.match(css, /\.submenu\s*\{[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/);
   assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
 });
 
@@ -1102,6 +1202,13 @@ test("row context menu orders Clone Row after hide and delete without changing c
   const ids = rowItems.map((item) => item.id);
   assert.deepEqual(ids, ["add-row", "insert-row", "hide-row", "delete-row", "clone-row"]);
   assert.deepEqual(rowItems.at(-1), { id: "clone-row", label: "Clone Row", disabled: true });
+});
+
+test("column context menu orders Clone Column(s) after hide and delete", () => {
+  const columnItems = columnCommandItems({ cloneDisabled: true });
+  const ids = columnItems.map((item) => item.id);
+  assert.deepEqual(ids, ["add-column", "insert-column", "hide-column", "delete-column", "clone-column"]);
+  assert.deepEqual(columnItems.at(-1), { id: "clone-column", label: "Clone Column(s)", disabled: true });
 });
 
 test("Settings modal exposes immediate visual settings without save cancel apply", () => {
@@ -1509,10 +1616,22 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
 function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
   const hostDocument = { activeElement: null };
   const host = { focus: () => { hostDocument.activeElement = host; } };
-  const state = { docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs], active: 0, lint: { engine: options.lintEngine ?? "legacy" } };
+  const state = {
+    docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs],
+    active: 0,
+    workspace: options.workspace ?? null,
+    lint: {
+      engine: options.lintEngine ?? "legacy",
+      enabled: options.lintEnabled ?? true,
+      diagnostics: [],
+      status: ""
+    }
+  };
   const grid = {
+    autoFitInitialColumns: () => {},
     commitEdit: () => {},
     draw: () => {},
+    layout: () => {},
     setDocument: () => {},
     ...gridOverrides
   };
@@ -1536,17 +1655,20 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     reportLspOpenFailure: () => {},
     lspCloseDoc: options.lspCloseDoc ?? (() => {}),
     reportLspCloseFailure: () => {},
+    lspStopSession: options.lspStopSession ?? (() => 0),
     lspStartWorkspace: options.lspStartWorkspace ?? (() => {}),
     ensureDocumentSession: options.ensureDocumentSession ?? (() => {}),
     scheduleHoverPrewarm: options.scheduleHoverPrewarm ?? (() => {}),
     resetUndoManagerForDocument: () => {},
-    resetLegacyWorkspaceIndex: () => {},
+    resetLegacyWorkspaceIndex: options.resetLegacyWorkspaceIndex ?? (() => {}),
     scheduleLegacyLintForOpen: options.scheduleLegacyLintForOpen ?? (() => {}),
     scheduleLegacyLintFull: () => {},
-    cancelLegacyLintJobs: () => {},
+    cancelLegacyLintJobs: options.cancelLegacyLintJobs ?? (() => {}),
     isVectorLintEngine: options.isVectorLintEngine ?? (() => false),
     isLegacyLintEngine: options.isLegacyLintEngine ?? (() => true),
+    setLintDiagnostics: options.setLintDiagnostics ?? ((diagnostics) => { state.lint.diagnostics = diagnostics; }),
     updateGridDiagnostics: () => {},
+    resetWorkspaceView: options.resetWorkspaceView ?? (() => {}),
     scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
   });
   return { controller, state, document: hostDocument, host };

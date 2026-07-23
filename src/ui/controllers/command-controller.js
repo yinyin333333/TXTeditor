@@ -15,6 +15,7 @@ import {
   hiddenRowsCommand,
   incrementFillSelectedCellsCommand
 } from "../../core/operations.js";
+import { tText } from "../../core/i18n.js";
 
 export function createCommandController({
   isDevelopmentMode,
@@ -30,13 +31,14 @@ export function createCommandController({
   showError,
   handlers
 }) {
-  const commandLabels = commandLabelsForEnvironment({ isDevelopmentMode });
-  const commands = createCommandRunners(commandLabels, runCommand);
+  const commandLabels = () => commandLabelsForEnvironment({ isDevelopmentMode });
+  const commands = createCommandRunners(commandLabels(), runCommand);
 
   function runCommand(id) {
-    if (!hasOpenDocument() && !canRunCommandWithoutDocument(id)) return showError("Open a file before using that command.");
+    if (id === "close-all" && !state.workspace && !state.docs.length) return;
+    if (!hasOpenDocument() && !canRunCommandWithoutDocument(id)) return showError(tText("error.openDocument"));
     if (hasOpenDocument() && !canRunCommandForDocument(id, activeDocumentKind())) {
-      return showError("This command is available only for table documents.");
+      return showError(tText("error.tableOnly"));
     }
     const doc = activeDoc();
     const rect = state.selection.rect;

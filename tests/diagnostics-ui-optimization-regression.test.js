@@ -282,12 +282,12 @@ test("Stage 1-E diagnostics-only refresh preserves tab and file DOM while patchi
   }
 });
 
-test("product diagnostics commits rebuild Explorer so unopened workspace badges use current diagnostics", () => {
+test("product diagnostics commits use the narrow renderer that updates workspace badges in place", () => {
   const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(
     appSource,
-    /function renderDiagnosticsChrome\(\)\s*\{\s*return shellController\.renderChrome\(\);\s*\}/,
-    "Vector-LSP diagnostics must rebuild the Explorer file list; the partial patch path missed unopened-file badges"
+    /function renderDiagnosticsChrome\(\)\s*\{\s*return shellController\.renderDiagnosticsChrome\(\);\s*\}/,
+    "Vector-LSP diagnostics should update badges and the Problems panel without rebuilding tabs or Explorer"
   );
 });
 
@@ -400,7 +400,7 @@ test("Stage 1-D bulk start and sync render once per batch without changing didOp
 
     const startCalls = calls.splice(0);
     assert.deepEqual(startCalls.filter(([command]) => command === "lsp_start"), [
-      ["lsp_start", { workspacePath: "E:\\Data", generation: 1 }]
+      ["lsp_start", { workspacePath: "E:\\Data", generation: 1, locale: "enUS" }]
     ]);
     assert.deepEqual(
       startCalls.filter(([command]) => command === "lsp_open_file").map(([, args]) => ({

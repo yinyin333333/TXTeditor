@@ -246,7 +246,7 @@ export function createLspDiagnosticsEventController({
         renderDiagnosticsChrome();
         performance.renders += 1;
       } else {
-        updateGridDiagnostics();
+        updateGridDiagnostics({ redraw: false, updateRuler: false });
       }
       let prewarmActive = false;
       for (const { doc, uri } of replacements.values()) {
@@ -272,12 +272,19 @@ export function createLspDiagnosticsEventController({
     const flush = { promise, resolve };
     scheduledFlush = flush;
     scheduleUiFlush(async () => {
-      if (scheduledFlush === flush) scheduledFlush = null;
       try {
-        await flushPendingRequests(epoch);
+        while (
+          scheduledFlush === flush
+          && epoch === pendingEpoch
+          && pendingRequests.size > 0
+        ) {
+          await flushPendingRequests(epoch);
+        }
         resolve();
       } catch (error) {
         reject(error);
+      } finally {
+        if (scheduledFlush === flush) scheduledFlush = null;
       }
     });
     return promise;

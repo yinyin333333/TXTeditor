@@ -75,7 +75,10 @@ export function createJsonEditorController({
         character: diagnostic.endCharacter ?? diagnostic.startCharacter ?? diagnostic.columnIndex ?? 0
       }
     };
-    moduleApi.selectAndReveal(view, lspRangeToJsonOffsets(doc.text, range));
+    moduleApi.selectAndReveal(
+      view,
+      lspRangeToJsonOffsets(view.state.doc.toString(), range)
+    );
     return true;
   }
 
@@ -119,6 +122,10 @@ export function createJsonEditorController({
     moduleApi?.refreshJsonEditorAppearance?.(view);
   }
 
+  function refreshLocale() {
+    moduleApi?.refreshJsonEditorLocale?.(view);
+  }
+
   function editorOwnsTarget(target) {
     const ElementCtor = globalThis.Element;
     return Boolean(ElementCtor && target instanceof ElementCtor && target.closest(".cm-editor"));
@@ -136,9 +143,11 @@ export function createJsonEditorController({
     findPrevious: () => run("findPreviousJson"),
     focusActive,
     navigateToDiagnostic,
+    openReplace: () => run("openJsonReplace"),
     openSearch: () => run("openJsonSearch"),
     reconcileDiagnosticHighlight,
     refreshAppearance,
+    refreshLocale,
     redo: () => run("redoJsonEditor"),
     reloadActiveDocument,
     selectAll: () => run("selectAllJson"),

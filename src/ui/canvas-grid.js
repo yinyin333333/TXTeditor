@@ -169,9 +169,9 @@ export class CanvasGrid {
   clearLspHovers() { return clearGridLspHovers(this); }
   hideVectorTooltip() { return hideGridVectorTooltip(this); }
 
-  setDiagnostics(diagnosticsByCell) {
+  setDiagnostics(diagnosticsByCell, { redraw = true } = {}) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
-    this.draw();
+    if (redraw) this.draw();
   }
 
   notifySelectionChanged(reason = "selection") {
@@ -600,6 +600,8 @@ export class CanvasGrid {
       key,
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
       focus: this.selection.focus,
       rowCount: this.doc.rowCount,
       columnCount: this.doc.columnCount,
@@ -645,7 +647,14 @@ export class CanvasGrid {
   }
 
   onEditorKeyDown(event) {
-    const keyAction = editorKeyAction({ key: event.key, shiftKey: event.shiftKey, editMode: this.editMode });
+    const keyAction = editorKeyAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      editMode: this.editMode
+    });
     if (keyAction.action === "commit-move") {
       event.preventDefault();
       this.commitEdit();

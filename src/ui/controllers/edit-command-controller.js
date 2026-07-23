@@ -13,6 +13,7 @@ import {
   readClipboardText,
   writeClipboardText
 } from "../app-runtime-utils.js";
+import { tText } from "../../core/i18n.js";
 
 export function createEditCommandController({
   state,
@@ -24,29 +25,43 @@ export function createEditCommandController({
   promptNumber,
   showError
 }) {
-  async function copySelection() {
-    if (!hasOpenDocument()) return false;
+  async function copyRangesToClipboard(doc, ranges) {
     try {
-      await writeClipboardText(copyRanges(activeDoc(), state.selection.ranges));
+      await writeClipboardText(copyRanges(doc, ranges));
       return true;
     } catch (error) {
-      showError(`Clipboard copy failed: ${error instanceof Error ? error.message : String(error)}`);
+      showError(tText("error.clipboardCopy", { error: error instanceof Error ? error.message : String(error) }));
       return false;
     }
   }
 
+  async function copySelection() {
+    if (!hasOpenDocument()) return false;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    return copyRangesToClipboard(targetDoc, targetRanges);
+  }
+
   async function cutSelection() {
-    if (!await copySelection()) return;
-    execute(clearRangesCommand(activeDoc(), state.selection.ranges, "Cut"));
+    if (!hasOpenDocument()) return;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    if (!await copyRangesToClipboard(targetDoc, targetRanges)) return;
+    if (activeDoc() !== targetDoc) return;
+    execute(clearRangesCommand(targetDoc, targetRanges, "Cut"));
   }
 
   async function pasteSelection() {
     if (!hasOpenDocument()) return;
+    const targetDoc = activeDoc();
+    const targetRanges = state.selection.ranges.map((range) => ({ ...range }));
+    const targetFocus = { ...state.selection.focus };
     try {
       const text = await readClipboardText();
-      execute(pasteTextToRangesCommand(activeDoc(), state.selection.ranges, state.selection.focus, text));
+      if (activeDoc() !== targetDoc) return;
+      execute(pasteTextToRangesCommand(targetDoc, targetRanges, targetFocus, text));
     } catch (error) {
-      showError(`Clipboard paste failed: ${error instanceof Error ? error.message : String(error)}`);
+      showError(tText("error.clipboardPaste", { error: error instanceof Error ? error.message : String(error) }));
     }
   }
 
@@ -58,8 +73,8 @@ export function createEditCommandController({
 
   async function addRows() {
     const count = await promptNumber({
-      title: "Add Rows",
-      message: "Number of rows to add:",
+      title: tText("prompt.addRows"),
+      message: tText("prompt.rowsToAdd"),
       defaultValue: 1,
       min: 1
     });
@@ -68,8 +83,8 @@ export function createEditCommandController({
 
   async function insertRows() {
     const count = await promptNumber({
-      title: "Insert Rows",
-      message: "Number of rows to insert:",
+      title: tText("prompt.insertRows"),
+      message: tText("prompt.rowsToInsert"),
       defaultValue: 1,
       min: 1
     });
@@ -78,8 +93,8 @@ export function createEditCommandController({
 
   async function addColumns() {
     const count = await promptNumber({
-      title: "Add Columns",
-      message: "Number of columns to add:",
+      title: tText("prompt.addColumns"),
+      message: tText("prompt.columnsToAdd"),
       defaultValue: 1,
       min: 1
     });
@@ -88,8 +103,8 @@ export function createEditCommandController({
 
   async function insertColumns() {
     const count = await promptNumber({
-      title: "Insert Columns",
-      message: "Number of columns to insert:",
+      title: tText("prompt.insertColumns"),
+      message: tText("prompt.columnsToInsert"),
       defaultValue: 1,
       min: 1
     });
@@ -99,8 +114,8 @@ export function createEditCommandController({
   async function math(kind) {
     const operator = { add: "+", subtract: "-", multiply: "*", divide: "/" }[kind];
     const operand = await promptNumber({
-      title: "Math",
-      message: `Apply ${operator} to numeric selected cells:`,
+      title: tText("prompt.math"),
+      message: tText("prompt.applyMath", { operator }),
       defaultValue: "",
       allowFloat: true
     });

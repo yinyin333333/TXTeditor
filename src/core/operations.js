@@ -64,6 +64,22 @@ export function pasteTextToRangesCommand(doc, ranges, focus, text) {
       return makeCellCommand("Paste Selection", doc, cells.map(({ row, column }) => ({ row, column, value })));
     }
   }
+
+  const matrixWidth = rows.reduce((width, row) => Math.max(width, row.length), 0);
+  if (rows.length > 1 || matrixWidth > 1) {
+    const [range] = ranges;
+    const isSingleMultiCellRange = ranges.length === 1
+      && (range.bottom > range.top || range.right > range.left);
+    if (isSingleMultiCellRange) {
+      const rangeHeight = range.bottom - range.top + 1;
+      const rangeWidth = range.right - range.left + 1;
+      if (rows.length > rangeHeight || matrixWidth > rangeWidth) {
+        return makeCellCommand("Paste Range", doc, []);
+      }
+      return pasteTextCommand(doc, { row: range.top, column: range.left }, text);
+    }
+  }
+
   return pasteTextCommand(doc, focus, text);
 }
 
@@ -218,7 +234,7 @@ export function cloneRowsCommand(doc, rows, insertAt = null) {
     .filter((row) => row > 0 && row < doc.rowCount)
     .sort((a, b) => a - b);
   const values = targets.map((row) => Array.from({ length: doc.columnCount }, (_, column) => doc.getCell(row, column)));
-  const at = clamp(insertAt ?? ((targets.at(-1) ?? 0) + 1), 1, doc.rowCount);
+  const at = clamp(insertAt ?? doc.rowCount, 1, doc.rowCount);
   return makeCustomCommand(`Clone ${targets.length} Row(s)`, {
     empty: targets.length === 0,
     redo(target) {
@@ -278,6 +294,27 @@ export function addColumnsCommand(doc, count = 1) {
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
     undoLspChange: { kind: "deleteColumns", index: at, count: safeCount }
+  });
+}
+
+export function cloneColumnsCommand(doc, columns, insertAt = null) {
+  const targets = [...new Set(columns)]
+    .filter((column) => column >= 0 && column < doc.columnCount)
+    .sort((a, b) => a - b);
+  const values = Array.from({ length: doc.rowCount }, (_, row) => targets.map((column) => doc.getCell(row, column)));
+  const widths = targets.map((column) => doc.columnWidths[column]);
+  const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
+  return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
+    empty: targets.length === 0,
+    redo(target) {
+      target.restoreColumns(at, values, widths);
+    },
+    undo(target) {
+      target.removeColumns(at, targets.length);
+    },
+    contentChanged: true,
+    lspChange: { kind: "insertColumns", index: at, count: targets.length },
+    undoLspChange: { kind: "deleteColumns", index: at, count: targets.length }
   });
 }
 

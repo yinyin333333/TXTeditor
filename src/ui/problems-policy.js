@@ -1,3 +1,5 @@
+import { t, tText } from "../core/i18n.js";
+
 export function lintPanelActive({ problemsVisible = false, lintEnabled = false } = {}) {
   return Boolean(problemsVisible && lintEnabled);
 }
@@ -124,15 +126,15 @@ export function problemsPanelHtml({
   collapsedFiles = [],
   escapeHtml = escapeHtmlValue
 } = {}) {
-  if (!lintEnabled) return `<div class="empty-problems">Lint is off.</div>`;
-  if (vectorEngine && !lspStarted) return `<div class="empty-problems">Open a folder to enable linting.</div>`;
-  if (!diagnostics.length) return `<div class="empty-problems">No problems.</div>`;
+  if (!lintEnabled) return `<div class="empty-problems">${t("lint.off")}</div>`;
+  if (vectorEngine && !lspStarted) return `<div class="empty-problems">${t("lint.openFolder")}</div>`;
+  if (!diagnostics.length) return `<div class="empty-problems">${t("lint.none")}</div>`;
   const collapsed = collapsedFiles instanceof Set ? collapsedFiles : new Set(collapsedFiles);
   return groupDiagnosticsByFile(diagnostics).map(([fileName, fileDiagnostics]) => `
     <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsed.has(fileName) ? "" : " open"}>
       <summary class="problem-file-header">${escapeHtml(fileName)} <span class="problem-file-count">(${fileDiagnostics.length})</span></summary>
       ${fileDiagnostics.map((diagnostic) => `
-        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? " disabled aria-disabled=\"true\" title=\"JSON diagnostics are read-only in TXTEditor.\"" : ""}>
+        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? ` disabled aria-disabled="true" title="${t("problems.jsonReadOnly")}"` : ""}>
           <span class="problem-location">R${diagnostic.rowIndex + 1}:C${diagnostic.columnIndex + 1}</span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
@@ -156,19 +158,19 @@ export function lintSummaryText({
   counts = null,
   openFileCount = 0
 } = {}) {
-  if (!lintEnabled) return "Lint off";
+  if (!lintEnabled) return t("lint.offSummary");
   if (legacyEngine) {
     if (legacyStatus) return legacyStatus;
-    if (legacyWorkspaceLoadStatus === "failed") return `Workspace index failed - ${legacyProfile}`;
+    if (legacyWorkspaceLoadStatus === "failed") return tText("lint.workspaceIndexFailed", { profile: legacyProfile });
     const summaryCounts = counts ?? diagnosticCounts(diagnostics);
-    if (!diagnostics.length) return `No problems - ${legacyProfile}`;
-    return `${summaryCounts.error} errors, ${summaryCounts.warning} warnings, ${summaryCounts.info} info - ${legacyProfile}`;
+    if (!diagnostics.length) return tText("lint.noProblemsProfile", { profile: legacyProfile });
+    return tText("lint.summaryCountsProfile", { ...summaryCounts, profile: legacyProfile });
   }
-  if (vectorEngine && !lspStarted) return "Open a folder to enable linting";
+  if (vectorEngine && !lspStarted) return t("lint.openFolderSummary");
   if (lintStatus) return lintStatus;
   const summaryCounts = counts ?? diagnosticCounts(diagnostics);
-  if (!diagnostics.length) return `No problems (${openFileCount} file${openFileCount === 1 ? "" : "s"} linted)`;
-  return `${summaryCounts.error} errors, ${summaryCounts.warning} warnings, ${summaryCounts.info} info (${openFileCount} files)`;
+  if (!diagnostics.length) return tText(openFileCount === 1 ? "lint.noProblemsOneFile" : "lint.noProblemsFiles", { count: openFileCount });
+  return tText("lint.summaryCounts", { ...summaryCounts, count: openFileCount });
 }
 
 export function problemBadgeHtml({ diagnostics = [], fileKey = "", notificationsVisible = false, escapeHtml = escapeHtmlValue } = {}) {

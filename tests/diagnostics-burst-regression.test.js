@@ -57,6 +57,7 @@ function createBurstHarness({ generation = 7, getter, initialDiagnostics = [] } 
   const counters = {
     commits: 0,
     getters: 0,
+    gridRedraws: 0,
     gridUpdates: 0,
     problemsRebuilds: 0,
     renders: 0,
@@ -87,9 +88,10 @@ function createBurstHarness({ generation = 7, getter, initialDiagnostics = [] } 
     }
   };
 
-  const updateGridDiagnostics = () => {
+  const updateGridDiagnostics = ({ redraw = true, updateRuler = true } = {}) => {
     counters.gridUpdates += 1;
-    counters.rulerUpdates += 1;
+    if (redraw) counters.gridRedraws += 1;
+    if (updateRuler) counters.rulerUpdates += 1;
   };
   const renderChrome = () => {
     counters.renders += 1;
@@ -132,7 +134,7 @@ function createBurstHarness({ generation = 7, getter, initialDiagnostics = [] } 
   };
 }
 
-test("unchanged versioned diagnostics update metadata without rebuilding Problems", async (context) => {
+test("unchanged versioned diagnostics update metadata without redrawing diagnostics UI", async (context) => {
   const uri = diagnosticUri(0);
   const raw = rawDiagnostics(0, 3);
   const initialDiagnostics = raw.map((diagnostic, index) => mapLspDiagnosticToDisplay(diagnostic, {
@@ -152,6 +154,8 @@ test("unchanged versioned diagnostics update metadata without rebuilding Problem
   assert.equal(harness.counters.renders, 0);
   assert.equal(harness.counters.problemsRebuilds, 0);
   assert.equal(harness.counters.gridUpdates, 1);
+  assert.equal(harness.counters.gridRedraws, 0);
+  assert.equal(harness.counters.rulerUpdates, 0);
 });
 
 function canonicalRaw(uri, diagnostic) {
@@ -193,7 +197,7 @@ function counterSummary(counters) {
   return {
     getters: counters.getters,
     commits: counters.commits,
-    grid: counters.gridUpdates,
+    grid: counters.gridRedraws,
     ruler: counters.rulerUpdates,
     renders: counters.renders,
     problems: counters.problemsRebuilds
@@ -253,7 +257,7 @@ test("Burst A preserves 10,000-diagnostic fingerprint and commits one UI batch",
   }
 });
 
-test("Burst B keeps the latest same-URI snapshot when getters finish 2, 3, 1", async (context) => {
+test("Burst B coalesces same-URI snapshots while one getter is in flight", async (context) => {
   const uri = diagnosticUri(0);
   const gates = new Map();
   const harness = createBurstHarness({
@@ -265,20 +269,24 @@ test("Burst B keeps the latest same-URI snapshot when getters finish 2, 3, 1", a
   });
 
   try {
-    const pending = [];
-    for (const sequence of [1, 2, 3]) {
+    const pending = [harness.controller.handleDiagnosticsChanged({
+      generation: harness.state.lsp.generation,
+      sequence: 1,
+      uri
+    })];
+    await waitFor(() => gates.has(1));
+    for (const sequence of [2, 3]) {
       pending.push(harness.controller.handleDiagnosticsChanged({
         generation: harness.state.lsp.generation,
         sequence,
         uri
       }));
-      await waitFor(() => gates.has(sequence));
     }
-    gates.get(2).resolve(rawDiagnostics(0, 2, 2));
-    await new Promise((resolve) => setImmediate(resolve));
-    gates.get(3).resolve(rawDiagnostics(0, 3, 3));
-    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual([...gates.keys()], [1]);
     gates.get(1).resolve(rawDiagnostics(0, 1, 1));
+    await waitFor(() => gates.has(3));
+    assert.equal(gates.has(2), false);
+    gates.get(3).resolve(rawDiagnostics(0, 3, 3));
     await Promise.all(pending);
 
     const summary = counterSummary(harness.counters);
@@ -287,7 +295,7 @@ test("Burst B keeps the latest same-URI snapshot when getters finish 2, 3, 1", a
       harness.state.lint.diagnostics.map((diagnostic) => diagnostic.data.revision),
       [3, 3, 3]
     );
-    assert.equal(harness.counters.getters, 3);
+    assert.equal(harness.counters.getters, 2);
     assert.equal(harness.counters.commits, 1);
   } finally {
     harness.restore();

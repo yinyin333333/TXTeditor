@@ -5,20 +5,21 @@ import { asciiCaseInsensitiveValues, asciiLower, fixed4cc, fixed4ccValues, fixed
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { numberedFields } from "./lint-stat-data.js";
 import { clean, normalizeHeader, normalizeToken, rowLabelFor } from "./lint-table.js";
+import { legacyMessage, legacyMessageText, legacyTerm } from "./legacy-lint-i18n.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export function basicLintRules(options = {}) {
   const linkedExcelRunner = options.lintLinkedExcel ?? lintLinkedExcel;
   return [
-    rule("Basic/NoDuplicateExcel", "No duplicate Excel IDs", lintNoDuplicateExcel, true, PROFILE_OPTIONS, "Checks duplicate IDs using each field's actual comparison rules, including four-character codes, numbers, case-insensitive names, and exact text."),
-    rule("Basic/ExcelColumns", "Required Excel columns", lintExcelColumns, true, PROFILE_OPTIONS, "Reports missing columns and distinguishes fields required by the game from fields used only by TXTEditor."),
-    rule("Basic/LinkedExcel", "Linked Excel references", linkedExcelRunner, true, PROFILE_OPTIONS, "Checks linked TXT values with the matching rules used by each field. Four-character item-type codes are case-sensitive; letter case does not matter for verified name fields."),
-    rule("Basic/MissileRangeFieldSemantics", "Missile range field semantics", lintMissileRangeFieldSemantics, true, ["2.4"], "Checks that missiles.txt range values use the plain integer format expected by D2R 2.4."),
-    rule("Basic/MonstatsDesecratedTreasureClassSemantics", "Desecrated treasure class semantics", lintMonstatsDesecratedTreasureClassSemantics, true, ["2.4"], "Checks that desecrated champion or unique treasure classes also have the matching base desecrated treasure class in D2R 2.4."),
-    rule("Basic/MonEquipLevelOrder", "Monster equipment level order", lintMonEquipLevelOrder, true, ["2.4"], "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level in D2R 2.4."),
-    rule("Basic/StringCheck", "String references", lintStringCheck, true, PROFILE_OPTIONS, "Warns when different keys reuse one string ID. This is an editor consistency check when the game's behavior is not confirmed."),
-    rule("Basic/NumericBounds", "Numeric bounds", lintNumericBounds, true, PROFILE_OPTIONS, "Checks plain integer spelling and the allowed range for the selected profile."),
-    rule("Basic/BooleanFields", "Boolean fields", lintBooleanFields, true, PROFILE_OPTIONS, "Uses 0=false and nonzero=true for the confirmed missile fields, and recommends 0 or 1 for other boolean fields.")
+    rule("Basic/NoDuplicateExcel", lintNoDuplicateExcel, true, PROFILE_OPTIONS),
+    rule("Basic/ExcelColumns", lintExcelColumns, true, PROFILE_OPTIONS),
+    rule("Basic/LinkedExcel", linkedExcelRunner, true, PROFILE_OPTIONS),
+    rule("Basic/MissileRangeFieldSemantics", lintMissileRangeFieldSemantics, true, ["2.4"]),
+    rule("Basic/MonstatsDesecratedTreasureClassSemantics", lintMonstatsDesecratedTreasureClassSemantics, true, ["2.4"]),
+    rule("Basic/MonEquipLevelOrder", lintMonEquipLevelOrder, true, ["2.4"]),
+    rule("Basic/StringCheck", lintStringCheck, true, PROFILE_OPTIONS),
+    rule("Basic/NumericBounds", lintNumericBounds, true, PROFILE_OPTIONS),
+    rule("Basic/BooleanFields", lintBooleanFields, true, PROFILE_OPTIONS)
   ];
 }
 
@@ -132,10 +133,10 @@ export function lintExcelColumns(index, ctx) {
         if (!table.hasColumn(columnName)) {
           const evidence = requiredColumnEvidence(table.fileName, columnName);
           const message = evidence === "editor-policy"
-            ? `Column "${columnName}" is missing. TXTEditor uses it to label recipes, but the game does not require it.`
+            ? legacyMessage("basic.columnMissingEditor", { column: columnName })
             : evidence === "runtime-semantic"
-              ? `Column "${columnName}" is missing. The game uses this field when present; add it, although a missing header is not known to reject the whole table.`
-              : `Column "${columnName}" is missing from the selected profile. Add the column; the exact effect of omitting the header is not confirmed.`;
+              ? legacyMessage("basic.columnMissingRuntime", { column: columnName })
+              : legacyMessage("basic.columnMissingRuntime", { column: columnName });
           ctx.add(table, 0, 0, message, {
             severity: "warning",
             d2rMessage: `${table.displayName} - ${message}`
@@ -149,7 +150,7 @@ export function lintExcelColumns(index, ctx) {
       const normalized = normalizeHeader(header);
       if (accepted.has(normalized)) continue;
       if (nonStandard.has(normalized)) {
-        ctx.add(table, 0, header, `Non-standard column "${header}" found.`, {
+        ctx.add(table, 0, header, legacyMessage("basic.nonStandardColumn", { column: header }), {
           d2rMessage: `${table.displayName} - non-standard column '${normalized}' found`
         });
       }
@@ -166,8 +167,8 @@ export function lintNoDuplicateExcel(index, ctx) {
       for (const { rowIndex, previousRow, value } of duplicateRowPairs(table, key, { comparison })) {
         const policyOnly = comparison === "raw";
         const message = policyOnly
-          ? `Potential duplicate ${key} "${value}" also appears on row ${previousRow + 1}. Check whether these rows should share the same value; the game's handling of duplicates for this field is not confirmed.`
-          : `Duplicate ${key} "${value}" also appears on row ${previousRow + 1}.`;
+          ? legacyMessage("basic.duplicatePolicy", { column: key, value, previousRow: previousRow + 1 })
+          : legacyMessage("basic.duplicate", { column: key, value, previousRow: previousRow + 1 });
         ctx.add(table, rowIndex, key, message, {
           ...(policyOnly ? { severity: "warning" } : {}),
           d2rMessage: policyOnly
@@ -186,7 +187,7 @@ export function lintMissileRangeFieldSemantics(index, ctx) {
   if (!table?.hasColumn("range")) return;
   table.eachRow((row) => {
     const value = clean(row.get("range"));
-    if (value && !isIntegerText(value)) ctx.add(table, row.rowIndex, "range", "D2R 2.4 expects missiles.range to be a plain integer.");
+    if (value && !isIntegerText(value)) ctx.add(table, row.rowIndex, "range", legacyMessage("basic.missileRangeInteger"));
   });
 }
 
@@ -204,7 +205,7 @@ export function lintMonstatsDesecratedTreasureClassSemantics(index, ctx) {
       if (!table.hasColumn(base) || !table.hasColumn(champ) || !table.hasColumn(unique)) continue;
       const filled = [champ, unique].filter((columnName) => clean(row.get(columnName)));
       if (filled.length && !clean(row.get(base))) {
-        ctx.add(table, row.rowIndex, base, `${filled.join(" / ")} is populated but ${base} is blank; ${label} desecrated drops require the base desecrated treasure class in 2.4.`);
+        ctx.add(table, row.rowIndex, base, legacyMessage("basic.desecratedTreasure", { filled: filled.join(" / "), base, label }));
       }
     }
   });
@@ -227,7 +228,7 @@ export function lintMonEquipLevelOrder(index, ctx) {
     const rawLevel = clean(row.get("level"));
     const level = rawLevel ? integerValue(rawLevel) : 0;
     if (level === null) {
-      ctx.add(table, row.rowIndex, "level", `Invalid level "${rawLevel}" for "${monster}".`);
+      ctx.add(table, row.rowIndex, "level", legacyMessage("basic.invalidLevel", { value: rawLevel, monster }));
       return;
     }
     if (monster !== currentMonster) {
@@ -237,7 +238,7 @@ export function lintMonEquipLevelOrder(index, ctx) {
       return;
     }
     if (previousLevel !== null && level > previousLevel) {
-      ctx.add(table, row.rowIndex, "level", `Level ${level} for "${monster}" appears after lower level ${previousLevel} on row ${previousRow + 1}; rows for the same monster should be ordered highest to lowest.`);
+      ctx.add(table, row.rowIndex, "level", legacyMessage("basic.levelOrder", { level, monster, previousLevel, row: previousRow + 1 }));
     }
     previousLevel = level;
     previousRow = row.rowIndex;
@@ -254,7 +255,7 @@ export function lintStringCheck(index, ctx) {
       const normalizedId = normalizeToken(id);
       const found = seenIds.get(normalizedId);
       if (found && normalizeToken(found.key) !== normalizeToken(key)) {
-        const message = `Potential string-ID reuse: "${key}" shares "${id}" with "${found.key}" in ${found.fileName}. Check whether both keys should use the same text; the game's behavior is not confirmed.`;
+        const message = legacyMessage("basic.stringReuse", { key, id, previousKey: found.key, fileName: found.fileName });
         ctx.add(table, row.rowIndex, "id", message, {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -286,7 +287,7 @@ export function lintNumericBounds(index, ctx) {
         const label = numericBoundsLabel(table, row);
         if (!isIntegerText(value)) {
           const message = integerPolicyMessage(table.fileName, columnName, value);
-          ctx.add(table, row.rowIndex, columnName, message, {
+          ctx.add(table, row.rowIndex, columnName, integerPolicyDescriptor(table.fileName, columnName, value), {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message} Row '${label}'.`
           });
@@ -300,8 +301,8 @@ export function lintNumericBounds(index, ctx) {
             row.rowIndex,
             columnName,
             engineStorageBound
-              ? `"${columnName}" must be from ${formatBound(min)} through ${formatBound(max)}. Enter a value in that range.`
-              : `"${columnName}" is outside the recommended range ${formatBound(min)} through ${formatBound(max)} for this profile.`,
+              ? legacyMessage("basic.integerStorageBound", { column: columnName, min: formatBound(min), max: formatBound(max) })
+              : legacyMessage("basic.numericRecommended", { column: columnName, min: formatBound(min), max: formatBound(max) }),
             {
               severity: "warning",
               d2rMessage: engineStorageBound
@@ -327,7 +328,7 @@ function lintHitSummonMode(index, ctx) {
     const rawValue = String(row.get("sHitPar2") ?? "");
     const result = hitSummonModeResult(rawValue);
     if (!result.message) return;
-    ctx.add(table, row.rowIndex, "sHitPar2", result.message, {
+    ctx.add(table, row.rowIndex, "sHitPar2", legacyMessage(result.messageKey, result.messageParams), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${result.message}`,
       hitSummonMode: {
@@ -365,24 +366,36 @@ export function hitSummonModeResult(rawValue) {
   const fallbackApplied = parsed > 15;
   const effective = fallbackApplied ? 1 : parsed;
   if (digitsOnly || /^-[0-9]+$/.test(value)) {
+    const messageKey = fallbackApplied ? "basic.hitSummonOutOfRange" : "basic.hitSummonConverted";
+    const messageParams = fallbackApplied
+      ? { value: shownValue }
+      : { value: shownValue, effective, mode: HIT_SUMMON_MODE_CODES[effective] };
     return {
       parsed,
       effective,
       fallbackApplied,
-      message: fallbackApplied
-        ? `'${shownValue}' is outside the HitSummon mode range 0 through 15. The game uses 1 (NU). Enter a value from 0 through 15.`
-        : `'${shownValue}' does not directly name a HitSummon mode from 0 through 15. The game reads it as ${effective} (${HIT_SUMMON_MODE_CODES[effective]}). Replace it with the mode number you actually want.`
+      messageKey,
+      messageParams,
+      message: legacyMessageText(messageKey, messageParams)
     };
   }
+  const messageKey = value === "NU"
+    ? "basic.hitSummonNu"
+    : fallbackApplied
+      ? "basic.hitSummonNonNumericFallback"
+      : "basic.hitSummonNonNumeric";
+  const messageParams = value === "NU"
+    ? {}
+    : fallbackApplied
+      ? { value: shownValue }
+      : { value: shownValue, effective, mode: HIT_SUMMON_MODE_CODES[effective] };
   return {
     parsed,
     effective,
     fallbackApplied,
-    message: value === "NU"
-      ? "'NU' is not a numeric mode ID here. The game replaces it with 1 (NU). Use 1 for neutral mode."
-      : fallbackApplied
-        ? `'${shownValue}' is not a numeric mode ID here. The game replaces it with 1 (NU). Enter a value from 0 through 15.`
-        : `'${shownValue}' is not a numeric mode ID here. The game reads it as ${effective} (${HIT_SUMMON_MODE_CODES[effective]}). Replace it with the mode number you actually want from 0 through 15.`
+    messageKey,
+    messageParams,
+    message: legacyMessageText(messageKey, messageParams)
   };
 }
 
@@ -396,7 +409,7 @@ export function lintBooleanFields(index, ctx) {
         if (type29Fields.has(columnName)) {
           const rawValue = String(row.get(columnName) ?? "");
           if (rawValue.trim() && !isSignedDecimalText(rawValue)) {
-            const message = `'${rawValue}' is not a number for '${columnName}'. Use 0 for false or any nonzero integer for true.`;
+            const message = legacyMessage("basic.booleanType29", { value: rawValue, column: columnName });
             ctx.add(table, row.rowIndex, columnName, message, {
               severity: "warning",
               d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -406,7 +419,7 @@ export function lintBooleanFields(index, ctx) {
         }
         const value = clean(row.get(columnName));
         if (value && value !== "0" && value !== "1") {
-          const message = `'${value}' is not a standard boolean value for '${columnName}'. Use 0 for false or 1 for true.`;
+          const message = legacyMessage("basic.booleanStandard", { value, column: columnName });
           ctx.add(table, row.rowIndex, columnName, message, {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -418,11 +431,20 @@ export function lintBooleanFields(index, ctx) {
 }
 
 export function integerPolicyMessage(fileName, columnName, value) {
+  return legacyMessageText(
+    fileName === "missiles.txt" && normalizeHeader(columnName) === "cltparam5" && value === "`"
+      ? "basic.integerBacktick"
+      : "basic.integerPolicy",
+    fileName === "missiles.txt" && normalizeHeader(columnName) === "cltparam5" && value === "`" ? {} : { value, column: columnName }
+  );
+}
+
+function integerPolicyDescriptor(fileName, columnName, value) {
   return fileName === "missiles.txt"
     && normalizeHeader(columnName) === "cltparam5"
     && value === "`"
-    ? "'`' is not written as a normal integer. The game converts it to 48. Replace it with the number you actually want."
-    : `'${value}' is not a standard integer for '${columnName}'. Use a plain whole number; the game may read a different value.`;
+    ? legacyMessage("basic.integerBacktick")
+    : legacyMessage("basic.integerPolicy", { value, column: columnName });
 }
 
 function mustExist(index, ctx, table, fieldName, labelColumn, targetValues, options = {}) {
@@ -460,7 +482,7 @@ function mustExist(index, ctx, table, fieldName, labelColumn, targetValues, opti
         });
         return;
       }
-      ctx.add(table, row.rowIndex, fieldName, `${fieldName} "${value}" not found for "${label}".`, {
+      ctx.add(table, row.rowIndex, fieldName, legacyMessage("basic.referenceNotFound", { field: fieldName, value, label }), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${fieldName} '${value}' not found for '${label}'`
       });
     }
@@ -478,8 +500,8 @@ function validatePropertiesStatReferences(ctx, table, itemStats, targetsAvailabl
       const value = String(row.get(statColumn) ?? "");
       if (!value || itemStats.has(asciiLower(value))) continue;
       const message = func === 17
-        ? `Unknown stat name '${value}'. This property has no effect. Use the exact Stat name from itemstatcost.txt.`
-        : `Unknown stat name '${value}'. Use the exact Stat name from itemstatcost.txt.`;
+        ? legacyMessage("basic.propertyUnknownStatNoEffect", { value })
+        : legacyMessage("basic.propertyUnknownStat", { value });
       ctx.add(table, row.rowIndex, statColumn, message, {
         severity: "warning",
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -509,7 +531,7 @@ function validateMonPetConsumeStatReferences(ctx, table, itemStats, targetsAvail
       if (!table.hasColumn(statColumn)) continue;
       const value = String(row.get(statColumn) ?? "");
       if (!value || itemStats.has(asciiLower(value))) continue;
-      const message = `Unknown stat name '${value}'. This Consume bonus is not applied; other Consume slots still work. Use the exact Stat name from itemstatcost.txt.`;
+      const message = legacyMessage("basic.monPetUnknownStat", { value });
       ctx.add(table, row.rowIndex, statColumn, message, {
         severity: "warning",
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -524,7 +546,7 @@ function requiredString(index, ctx, table, fieldName, labelColumn) {
     const label = clean(row.get(labelColumn));
     if (!label || label === "Expansion" || label === "Null" || label === "Elite Uniques" || label.startsWith("@")) return;
     if (!clean(row.get(fieldName))) {
-      const message = `${fieldName} is blank for "${label}". Add the localization key so TXTEditor and other tools can display the intended name.`;
+      const message = legacyMessage("basic.requiredString", { field: fieldName, label });
       ctx.add(table, row.rowIndex, fieldName, message, {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
       });
@@ -542,7 +564,7 @@ function validateSkillSummode(index, ctx, table, monModes = index.monModes, opti
     const summode = String(row.get("summode") ?? "");
     const skill = clean(row.get("skill"));
     if (!monModes.has(asciiLower(summode))) {
-      const message = `Unknown summode "${summode}" for "${skill}". Choose a valid code from monmode.txt.`;
+      const message = legacyMessage("basic.unknownSummode", { summode, skill });
       ctx.add(table, row.rowIndex, "summode", message, {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
       });
@@ -580,7 +602,7 @@ function validVersion(table, ctx, labelColumn, versionColumn, shouldConsider = n
     if (version === "0" || version === "1" || version === "100") return;
     if (shouldConsider && !shouldConsider(row)) return;
     if (isDummyVersionRow(table, row, labelColumn, versionColumn)) return;
-    const message = `Unusual version value "${version}" for "${label}". Use 0, 1, or 100 for this profile.`;
+    const message = legacyMessage("basic.unusualVersion", { version, label });
     ctx.add(table, row.rowIndex, versionColumn, message, {
       d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
     });
@@ -591,11 +613,16 @@ function fixed4UnknownMessage(value) {
   const effective = fixed4cc(value);
   const shownValue = markWhitespace(value);
   const shownEffective = markWhitespace(effective);
-  const markers = [];
-  if (String(value).includes(" ") || effective.includes(" ")) markers.push("␠ = space");
-  if (String(value).includes("\t") || effective.includes("\t")) markers.push("⇥ = tab");
-  const legend = markers.length ? ` ${markers.join(", ")}.` : "";
-  return `Unknown code '${shownValue}'. The game reads this code as '${shownEffective}'.${legend} Check the four-character code and letter case.`;
+  const hasSpace = String(value).includes(" ") || effective.includes(" ");
+  const hasTab = String(value).includes("\t") || effective.includes("\t");
+  const legend = hasSpace && hasTab
+    ? legacyTerm("spaceTabLegend")
+    : hasSpace
+      ? legacyTerm("spaceLegend")
+      : hasTab
+        ? legacyTerm("tabLegend")
+        : "";
+  return legacyMessage("basic.fixed4Unknown", { value: shownValue, effective: shownEffective, legend });
 }
 
 function markWhitespace(value) {

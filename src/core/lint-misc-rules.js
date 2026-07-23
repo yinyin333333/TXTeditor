@@ -1,17 +1,18 @@
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { clean, normalizeHeader, normalizeToken } from "./lint-table.js";
+import { legacyMessage, legacyTerm } from "./legacy-lint-i18n.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const MONSTER_LINT_RULES = [
-  rule("Monsters/ValidChains", "Valid monster chains", lintMonsterChains, true, PROFILE_OPTIONS, "Checks exact monstats.txt BaseId and NextInClass references and follows their resolved graph without relying on physical row order.")
+  rule("Monsters/ValidChains", lintMonsterChains, true, PROFILE_OPTIONS)
 ];
 
 export const SKILL_LINT_RULES = [
-  rule("Skills/EqualSkills", "Equal skills", lintEqualSkills, true, PROFILE_OPTIONS, "Checks whether a class has fewer skill entries than the largest class. Equal counts are not required by the game.")
+  rule("Skills/EqualSkills", lintEqualSkills, true, PROFILE_OPTIONS)
 ];
 
 export const STRING_LINT_RULES = [
-  rule("String/NoUntranslated", "No untranslated strings", lintNoUntranslatedStrings, true, PROFILE_OPTIONS, "Checks for blank translations and asks you to add the intended text.")
+  rule("String/NoUntranslated", lintNoUntranslatedStrings, true, PROFILE_OPTIONS)
 ];
 
 export function lintMonsterChains(index, ctx) {
@@ -42,7 +43,7 @@ export function lintMonsterChains(index, ctx) {
     if (entry.baseId) {
       const baseMatches = entriesById.get(entry.baseId);
       if (!baseMatches) {
-        ctx.add(table, entry.rowIndex, "baseid", `baseId "${entry.baseId}" does not exist for "${entry.id}".`, {
+        ctx.add(table, entry.rowIndex, "baseid", legacyMessage("misc.missingBaseId", { baseId: entry.baseId, id: entry.id }), {
           d2rMessage: `${table.displayName}, line ${entry.rowIndex + 1}: baseId '${entry.baseId}' doesn't exist for '${entry.id}'.`
         });
       } else if (baseMatches.length === 1) {
@@ -50,7 +51,7 @@ export function lintMonsterChains(index, ctx) {
       }
     }
     if (entry.nextInClass && !entriesById.has(entry.nextInClass)) {
-      ctx.add(table, entry.rowIndex, "nextinclass", `nextInClass for "${entry.id}" (${entry.nextInClass}) does not exist.`, {
+      ctx.add(table, entry.rowIndex, "nextinclass", legacyMessage("misc.missingNextInClass", { id: entry.id, nextInClass: entry.nextInClass }), {
         d2rMessage: `${table.displayName}, line ${entry.rowIndex + 1}: nextInClass for '${entry.id}' (${entry.nextInClass}) doesn't exist.`
       });
     }
@@ -73,7 +74,7 @@ export function lintMonsterChains(index, ctx) {
       const nextHop = hops + 1;
       if (nextHop > maximumHops) {
         const nodeCount = nextHop + 1;
-        const message = `nextInClass chain from "${start.id}" exceeds ${maximumHops} hops: "${current.id}" -> "${next.id}" reaches hop ${nextHop} (node ${nodeCount}).`;
+        const message = legacyMessage("misc.chainTooLong", { id: start.id, maximumHops, current: current.id, next: next.id, nextHop, nodeCount });
         ctx.add(table, current.rowIndex, "nextinclass", message, {
           d2rMessage: `${table.displayName}, line ${current.rowIndex + 1}: nextInClass chain from '${start.id}' exceeds ${maximumHops} hops; '${current.id}' -> '${next.id}' reaches hop ${nextHop} (node ${nodeCount}).`
         });
@@ -88,7 +89,8 @@ export function lintMonsterChains(index, ctx) {
           const labels = [...cycle.map((entry) => entry.id), next.id];
           const chain = labels.map((label) => `"${label}"`).join(" -> ");
           const hopLabel = nextHop === 1 ? "hop" : "hops";
-          ctx.add(table, current.rowIndex, "nextinclass", `nextInClass cycle detected after ${nextHop} ${hopLabel} from "${start.id}": ${chain}.`, {
+          const hopTerm = legacyTerm(hopLabel);
+          ctx.add(table, current.rowIndex, "nextinclass", legacyMessage("misc.chainCycle", { hop: nextHop, hopLabel: hopTerm, id: start.id, chain }), {
             d2rMessage: `${table.displayName}, line ${current.rowIndex + 1}: nextInClass cycle detected after ${nextHop} ${hopLabel} from '${start.id}': ${labels.map((label) => `'${label}'`).join(" -> ")}.`
           });
         }
@@ -115,7 +117,7 @@ export function lintEqualSkills(index, ctx) {
     if (!code) return;
     const count = counts.get(code) ?? 0;
     if (count !== expected) {
-      const message = `This class has ${count} skills while the largest class has ${expected}. Check whether entries are missing; equal counts are not required by the game.`;
+      const message = legacyMessage("misc.equalSkills", { count, largestCount: expected });
       ctx.add(playerClass, row.rowIndex, "code", message, {
         severity: "warning",
         d2rMessage: `${playerClass.displayName}, line ${row.rowIndex + 1}: ${message}`
@@ -134,7 +136,7 @@ export function lintNoUntranslatedStrings(index, ctx) {
       if (!key) return;
       for (const columnName of presentLanguages) {
         if (!clean(row.get(columnName))) {
-          const message = `Translation for "${key}" is blank in column ${columnName}. Add the intended text.`;
+          const message = legacyMessage("misc.untranslatedString", { key, column: columnName });
           ctx.add(table, row.rowIndex, columnName, message, {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`

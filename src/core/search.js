@@ -30,6 +30,34 @@ export function findInTable(doc, query, start = { row: 0, column: 0 }, options =
   return null;
 }
 
+export function replaceNextInTable(doc, query, replacement, start = { row: 0, column: 0 }, options = {}) {
+  const found = findInTable(doc, query, start, { ...options, includeStart: true });
+  if (!found) return { found: null, edits: [], replacementCount: 0 };
+  const current = doc.getCell(found.row, found.column);
+  const replaced = replaceText(current, query, replacement, { ...options, limit: 1 });
+  return {
+    found,
+    edits: replaced.count ? [{ row: found.row, column: found.column, value: replaced.value }] : [],
+    replacementCount: replaced.count
+  };
+}
+
+export function replaceAllInTable(doc, query, replacement, options = {}) {
+  if (!query) return { edits: [], replacementCount: 0 };
+  const scope = normalizeSearchScope(options.scope);
+  const edits = [];
+  let replacementCount = 0;
+  for (let index = 0; index < searchCandidateCount(doc, scope); index++) {
+    const { row, column } = searchCandidateAt(doc, scope, index);
+    const current = doc.getCell(row, column);
+    const replaced = replaceText(current, query, replacement, options);
+    if (!replaced.count) continue;
+    edits.push({ row, column, value: replaced.value });
+    replacementCount += replaced.count;
+  }
+  return { edits, replacementCount };
+}
+
 export function normalizeSearchDirection(direction) {
   return direction === SEARCH_DIRECTION_BACKWARD ? SEARCH_DIRECTION_BACKWARD : SEARCH_DIRECTION_FORWARD;
 }
@@ -67,4 +95,25 @@ function clamp(value, min, max) {
 function searchableText(value, options = {}) {
   const text = String(value);
   return options.matchCase ? text : text.toLocaleLowerCase();
+}
+
+function replaceText(value, query, replacement, options = {}) {
+  const source = String(value);
+  const needle = searchableText(query, options);
+  if (!needle) return { value: source, count: 0 };
+  const haystack = searchableText(source, options);
+  const replacementText = String(replacement);
+  const limit = Number.isFinite(options.limit) ? Math.max(0, options.limit) : Number.POSITIVE_INFINITY;
+  let cursor = 0;
+  let count = 0;
+  let result = "";
+  while (cursor <= source.length && count < limit) {
+    const match = haystack.indexOf(needle, cursor);
+    if (match < 0) break;
+    result += source.slice(cursor, match) + replacementText;
+    cursor = match + String(query).length;
+    count += 1;
+  }
+  if (!count) return { value: source, count: 0 };
+  return { value: result + source.slice(cursor), count };
 }

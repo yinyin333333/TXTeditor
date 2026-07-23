@@ -52,6 +52,8 @@ import { createSearchController } from "./ui/controllers/search-controller.js";
 import { createSettingsController } from "./ui/controllers/settings-controller.js";
 import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
+import { createLocaleController, initializeLocale } from "./ui/controllers/locale-controller.js";
+import { t, tText } from "./core/i18n.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
   uiPerfSamples,
@@ -62,10 +64,10 @@ const {
   recordLintEngineEvent
 } = createAppPerf({ state });
 document.documentElement.dataset.theme = savedTheme;
+initializeLocale({ state, storage: localStorage, ownerDocument: document });
 document.documentElement.style.setProperty("--grid-font", savedGridFont);
 document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState.sidebarWidth}px`);
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
-
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
 let documentController = null, documentEditorController = null, lspController = null;
@@ -80,9 +82,7 @@ const jsonEditorController = createJsonEditorController({
 });
 const askText = (options) => askPromptText({ ...options, escapeHtml, host: els.host });
 const promptNumber = (options) => promptForNumber({ ...options, askText });
-
 const isDevelopmentMode = ["localhost", "127.0.0.1", ""].includes(location.hostname);
-
 const diagnosticsController = createDiagnosticsController({
   state,
   els,
@@ -103,7 +103,6 @@ const diagnosticsController = createDiagnosticsController({
   saveSelectionState,
   storage: localStorage
 });
-
 const EMPTY_DOC = TableDocument.fromText("Empty", "");
 const dockController = createDockController({
   state,
@@ -201,19 +200,12 @@ gridCommandController = createGridCommandController({
   saveSelectionState,
   renderChrome,
   showError,
+  promptNumber,
   applyFreezeToDoc,
   rowsForContextOperation,
   columnsFromSelection
 });
-const {
-  toggleFreeze,
-  unhideAll,
-  zoomBy,
-  zoomReset,
-  resetRowHeights,
-  resizeFit,
-  cloneRows
-} = gridCommandController;
+const { toggleFreeze, unhideAll, zoomBy, zoomReset, resetRowHeights, goToRow, resizeFit, cloneRows, cloneColumns } = gridCommandController;
 lspController = createLspController({
   state,
   els,
@@ -243,6 +235,7 @@ lspController = createLspController({
     }),
   handleWatchedFilesChanged: (payload) => documentController?.handleWatchedFilesChanged(payload)
 });
+const localeController = createLocaleController({ state, storage: localStorage, ownerDocument: document, legacyActive: isLegacyLintEngine, scheduleLegacyLintFull, lspController, activeDoc, setLintDiagnostics, updateGridDiagnostics, renderChrome, refreshJsonEditorLocale: jsonEditorController.refreshLocale });
 exposeTxteditorPerf(window, {
   uiPerfSamples,
   lintEngineEvents,
@@ -266,6 +259,7 @@ const settingsController = createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
+  stopVectorSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: (options) => lspController.ensureStandaloneSession(activeDoc(), options),
   resetLegacyWorkspaceIndex,
   refreshJsonEditorAppearance: jsonEditorController.refreshAppearance,
@@ -273,6 +267,8 @@ const settingsController = createSettingsController({
   renderChrome,
   reportBackgroundFailure,
   showError,
+  t,
+  setLocale: localeController.setLocale,
   escapeHtml
 });
 const shortcutSettingsController = createShortcutSettingsController({
@@ -304,7 +300,7 @@ documentController = createDocumentController({
   handleLspUpdateError,
   reportLspCloseFailure,
   lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
-  lspStartWorkspace,
+  lspStartWorkspace, lspStopSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: lspController.ensureStandaloneSession,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -314,7 +310,8 @@ documentController = createDocumentController({
   cancelLegacyLintJobs,
   isVectorLintEngine,
   isLegacyLintEngine,
-  updateGridDiagnostics,
+  setLintDiagnostics, updateGridDiagnostics,
+  resetWorkspaceView: () => shellController?.resetWorkspaceView(),
   scrollProblemsToActiveFile
 });
 const searchController = createSearchController({
@@ -324,6 +321,7 @@ const searchController = createSearchController({
   activeDoc,
   updateActiveProblemHighlight,
   saveSelectionState,
+  applyEdits,
   jsonSearch: jsonEditorController,
   focusActiveEditor
 });
@@ -361,20 +359,25 @@ const commandController = createCommandController({
   showError,
   handlers: {
     openFile: documentController.openFile,
-    openFolder: documentController.openFolder,
+    openFolder: documentController.openFolder, closeAll: documentController.closeAll,
     saveFile: documentController.saveFile,
     saveAs: documentController.saveAs,
     undo,
     redo,
     showSearch: searchController.showSearch,
     findNext: searchController.findNext,
+    findPrevious: searchController.findPrevious,
+    showReplace: searchController.showReplace,
+    goToRow,
+    nextTab: () => shellController?.switchTab(1),
+    previousTab: () => shellController?.switchTab(-1),
     copySelection,
     pasteSelection,
     cutSelection,
     selectAll,
     addRows,
     insertRows,
-    cloneRows,
+    cloneRows, cloneColumns,
     addColumns,
     insertColumns,
     unhideAll,
@@ -436,7 +439,7 @@ shellController = createShellController({
   syncDockLayout,
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
-  ensureDocumentSession: lspController.ensureStandaloneSession,
+  ensureDocumentSession: lspController.ensureStandaloneSession, commitActiveEditor,
   saveSelectionState,
   recordUiPerf,
   perfNow,
@@ -477,6 +480,7 @@ const eventController = createAppEventController({
   selectAll,
   jsonEditorOwnsTarget: jsonEditorController.editorOwnsTarget,
   handleExternalChangeDialogClick: documentController.handleExternalChangeDialogClick,
+  commitActiveEditor,
   focusActiveEditor
 });
 renderChrome();
@@ -515,12 +519,12 @@ function legacyLintDisplayActive() {
 }
 
 function effectiveVectorLspHoverEnabled() {
-  return effectiveVectorLspHover({ engine: state.lint.engine, vectorLspHover: state.vectorLspHover });
+  return effectiveVectorLspHover({ engine: state.lint.engine, lintEnabled: state.lint.enabled, vectorLspHover: state.vectorLspHover });
 }
 
 function execute(command) {
-  if (!hasOpenDocument()) return showError("Open a file before editing.");
-  if (!isTableDocument(activeDoc())) return showError("This command is available only for table documents.");
+  if (!hasOpenDocument()) return showError(tText("error.openDocument"));
+  if (!isTableDocument(activeDoc())) return showError(tText("error.tableOnly"));
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
@@ -537,9 +541,10 @@ function finishCommand(doc, command, context = "edit", started = perfNow()) {
   saveSelectionState(doc);
   grid.layout();
   const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange : command.lspChange;
-  if (contentChanged && documentChangeSyncRoute(state.lint.engine) === "vector-update") {
+  const syncRoute = documentChangeSyncRoute(state.lint.engine, state.lint.enabled);
+  if (contentChanged && syncRoute === "vector-update") {
     lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
-  } else if (contentChanged && !doc.largeFileMode) {
+  } else if (contentChanged && syncRoute === "legacy-lint-edit" && !doc.largeFileMode) {
     scheduleLegacyLintForEdit(doc);
   }
   recordUiPerf("row-command", started, { changedRows: Array.isArray(lspChange) ? lspChange.length : lspChange?.rows?.length ?? 0, contentChanged });
@@ -641,9 +646,9 @@ function scheduleHoverPrewarm(reason = "schedule") {
   return lspController.scheduleHoverPrewarm(reason);
 }
 
-function updateGridDiagnostics() {
+function updateGridDiagnostics(options) {
   jsonEditorController.reconcileDiagnosticHighlight(state.lint.diagnostics);
-  return diagnosticsController.updateGridDiagnostics();
+  return diagnosticsController.updateGridDiagnostics(options);
 }
 
 function docDiagnosticSeverity(_doc) {
@@ -675,10 +680,7 @@ function showPalette() {
   return commandSurfaceController.showPalette();
 }
 
-function renderPalette() {
-  return commandSurfaceController.renderPalette();
-}
-
+function renderPalette() { return commandSurfaceController.renderPalette(); }
 function showContextMenu(args) {
   return commandSurfaceController.showContextMenu(args);
 }
@@ -698,9 +700,8 @@ function renderLintControls() {
 function renderChrome() {
   return shellController.renderChrome();
 }
-
 function renderDiagnosticsChrome() {
-  return shellController.renderChrome();
+  return shellController.renderDiagnosticsChrome();
 }
 
 function renderProblemsPanelIfNeeded() {
@@ -710,7 +711,6 @@ function renderProblemsPanelIfNeeded() {
 function updateActiveProblemHighlight({ scroll = false } = {}) {
   return diagnosticsController.updateActiveProblemHighlight({ scroll });
 }
-
 function lintSummaryText() {
   return diagnosticsController.lintSummaryText();
 }

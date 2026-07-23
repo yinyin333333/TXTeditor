@@ -1,14 +1,15 @@
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { asciiCaseInsensitiveValues, asciiLower, exactOuterUnquote, fitsFixed4cc, fixed4ccValues, fixed4Key, referenceTable } from "./lint-reference-semantics.js";
 import { clean } from "./lint-table.js";
+import { legacyMessage, legacyTerm } from "./legacy-lint-i18n.js";
 
 const TREASURE_MODIFIERS = new Set(["mul", "cu", "cs", "cr", "cm", "ce", "cg", "ma", "mg"]);
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const TREASURE_LINT_RULES = [
-  rule("TC/ValidTreasure", "Valid treasure references", lintTreasureReferences, true, PROFILE_OPTIONS, "Checks four-character item codes, treasure/unique/set names, valid modifiers, and text ignored after an unknown modifier. Letter case does not matter for names."),
-  rule("TC/ValidNegativePicks", "Valid negative picks", lintTreasureNegativePicks, true, PROFILE_OPTIONS, "Checks that non-empty probability fields on negative-picks rows contain integers; the game does not require their sum to equal abs(Picks)."),
-  rule("TC/ValidProbs", "Valid probabilities", lintTreasureProbabilities, true, PROFILE_OPTIONS, "Explains entries skipped by blank or nonpositive probabilities and fields ignored after the first empty Item slot.")
+  rule("TC/ValidTreasure", lintTreasureReferences, true, PROFILE_OPTIONS),
+  rule("TC/ValidNegativePicks", lintTreasureNegativePicks, true, PROFILE_OPTIONS),
+  rule("TC/ValidProbs", lintTreasureProbabilities, true, PROFILE_OPTIONS)
 ];
 
 export function lintTreasureReferences(index, ctx) {
@@ -51,7 +52,10 @@ export function lintTreasureReferences(index, ctx) {
         || uniqueItems.has(named)
         || setItems.has(named);
       if (!valid) {
-        ctx.add(table, row.rowIndex, columnName, `Unknown treasure reference "${value}" in ${className || "Treasure Class"}.`, {
+        ctx.add(table, row.rowIndex, columnName, legacyMessage("treasure.unknownReference", {
+          value,
+          className: className || legacyTerm("treasureClass")
+        }), {
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: can't find '${parsed.base}' for '${columnName}' in TC '${className}'`
         });
         continue;
@@ -74,7 +78,7 @@ export function lintTreasureNegativePicks(index, ctx) {
       const value = clean(row.get(columnName));
       if (!value) continue;
       if (!isIntegerText(value)) {
-        ctx.add(table, row.rowIndex, columnName, `Probability ${columnName} must be numeric when picks is negative.`);
+        ctx.add(table, row.rowIndex, columnName, legacyMessage("treasure.negativePickProbability", { column: columnName }));
       }
     }
   });
@@ -98,13 +102,13 @@ export function lintTreasureProbabilities(index, ctx) {
       const itemPresent = exactOuterUnquote(item) !== "";
       if (terminated) {
         if (itemPresent) {
-          ctx.add(table, row.rowIndex, itemColumn, `${itemColumn} is ignored because the first empty Item slot already ended this treasure class.`, {
+          ctx.add(table, row.rowIndex, itemColumn, legacyMessage("treasure.ignoredAfterEmptyItem", { column: itemColumn }), {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${itemColumn}' is ignored after the first empty Item slot.`
           });
         }
         if (hasProbabilityColumn && probability) {
-          ctx.add(table, row.rowIndex, probColumn, `${probColumn} is ignored because the first empty Item slot already ended this treasure class.`, {
+          ctx.add(table, row.rowIndex, probColumn, legacyMessage("treasure.ignoredAfterEmptyItem", { column: probColumn }), {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${probColumn}' is ignored after the first empty Item slot.`
           });
@@ -114,7 +118,7 @@ export function lintTreasureProbabilities(index, ctx) {
       if (!itemPresent) {
         terminated = true;
         if (hasProbabilityColumn && probability) {
-          ctx.add(table, row.rowIndex, probColumn, `${probColumn} is orphaned and ignored because ${itemColumn} is empty.`, {
+          ctx.add(table, row.rowIndex, probColumn, legacyMessage("treasure.orphanProbability", { column: probColumn, itemColumn }), {
             severity: "warning",
             d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${probColumn}' is ignored because '${itemColumn}' is empty.`
           });
@@ -125,17 +129,17 @@ export function lintTreasureProbabilities(index, ctx) {
         continue;
       }
       if (!probability) {
-        ctx.add(table, row.rowIndex, probColumn, `This Treasure Class entry is skipped because ${probColumn} is blank.`, {
+        ctx.add(table, row.rowIndex, probColumn, legacyMessage("treasure.blankProbability", { column: probColumn }), {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: This Treasure Class entry is skipped because '${probColumn}' is blank ('${itemColumn}').`
         });
       } else if (!isIntegerText(probability)) {
-        ctx.add(table, row.rowIndex, probColumn, `${probColumn} is not a whole number. Its converted value may cause this Treasure Class entry to be skipped.`, {
+        ctx.add(table, row.rowIndex, probColumn, legacyMessage("treasure.nonIntegerProbability", { column: probColumn }), {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${probColumn}' is not a whole number and may cause '${itemColumn}' to be skipped.`
         });
       } else if (Number(probability) <= 0) {
-        ctx.add(table, row.rowIndex, probColumn, `This Treasure Class entry is skipped because ${probColumn} is zero or negative.`, {
+        ctx.add(table, row.rowIndex, probColumn, legacyMessage("treasure.nonPositiveProbability", { column: probColumn }), {
           severity: "warning",
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: This Treasure Class entry is skipped because '${probColumn}' is ${probability} ('${itemColumn}').`
         });
@@ -171,14 +175,14 @@ function validateTreasureModifier(ctx, table, rowIndex, columnName, parsed, clas
     const numeric = /^-?\d+$/.test(modifier.parameter) ? BigInt(modifier.parameter) : 0n;
     const wrapped = numeric % 65536n;
     const stored = Number(wrapped < 0n ? wrapped + 65536n : wrapped);
-    ctx.add(table, rowIndex, columnName, `Modifier '${modifier.raw}' is outside 0..65535. The game converts it to ${stored}. Replace it with the number you actually want.`, {
+    ctx.add(table, rowIndex, columnName, legacyMessage("treasure.modifierRange", { modifier: modifier.raw, stored }), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: Modifier '${modifier.raw}' for '${columnName}' in TC '${className}' is outside 0..65535. The game converts it to ${stored}. Replace it with the number you actually want.`
     });
   }
   if (parsed.ignoredSuffix !== null) {
     const stoppedAt = parsed.ignoredSuffix.split(",")[0] || "(empty modifier)";
-    ctx.add(table, rowIndex, columnName, `The game stops at '${stoppedAt}'. The base and modifiers before it still work; '${stoppedAt}' and everything after it are ignored.`, {
+    ctx.add(table, rowIndex, columnName, legacyMessage("cube.stopsAfterModifier", { stoppedAt }), {
       severity: "warning",
       d2rMessage: `${table.displayName}, line ${rowIndex + 1}: The game stops at '${stoppedAt}' for '${columnName}' in TC '${className}'. The base and modifiers before it still work; '${stoppedAt}' and everything after it are ignored.`
     });
@@ -187,7 +191,7 @@ function validateTreasureModifier(ctx, table, rowIndex, columnName, parsed, clas
 
 function validateTreasureFieldWidth(ctx, table, rowIndex, columnName, parsed, className) {
   if (new TextEncoder().encode(parsed.raw).length < 64) return;
-  ctx.add(table, rowIndex, columnName, `Treasure item text is too long. Keep the value under 64 UTF-8 bytes.`, {
+  ctx.add(table, rowIndex, columnName, legacyMessage("treasure.textTooLong"), {
     severity: "warning",
     d2rMessage: `${table.displayName}, line ${rowIndex + 1}: '${columnName}' in TC '${className}' is too long. Keep it under 64 UTF-8 bytes.`
   });

@@ -1,4 +1,5 @@
 import { isTauriRuntime, tauriApi } from "../core/platform/tauri-api.js";
+import { tText } from "../core/i18n.js";
 
 export function readJsonStorage(key, fallback, storage = localStorage) {
   try {
@@ -21,7 +22,7 @@ export function createToastFeedback(els) {
   let toastTimer = 0;
   function showError(error) {
     const message = error instanceof Error ? error.message : String(error);
-    els.toast.textContent = message || "Action failed.";
+    els.toast.textContent = message || tText("error.actionFailed");
     els.toast.classList.remove("hidden");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => els.toast.classList.add("hidden"), 5200);
@@ -40,12 +41,12 @@ export function createToastFeedback(els) {
 export async function writeClipboardText(text) {
   if (isTauriRuntime()) {
     const { invoke } = await tauriApi();
-    await invoke("plugin:clipboard-manager|write_text", { text: String(text) });
+    await invoke("write_clipboard_text", { text: String(text) });
     return;
   }
   const clipboard = globalThis.navigator?.clipboard;
   if (!clipboard?.writeText) {
-    throw new Error("Clipboard write is unavailable. Allow clipboard access for this site or use the desktop build.");
+    throw new Error(tText("error.clipboardWriteUnavailable"));
   }
   await clipboard.writeText(String(text));
 }
@@ -53,11 +54,11 @@ export async function writeClipboardText(text) {
 export async function readClipboardText() {
   if (isTauriRuntime()) {
     const { invoke } = await tauriApi();
-    return invoke("plugin:clipboard-manager|read_text");
+    return invoke("read_clipboard_text");
   }
   const clipboard = globalThis.navigator?.clipboard;
   if (!clipboard?.readText) {
-    throw new Error("Clipboard read is unavailable. Focus TXTeditor and allow clipboard access for this site.");
+    throw new Error(tText("error.clipboardReadUnavailable"));
   }
   return clipboard.readText();
 }

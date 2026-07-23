@@ -342,7 +342,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
 
     await controller.startWorkspace("E:\\Mods\\B", { contextMode: "sibling" });
     assert.deepEqual(calls, [
-      ["lsp_start", { workspacePath: "E:\\Mods\\B", contextMode: "sibling", generation: 1 }],
+      ["lsp_start", { workspacePath: "E:\\Mods\\B", contextMode: "sibling", generation: 1, locale: "enUS" }],
       ["lsp_open_file", { uri: docToUri(second), version: 1, text: second.toText(), generation: 1 }]
     ]);
 
@@ -383,7 +383,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
     await documentController.closeTab(1);
     assert.deepEqual(calls.slice(2), [
       ["lsp_close_file", { uri: docToUri(second), generation: 1 }],
-      ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2 }],
+      ["lsp_start", { workspacePath: "E:\\Mods\\A", contextMode: "sibling", generation: 2, locale: "enUS" }],
       ["lsp_open_file", { uri: docToUri(first), version: 1, text: first.toText(), generation: 2 }]
     ]);
     assert.deepEqual(state.docs, [first]);
@@ -696,7 +696,7 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
     assert.equal(hoverCalls.length, 2);
     assert.equal(gridCalls.filter((call) => call[0] === "hover").at(-1)[3], "SECOND");
     assert.deepEqual(tauriCalls, [
-      ["lsp_start", { workspacePath: "E:\\Data", generation: 1 }],
+      ["lsp_start", { workspacePath: "E:\\Data", generation: 1, locale: "enUS" }],
       ["lsp_open_file", { uri, version: 1, text: doc.toText(), generation: 1 }]
     ]);
   } finally {
@@ -1205,6 +1205,22 @@ test("Vector-LSP tooltip does not repeat guidance already present in the message
   }), "Invalid calculation: Function 'min()' expects 2 arguments, got 1\n\nWhat to do:\nUse exactly 2 arguments.");
 });
 
+test("localized keyed diagnostics show localized structured guidance", () => {
+  const message = "SkillDesc 계산식에 소수가 포함되어 있습니다 (`-6.25`). 게임은 정수 부분만 사용하고 소수 부분은 무시합니다 (사용: `-6`, 무시: `.25`).";
+  assert.equal(diagnosticTooltipText({
+    severity: "warning",
+    message,
+    data: {
+      localizedMessage: true,
+      localizedGuidanceHeading: "수정 방법",
+      localizedGuidance: "의도에 맞는 정수 계산식으로 바꾸세요.",
+      messageKey: "plugin.calc.skilldesc-decimal-prefix",
+      kind: "decimal-policy",
+      hint: "Use an integer expression that matches your intent."
+    }
+  }), `${message}\n\n수정 방법:\n의도에 맞는 정수 계산식으로 바꾸세요.`);
+});
+
 test("Vector-LSP tooltip uses structured missing-token data for insertion hints", () => {
   const formula = "min(5,1";
   const diagnostic = {
@@ -1642,6 +1658,7 @@ test("Vector-LSP hover can be disabled without clearing baseline hover behavior"
   assert.equal(vectorLspHoverStorageValue(true), "on");
   assert.equal(vectorLspHoverStorageValue(false), "off");
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, vectorLspHover: true }), true);
+  assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, lintEnabled: false, vectorLspHover: true }), false);
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_VECTOR, vectorLspHover: false }), false);
   assert.equal(effectiveVectorLspHover({ engine: LINT_ENGINE_LEGACY, vectorLspHover: true }), false);
   const target = makeVectorHoverTarget({ uri: "file:///skills.txt", fileName: "skills.txt", row: 2, column: 0, cellValue: "cap" });
@@ -1724,6 +1741,8 @@ test("lint engine selector defaults to Vector-LSP and persists separately from l
   assert.equal(documentChangeSyncRoute(LINT_ENGINE_LEGACY), "legacy-lint-edit");
   assert.equal(documentOpenSyncRoute(LINT_ENGINE_VECTOR), "vector-open");
   assert.equal(documentOpenSyncRoute(LINT_ENGINE_LEGACY), "legacy-lint-open");
+  assert.equal(documentChangeSyncRoute(LINT_ENGINE_VECTOR, false), "disabled");
+  assert.equal(documentOpenSyncRoute(LINT_ENGINE_VECTOR, false), "disabled");
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_VECTOR, lspStarted: true }), true);
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_VECTOR, lspStarted: false }), false);
   assert.equal(vectorSessionAvailable({ engine: LINT_ENGINE_LEGACY, lspStarted: true }), false);
@@ -2249,7 +2268,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
     });
 
     await assert.rejects(() => controller.startWorkspace("E:\\Workspace"), /spawn failed/);
-    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace", generation: 1 }]]);
+    assert.deepEqual(calls, [["lsp_start", { workspacePath: "E:\\Workspace", generation: 1, locale: "enUS" }]]);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
     assert.equal(state.lint.status, "Vector-LSP startup failed");

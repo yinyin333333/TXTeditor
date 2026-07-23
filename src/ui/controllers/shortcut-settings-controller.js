@@ -8,6 +8,7 @@ import {
   shortcutDisplayForAction,
   validateShortcutChord
 } from "../shortcut-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createShortcutSettingsController({
   state,
@@ -28,14 +29,14 @@ export function createShortcutSettingsController({
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML = `
       <div class="modal shortcut-modal" role="dialog" aria-modal="true" aria-labelledby="shortcutSettingsTitle">
-        <h2 id="shortcutSettingsTitle">Keyboard Shortcuts</h2>
-        <p class="shortcut-settings-hint">Click a shortcut, then press the new key combination. Changes apply only after Save.</p>
+        <h2 id="shortcutSettingsTitle" data-shortcut-i18n="toolbar.shortcuts">${tText("toolbar.shortcuts")}</h2>
+        <p class="shortcut-settings-hint" data-shortcut-i18n="shortcut.hint">${tText("shortcut.hint")}</p>
         <div class="shortcut-settings-list" data-shortcut-list></div>
         <div class="modal-actions shortcut-modal-actions">
-          <button data-shortcut-reset>Reset All to Defaults</button>
+          <button data-shortcut-reset data-shortcut-i18n="shortcut.resetAll">${tText("shortcut.resetAll")}</button>
           <span class="shortcut-actions-spacer"></span>
-          <button data-shortcut-choice="save">Save</button>
-          <button data-shortcut-choice="cancel">Cancel</button>
+          <button data-shortcut-choice="save" data-shortcut-i18n="toolbar.save">${tText("toolbar.save")}</button>
+          <button data-shortcut-choice="cancel" data-shortcut-i18n="common.cancel">${tText("common.cancel")}</button>
         </div>
       </div>`;
     document.body.append(backdrop);
@@ -58,18 +59,18 @@ export function createShortcutSettingsController({
         displaced.push({ definition, removed, unassigned });
         rowMessages.set(
           definition.action,
-          `${removed.join(" / ")} was reassigned to ${target.label}.${unassigned ? " This command is now unassigned." : ""}`
+          tText("shortcut.reassigned", { keys: removed.join(" / "), target: target.label, suffix: unassigned ? tText("shortcut.nowUnassigned") : "" })
         );
       }
 
       draft[action] = assigned;
       if (displaced.length) {
         const previousAssignments = displaced
-          .map(({ definition, unassigned }) => `${definition.label}${unassigned ? " (now unassigned)" : ""}`)
+          .map(({ definition, unassigned }) => `${definition.label}${unassigned ? tText("shortcut.nowUnassignedLabel") : ""}`)
           .join(", ");
-        rowMessages.set(action, `${assigned.join(" / ")} was previously assigned to ${previousAssignments}.`);
+        rowMessages.set(action, tText("shortcut.previouslyAssigned", { keys: assigned.join(" / "), targets: previousAssignments }));
       } else if (restoringDefault) {
-        rowMessages.set(action, "Restored to default. Save to apply.");
+        rowMessages.set(action, tText("shortcut.restored"));
       }
     };
 
@@ -77,18 +78,18 @@ export function createShortcutSettingsController({
       const groups = [...new Set(SHORTCUT_DEFINITIONS.map(({ group }) => group))];
       list.innerHTML = groups.map((group) => `
         <section class="shortcut-group">
-          <h3>${escapeHtml(group)}</h3>
+          <h3>${escapeHtml(tText(group))}</h3>
           ${SHORTCUT_DEFINITIONS.filter((definition) => definition.group === group).map((definition) => {
             const recording = recordingAction === definition.action;
-            const display = shortcutDisplayForAction(definition.action, draft) || "Unassigned";
+            const display = shortcutDisplayForAction(definition.action, draft) || tText("shortcut.unassigned");
             const message = rowMessages.get(definition.action) ?? "";
             return `
               <div class="shortcut-row">
                 <span class="shortcut-command-label">${escapeHtml(definition.label)}</span>
                 <button class="shortcut-capture${recording ? " recording" : ""}" data-shortcut-record="${escapeHtml(definition.action)}" aria-pressed="${recording ? "true" : "false"}">
-                  ${recording ? "Press shortcut..." : escapeHtml(display)}
+                  ${recording ? tText("shortcut.press") : escapeHtml(display)}
                 </button>
-                <button class="shortcut-default" data-shortcut-default="${escapeHtml(definition.action)}" title="Restore default shortcut">Default</button>
+                <button class="shortcut-default" data-shortcut-default="${escapeHtml(definition.action)}" title="${tText("shortcut.restoreDefault")}">${tText("shortcut.default")}</button>
                 ${message ? `<div class="shortcut-row-message" data-shortcut-message="${escapeHtml(definition.action)}" aria-live="polite">${escapeHtml(message)}</div>` : ""}
               </div>`;
           }).join("")}
@@ -99,7 +100,7 @@ export function createShortcutSettingsController({
         button.addEventListener("click", () => {
           recordingAction = button.dataset.shortcutRecord;
           rowMessages.clear();
-          rowMessages.set(recordingAction, "Press the new shortcut. Escape cancels recording.");
+          rowMessages.set(recordingAction, tText("shortcut.pressNew"));
           renderRows();
           list.querySelector(`[data-shortcut-record='${recordingAction}']`)?.focus();
         });
@@ -114,22 +115,32 @@ export function createShortcutSettingsController({
       }
     };
 
+    const refreshForLocale = () => {
+      if (closed) return;
+      rowMessages.clear();
+      for (const element of backdrop.querySelectorAll("[data-shortcut-i18n]")) {
+        element.textContent = tText(element.dataset.shortcutI18n);
+      }
+      renderRows();
+    };
+
     const finish = (save = false) => {
       if (closed) return;
       if (save) {
         const conflict = shortcutConflicts(draft)[0];
         if (conflict) {
           for (const action of conflict.actions) {
-            rowMessages.set(action, `${conflict.chord} is still assigned to ${conflict.labels.join(" and ")}.`);
+            rowMessages.set(action, tText("shortcut.conflict", { chord: conflict.chord, labels: conflict.labels.join(" and ") }));
           }
           renderRows();
           return;
         }
         state.shortcuts = saveShortcutBindings(draft, storage);
-        showToast("Keyboard shortcuts saved.");
+        showToast(tText("shortcut.saved"));
       }
       closed = true;
       document.removeEventListener("keydown", onKeydown, true);
+      document.removeEventListener("txteditor-locale-changed", refreshForLocale);
       backdrop.remove();
       els.host.focus();
     };
@@ -170,6 +181,7 @@ export function createShortcutSettingsController({
     };
 
     document.addEventListener("keydown", onKeydown, true);
+    document.addEventListener("txteditor-locale-changed", refreshForLocale);
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop) return finish(false);
       const choice = event.target.closest("[data-shortcut-choice]")?.dataset.shortcutChoice;

@@ -48,6 +48,9 @@ function table(rows) {
     columnCount: Math.max(...rows.map((row) => row.length)),
     getCell(row, column) {
       return rows[row]?.[column] ?? "";
+    },
+    setCell(row, column, value) {
+      rows[row][column] = String(value);
     }
   };
 }
@@ -99,6 +102,10 @@ function searchHarness({
     focus: () => {},
     select: () => {}
   });
+  const searchReplaceInput = eventTarget({ value: "replacement", focus: () => {}, select: () => {} });
+  const searchReplaceRow = { classList: classList(["hidden"]) };
+  const searchReplaceActions = { classList: classList(["hidden"]) };
+  const searchTitle = { textContent: "Find" };
   const selection = {
     focus: { ...focus },
     set(row, column) {
@@ -110,11 +117,16 @@ function searchHarness({
     selection
   };
   const scrolls = [];
+  const doc = table(rows);
   const controller = createSearchController({
     state,
     els: {
       host: { focus: () => {} },
       searchInput,
+      searchReplaceInput,
+      searchReplaceRow,
+      searchReplaceActions,
+      searchTitle,
       searchPanel: panel,
       searchStatus: { textContent: "" }
     },
@@ -123,10 +135,25 @@ function searchHarness({
       scrollByWheel: () => {},
       draw: () => {}
     },
-    activeDoc: () => table(rows),
-    updateActiveProblemHighlight: () => {}
+    activeDoc: () => doc,
+    updateActiveProblemHighlight: () => {},
+    applyEdits: (edits) => edits.forEach(({ row, column, value }) => doc.setCell(row, column, value))
   });
-  return { controller, handle, modal, panel, scopeInput, searchInput, state, scrolls };
+  return {
+    controller,
+    handle,
+    modal,
+    panel,
+    scopeInput,
+    searchInput,
+    searchReplaceInput,
+    searchReplaceRow,
+    searchReplaceActions,
+    searchTitle,
+    state,
+    scrolls,
+    rows
+  };
 }
 
 test("opening Find starts again at the active cell and subsequent searches advance and wrap", () => {
@@ -237,4 +264,28 @@ test("search modal clamp keeps all edges within the configured margin", () => {
     viewportWidth: 800,
     viewportHeight: 600
   }), { left: 8, top: 372 });
+});
+
+test("Find and Replace mode exposes replacement controls and applies edit batches", () => {
+  const harness = searchHarness({
+    rows: [["name", "description"], ["bash", "bash bash"], ["zeal", "bash"]],
+    focus: { row: 1, column: 0 },
+    query: "bash"
+  });
+  harness.searchReplaceInput.value = "hit";
+
+  harness.controller.showReplace();
+  assert.equal(harness.searchTitle.textContent, "Find and Replace");
+  assert.equal(harness.searchReplaceRow.classList.contains("hidden"), false);
+  assert.equal(harness.searchReplaceActions.classList.contains("hidden"), false);
+
+  assert.equal(harness.controller.replaceNext(), true);
+  assert.equal(harness.rows[1][0], "hit");
+  assert.equal(harness.controller.replaceAll(), 3);
+  assert.deepEqual(harness.rows, [["name", "description"], ["hit", "hit hit"], ["zeal", "hit"]]);
+
+  harness.controller.showSearch();
+  assert.equal(harness.searchTitle.textContent, "Find");
+  assert.equal(harness.searchReplaceRow.classList.contains("hidden"), true);
+  assert.equal(harness.searchReplaceActions.classList.contains("hidden"), true);
 });

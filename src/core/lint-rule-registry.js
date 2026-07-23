@@ -1,7 +1,16 @@
 export const PROFILE_OPTIONS = ["RotW", "2.4"];
 export const DEFAULT_PROFILE = "RotW";
+import { tTextOr } from "./i18n.js";
+import { legacyRuleGroupLabel, legacyRuleMetadata, normalizeLegacyLintLocale } from "./legacy-lint-i18n.js";
 
 export function rule(id, label, runner, defaultEnabled = true, profiles = PROFILE_OPTIONS, note = "") {
+  if (typeof label === "function") {
+    note = profiles ?? "";
+    profiles = defaultEnabled ?? PROFILE_OPTIONS;
+    defaultEnabled = runner ?? true;
+    runner = label;
+    ({ label, note } = legacyRuleMetadata(id));
+  }
   return {
     id,
     label,
@@ -24,11 +33,16 @@ export function rulesForProfileFromRules(rules, profile) {
   return rules.filter((entry) => entry.profiles.includes(normalized));
 }
 
-export function ruleGroupsForProfile(ruleGroups, rules, profile) {
+export function ruleGroupsForProfile(ruleGroups, rules, profile, locale) {
+  const normalizedLocale = normalizeLegacyLintLocale(locale);
   const profileRules = rulesForProfileFromRules(rules, profile);
   return ruleGroups.map((group) => ({
-    group: group.group,
-    rules: profileRules.filter((entry) => entry.group === group.group)
+    group: legacyRuleGroupLabel(group.group, normalizedLocale),
+    rules: profileRules.filter((entry) => entry.group === group.group).map((entry) => ({
+      ...entry,
+      label: legacyRuleMetadata(entry.id, normalizedLocale).label || tTextOr(`lint.rule.${entry.id}.label`, entry.label),
+      note: legacyRuleMetadata(entry.id, normalizedLocale).note || (entry.note ? tTextOr(`lint.rule.${entry.id}.note`, entry.note) : "")
+    }))
   })).filter((group) => group.rules.length);
 }
 

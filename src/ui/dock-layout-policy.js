@@ -1,3 +1,5 @@
+import { tText } from "../core/i18n.js";
+
 export const MIN_DOCK_WIDTH = 180;
 export const MIN_DOCK_HEIGHT = 150;
 export const MIN_EDITOR_WIDTH = 320;
@@ -61,10 +63,10 @@ export function panelsForDockEdge({ layout, edge, visiblePanels = new Set(DOCK_P
 export function dockSettingsControls({ layout = DEFAULT_DOCK_LAYOUT } = {}) {
   return DOCK_PANELS.map((panel) => ({
     panel,
-    label: panel === "explorer" ? "Explorer Dock" : "Problems Dock",
+    label: tText(panel === "explorer" ? "dock.explorer" : "dock.problems"),
     options: DOCK_EDGES.map((edge) => ({
       edge,
-      label: `${edge[0].toUpperCase()}${edge.slice(1)}`,
+      label: tText(`dock.${edge}`),
       active: dockPanelEdge(layout, panel) === edge
     }))
   }));

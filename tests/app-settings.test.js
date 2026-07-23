@@ -7,6 +7,7 @@ import { DEFAULT_GRID_FONT } from "../src/ui/app-settings-policy.js";
 import { createInitialAppState } from "../src/ui/app-startup-state.js";
 import { DEFAULT_DOCK_LAYOUT } from "../src/ui/dock-layout-policy.js";
 import { createSettingsController } from "../src/ui/controllers/settings-controller.js";
+import { t } from "../src/core/i18n.js";
 import { installFakeAppStartupDom } from "./helpers/fake-dom-app-startup.mjs";
 
 function escapeHtml(value) {
@@ -57,6 +58,7 @@ function makeSettingsController({
   const host = document.createElement("section");
   const state = {
     theme: "dark",
+    locale: "enUS",
     colorizeColumns: true,
     mouseResizeLocked: false,
     excludeWorkspaceSubfolders: false,
@@ -102,7 +104,7 @@ function makeSettingsController({
     resetDockLayout: () => { state.dockLayout = DEFAULT_DOCK_LAYOUT; },
     isLegacyLintEngine: () => state.lint.engine === "legacy",
     isVectorLintEngine: () => state.lint.engine === LINT_ENGINE_VECTOR,
-    effectiveVectorLspHoverEnabled: () => true,
+    effectiveVectorLspHoverEnabled: () => state.lint.enabled && state.lint.engine === LINT_ENGINE_VECTOR,
     cancelLegacyLintJobs: () => calls.push("cancel-legacy"),
     scheduleLegacyLintFull: (reason, delay) => calls.push(["schedule-legacy", reason, delay]),
     legacyLintDisplayActive: () => state.lint.engine === "legacy",
@@ -114,12 +116,19 @@ function makeSettingsController({
       lspStarts.push(args);
       calls.push("lsp-start");
     },
+    stopVectorSession: async (reason) => calls.push(["stop-vector-session", reason]),
     ensureDocumentSession: async (options) => calls.push(["ensure-document-session", options]),
     resetLegacyWorkspaceIndex: () => calls.push("reset-legacy-workspace-index"),
     recordLintEngineEvent: (name) => calls.push(["lint-event", name]),
     renderChrome: () => calls.push("render"),
     reportBackgroundFailure: (label) => calls.push(["background-failure", label]),
     showError: (error) => calls.push(["error", String(error)]),
+    t,
+    setLocale: async (locale) => {
+      state.locale = locale;
+      calls.push(["locale", locale]);
+      return locale;
+    },
     escapeHtml
   });
   return { controller, document, calls, host, lspStarts, state };
@@ -144,12 +153,26 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
+  assert.equal(document.body.querySelector("#settingsLocale")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='legacy']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-theme='dark']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("App Settings changes the language immediately", async () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  controller.showAppSettings();
+  const locale = document.body.querySelector("#settingsLocale");
+  locale.value = "koKR";
+  locale.dispatchEvent({ type: "change" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(state.locale, "koKR");
+  assert.deepEqual(calls.filter((call) => Array.isArray(call) && call[0] === "locale"), [["locale", "koKR"]]);
+  assert.equal(document.body.querySelector("[data-settings-i18n='settings.language']")?.textContent, "언어");
 });
 
 test("workspace subfolder exclusion persists, relists Explorer, and restarts Vector-LSP", async () => {
@@ -356,6 +379,23 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
   await pending;
 });
 
+test("Lint Options recreates itself in the new locale without discarding an open draft", async () => {
+  const { controller, document, state } = makeSettingsController({
+    config: { pluginPath: "E:\\Original" }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  document.body.querySelector("#settingsPluginPath").value = "E:\\Unsaved draft";
+  state.locale = "koKR";
+  document.listeners.get("txteditor-locale-changed").at(-1)({ type: "txteditor-locale-changed" });
+
+  const refreshed = await waitForSelector(document, ".settings-modal");
+  assert.equal(refreshed?.querySelector("h2")?.textContent, "Lint 옵션");
+  assert.equal(document.body.querySelector("#settingsPluginPath")?.value, "E:\\Unsaved draft");
+  await pending;
+  document.body.querySelector("[data-settings-choice='cancel']").click();
+});
+
 test("standalone Vector Lint Options save and Restart LSP force-rebind the active document session", async () => {
   const { controller, document, calls, state } = makeSettingsController({
     lspStarted: true,
@@ -422,10 +462,10 @@ test("Legacy reference changes force a fresh Vector session while lint reactivat
   assert.equal(engineSwitch.calls.includes("lsp-start"), false);
 
   const lintEnable = makeSettingsController({ lintEnabled: false });
-  lintEnable.controller.toggleLint();
+  await lintEnable.controller.toggleLint();
   assert.equal(lintEnable.state.lint.enabled, true);
   assert.deepEqual(lintEnable.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
-    ["ensure-document-session", {}]
+    ["ensure-document-session", { forceRestart: true }]
   ]);
 
   const workspaceSwitch = makeSettingsController({
@@ -439,6 +479,28 @@ test("Legacy reference changes force a fresh Vector session while lint reactivat
     && entry[0] === "ensure-document-session"), [
     ["ensure-document-session", { forceRestart: true }]
   ]);
+});
+
+test("Lint Off stops Vector-LSP and Lint On rebuilds the workspace session", async () => {
+  const disabled = makeSettingsController({
+    lintEnabled: true,
+    lspStarted: true,
+    workspace: { path: "E:\\Workspace" },
+    diagnostics: [{ id: "old" }]
+  });
+
+  await disabled.controller.toggleLint();
+  assert.equal(disabled.state.lint.enabled, false);
+  assert.deepEqual(disabled.state.lint.diagnostics, []);
+  assert.deepEqual(disabled.calls.filter((entry) => Array.isArray(entry)
+    && entry[0] === "stop-vector-session"), [
+    ["stop-vector-session", "lint-disabled"]
+  ]);
+  assert.equal(disabled.calls.includes("lsp-start"), false);
+
+  await disabled.controller.toggleLint();
+  assert.equal(disabled.state.lint.enabled, true);
+  assert.deepEqual(disabled.lspStarts, [["E:\\Workspace", { includeSubfolders: true }]]);
 });
 
 test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {

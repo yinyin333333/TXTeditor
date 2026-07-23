@@ -1,5 +1,7 @@
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
+import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
 import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createShellController({
   state,
@@ -25,6 +27,7 @@ export function createShellController({
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
   ensureDocumentSession = async () => {},
+  commitActiveEditor = () => {},
   saveSelectionState = () => {},
   recordUiPerf,
   perfNow,
@@ -42,15 +45,15 @@ export function createShellController({
       const count = lintNotificationCount();
       if (count) {
         button.dataset.badge = String(count);
-        button.title = `Explorer (${count} problems)`;
+        button.title = `${tText("activity.explorer")} (${count} ${tText("activity.problems").toLowerCase()})`;
       } else {
         delete button.dataset.badge;
-        button.title = "Explorer";
+        button.title = tText("activity.explorer");
       }
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.textContent = "P";
-      button.title = state.lint.diagnostics.length ? `Problems (${state.lint.diagnostics.length})` : "Problems";
+      button.title = state.lint.diagnostics.length ? `${tText("activity.problems")} (${state.lint.diagnostics.length})` : tText("activity.problems");
     }
     if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
     if (fileBadges) updateFileProblemBadges();
@@ -104,6 +107,9 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
     }
+    for (const button of documentRef.querySelectorAll("[data-command='close-all']")) {
+      button.disabled = !state.workspace && !state.docs.length;
+    }
     const tableDocumentOpen = documentOpen && isTableDocument(activeDoc());
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
       button.disabled = !tableDocumentOpen;
@@ -119,10 +125,10 @@ export function createShellController({
     renderLintControls();
     for (const button of documentRef.querySelectorAll("[data-command='toggle-lint']")) {
       button.classList.toggle("active", state.lint.enabled);
-      button.textContent = state.lint.enabled ? "Lint: On" : "Lint: Off";
+      button.textContent = state.lint.enabled ? tText("lint.on") : tText("lint.offSummary");
     }
     for (const button of documentRef.querySelectorAll("[data-command='toggle-theme']")) {
-      button.textContent = state.theme === "dark" ? "Light Mode" : "Dark Mode";
+      button.textContent = state.theme === "dark" ? tText("theme.lightMode") : tText("theme.darkMode");
       button.classList.remove("active");
     }
     syncProblemsHeaderLayout();
@@ -131,8 +137,8 @@ export function createShellController({
         const severity = docDiagnosticSeverity(doc);
         const titleClass = severity ? `tab-title tab-title-${severity}` : "tab-title";
         const kindClass = isJsonDocument(doc) ? "tab-json" : "tab-table";
-        const dirty = doc.dirty ? '<span class="tab-dirty-dot" title="Unsaved changes">●</span>' : "";
-        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="Close">x</span></button>`;
+        const dirty = doc.dirty ? `<span class="tab-dirty-dot" title="${tText("tab.unsavedChanges")}">●</span>` : "";
+        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
       })
       .join("");
     const workspaceFiles = renderWorkspaceFileList({
@@ -176,6 +182,8 @@ export function createShellController({
   }
 
   function selectTab(index) {
+    if (index < 0 || index >= state.docs.length) return Promise.resolve();
+    commitActiveEditor();
     saveSelectionState();
     state.active = index;
     const doc = activeDoc();
@@ -196,6 +204,16 @@ export function createShellController({
     }
     finishActivation();
     return Promise.resolve();
+  }
+
+  function switchTab(delta) {
+    const index = cyclicDocumentIndex({
+      activeIndex: state.active,
+      documentCount: state.docs.length,
+      delta
+    });
+    if (index < 0 || index === state.active) return Promise.resolve();
+    return selectTab(index);
   }
 
   function bindExplorerFilter() {
@@ -245,7 +263,9 @@ export function createShellController({
     els.explorerFilter.value = "";
     renderExplorerSearchResults([]);
     if (result.index != null) return selectTab(result.index);
-    openDroppedNativePaths([result.path], { requireCurrentJsonMode: true }).catch(showError);
+    openDroppedNativePaths([result.path], {
+      requireCurrentJsonMode: true
+    }).catch(showError);
   }
 
   function explorerSearchResults() {
@@ -276,9 +296,19 @@ export function createShellController({
     return String(value || "").trim().toLowerCase();
   }
 
+  function resetWorkspaceView() {
+    collapsedFileGroups.clear();
+    explorerSearchActiveIndex = 0;
+    if (els.explorerFilter) els.explorerFilter.value = "";
+    renderExplorerSearchResults([]);
+  }
+
   return {
     collapsedFileGroups,
     renderDiagnosticsChrome,
-    renderChrome
+    renderChrome,
+    resetWorkspaceView,
+    selectTab,
+    switchTab
   };
 }

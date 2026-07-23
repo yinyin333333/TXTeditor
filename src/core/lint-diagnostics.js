@@ -1,4 +1,6 @@
 import { documentKey } from "./lint-paths.js";
+import { resolveLocalizedMessage } from "./i18n.js";
+import { resolveLegacyMessage } from "./legacy-lint-i18n.js";
 
 export function groupDiagnosticsByCell(diagnostics) {
   const grouped = new Map();
@@ -15,7 +17,7 @@ export function diagnosticsForDocument(diagnostics, doc) {
   return diagnostics.filter((diagnostic) => diagnostic.fileKey === key);
 }
 
-export function createRuleContext({ ruleId, severity, diagnostics, profile, rowLabelFor }) {
+export function createRuleContext({ ruleId, severity, diagnostics, profile, rowLabelFor, locale }) {
   return {
     add(table, rowIndex, columnName, message, meta = {}) {
       const columnIndex = typeof columnName === "number" ? columnName : table.columnIndex(columnName);
@@ -23,12 +25,16 @@ export function createRuleContext({ ruleId, severity, diagnostics, profile, rowL
       const rowLabel = rowLabelFor(table, rowIndex);
       const primaryLocationLabel = rowLabel ? `${rowLabel} > ${header}` : header;
       const technicalLocationLabel = `R${rowIndex + 1}:C${Math.max(0, columnIndex) + 1}`;
+      const isLegacyMessage = Boolean(message?.legacyKey);
       diagnostics.push({
         id: "",
         ruleId,
         profile,
         severity,
-        message,
+        message: isLegacyMessage ? resolveLegacyMessage(message, locale) : resolveLocalizedMessage(message, locale),
+        ...(isLegacyMessage
+          ? { messageKey: message.legacyKey, messageArgs: message.params ?? {} }
+          : message?.key ? { messageKey: message.key, messageArgs: message.params ?? {} } : {}),
         fileName: table.displayName,
         fileKey: table.fileKey,
         filePath: table.path,

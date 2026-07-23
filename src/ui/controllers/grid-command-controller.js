@@ -1,6 +1,7 @@
 import { clamp } from "../../core/table-model.js";
 import { makeCustomCommand } from "../../core/undo.js";
 import {
+  cloneColumnsCommand,
   cloneRowsCommand,
   hiddenColumnsCommand,
   hiddenRowsCommand,
@@ -9,6 +10,7 @@ import {
 } from "../../core/operations.js";
 import { indexRange } from "../row-operation-policy.js";
 import { persistFreezeState } from "../freeze-state-policy.js";
+import { tText } from "../../core/i18n.js";
 
 export function createGridCommandController({
   state,
@@ -19,6 +21,7 @@ export function createGridCommandController({
   saveSelectionState,
   renderChrome,
   showError,
+  promptNumber = async () => null,
   applyFreezeToDoc,
   rowsForContextOperation,
   columnsFromSelection,
@@ -75,6 +78,26 @@ export function createGridCommandController({
     renderChrome();
   }
 
+  async function goToRow() {
+    if (!hasOpenDocument()) return;
+    const doc = activeDoc();
+    const rowNumber = await promptNumber({
+      title: tText("prompt.goToRow"),
+      message: tText("prompt.rowNumber", { max: doc.rowCount }),
+      defaultValue: Math.min(doc.rowCount, state.selection.focus.row + 1),
+      min: 1,
+      max: doc.rowCount
+    });
+    if (rowNumber === null) return;
+    const row = rowNumber - 1;
+    const column = clamp(state.selection.focus.column, 0, Math.max(0, doc.columnCount - 1));
+    state.selection.set(row, column);
+    saveSelectionState(doc);
+    grid.scrollCellToCenter(row, column);
+    grid.draw();
+    renderChrome();
+  }
+
   function resizeFit(useSelection) {
     const doc = activeDoc();
     const columns = useSelection ? columnsFromSelection() : indexRange(0, doc.columnCount - 1);
@@ -96,15 +119,15 @@ export function createGridCommandController({
   function cloneRows() {
     const doc = activeDoc();
     const rows = rowsForContextOperation().filter((row) => row > 0 && row < doc.rowCount);
-    if (!rows.length) return showError("Select one or more body rows to clone.");
-    const insertAt = clamp(Math.max(...rows) + 1, 1, doc.rowCount);
-    execute(cloneRowsCommand(doc, rows, insertAt));
-    const column = clamp(state.selection.focus.column, 0, Math.max(0, doc.columnCount - 1));
-    state.selection.setRange(insertAt, 0, insertAt + rows.length - 1, doc.columnCount - 1, { row: insertAt, column });
-    saveSelectionState(doc);
-    grid.scrollCellIntoView(insertAt, column);
-    grid.draw();
-    renderChrome();
+    if (!rows.length) return showError(tText("error.cloneRows"));
+    execute(cloneRowsCommand(doc, rows, doc.rowCount));
+  }
+
+  function cloneColumns() {
+    const doc = activeDoc();
+    const columns = columnsFromSelection().filter((column) => column >= 0 && column < doc.columnCount);
+    if (!columns.length) return showError(tText("error.cloneColumns"));
+    execute(cloneColumnsCommand(doc, columns, doc.columnCount));
   }
 
   function commitResize(resize) {
@@ -121,9 +144,11 @@ export function createGridCommandController({
     zoomBy,
     zoomReset,
     resetRowHeights,
+    goToRow,
     resizeFit,
     autoFitColumns,
     cloneRows,
+    cloneColumns,
     commitResize
   };
 }

@@ -18,12 +18,12 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 globset = "0.4.16"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.9"
 tauri = { version = "2", features = [] }
-tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["sync", "time"] }

@@ -23,6 +23,7 @@ import {
   uniqueDocuments
 } from "./lint-table.js";
 import { buildWorkspaceFileStates, buildWorkspaceIndex } from "./lint-workspace-index.js";
+import { legacyRuleGroupLabel, legacyRuleMetadata, normalizeLegacyLintLocale } from "./legacy-lint-i18n.js";
 
 export { diagnosticsForDocument, groupDiagnosticsByCell };
 export { baseName as lintBaseName, documentKey as lintDocumentKey, normalizePath as lintNormalizePath };
@@ -59,23 +60,33 @@ export function lintProfileOptions() {
   return [...PROFILE_OPTIONS];
 }
 
-export function rulesForProfile(profile) {
-  return rulesForProfileFromRules(LINT_RULES, profile);
+export function rulesForProfile(profile, locale = "enUS") {
+  const normalizedLocale = normalizeLegacyLintLocale(locale);
+  return rulesForProfileFromRules(LINT_RULES, profile).map((entry) => ({
+    ...entry,
+    group: legacyRuleGroupLabel(entry.group, normalizedLocale),
+    ...legacyRuleMetadata(entry.id, normalizedLocale)
+  }));
 }
 
-export function lintRuleGroupsForProfile(profile) {
-  return ruleGroupsForProfile(LINT_RULE_GROUPS, LINT_RULES, profile);
+export function lintRuleGroupsForProfile(profile, locale) {
+  return ruleGroupsForProfile(LINT_RULE_GROUPS, LINT_RULES, profile, locale);
 }
 
-export function runLint(documents, settings = createDefaultLintSettings()) {
+export function runLint(documents, settings = createDefaultLintSettings(), options = {}) {
   const normalized = normalizeLintSettings(settings);
   if (!normalized.enabled) return [];
   const docs = uniqueDocuments(documents);
   const index = buildWorkspaceIndex(docs, normalized.profile);
-  return runLintWithWorkspaceIndex(index, normalized);
+  return runLintWithWorkspaceIndex(index, normalized, options);
 }
 
-export function runLintWithWorkspaceIndex(index, settings = createDefaultLintSettings()) {
+export function runLintWithWorkspaceIndex(index, settings = createDefaultLintSettings(), options = {}) {
   const normalized = normalizeLintSettings(settings);
-  return runLintRulesWithWorkspaceIndex(index, normalized, { rulesForProfile, rowLabelFor });
+  const locale = normalizeLegacyLintLocale(options.locale ?? settings.locale);
+  return runLintRulesWithWorkspaceIndex(index, normalized, {
+    rulesForProfile,
+    rowLabelFor,
+    locale
+  });
 }

@@ -21,6 +21,7 @@ import {
   lspOpenFile,
   lspReadyListen,
   lspStart,
+  lspStop,
   lspStoppedListen,
   lspUpdateFile,
   lspUpdateFileIncremental,
@@ -210,6 +211,7 @@ test("large file payloads can parse through a worker before document constructio
 
 test("Tauri command boundary preserves JS invoke names and Rust registrations", () => {
   const platformSources = [
+    "../src/ui/app-runtime-utils.js",
     "../src/core/platform/config.js",
     "../src/core/platform/file-io.js",
     "../src/core/platform/lsp-client.js",
@@ -234,17 +236,20 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "lsp_get_diagnostics",
     "lsp_get_diagnostics_batch",
     "lsp_hover",
-    "lsp_open_file",
-    "lsp_start",
-    "lsp_update_file",
+      "lsp_open_file",
+      "lsp_start",
+      "lsp_stop",
+      "lsp_update_file",
     "lsp_update_file_incremental",
     "open_files_dialog",
     "open_folder_dialog",
     "pick_file_path",
+    "read_clipboard_text",
     "read_text_files",
     "save_config",
     "save_file_dialog",
     "startup_open_paths",
+    "write_clipboard_text",
     "write_text_file_chunk_safe",
     "write_text_file_safe"
   ]);
@@ -401,8 +406,9 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
     await lspStart("E:\\Workspace", 7);
-    await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace");
+    await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace", true, "koKR");
     await lspStart("E:\\Workspace", 9, "workspace", "", false);
+    await lspStop(9);
     await lspOpenFile("file:///items.txt", 1, "id\n1", 7);
     await lspUpdateFile("file:///items.txt", 2, "id\n2", 7);
     await lspUpdateFileIncremental("file:///items.txt", 3, [{ range: { start: { line: 0, character: 0 } }, text: "id" }], 7);
@@ -456,9 +462,10 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", encoding: "utf-8", transactionId: chunkTransactionIds[1], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
-      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7 }],
-      ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8 }],
-      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", includeSubfolders: false, generation: 9 }],
+      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7, locale: "enUS" }],
+      ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8, locale: "koKR" }],
+      ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", includeSubfolders: false, generation: 9, locale: "enUS" }],
+      ["invoke", "lsp_stop", { generation: 9 }],
       ["invoke", "lsp_open_file", { uri: "file:///items.txt", version: 1, text: "id\n1", generation: 7 }],
       ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2", generation: 7 }],
       ["invoke", "lsp_update_file_incremental", { uri: "file:///items.txt", version: 3, changes: [{ range: { start: { line: 0, character: 0 } }, text: "id" }], generation: 7 }],

@@ -4,6 +4,7 @@ import {
   SEARCH_SCOPE_ROW_TITLES,
   normalizeSearchScope
 } from "../core/search.js";
+import { tText } from "../core/i18n.js";
 
 export function initialSearchState() {
   return { lastQuery: "", lastScope: SEARCH_SCOPE_ALL };
@@ -56,12 +57,12 @@ export function searchScrollOptionsForScope(scope) {
 export function searchStatusText(scope, found, target) {
   const normalized = normalizeSearchScope(scope);
   if (normalized === SEARCH_SCOPE_COLUMN_TITLES) {
-    return `Column C${target.column + 1} (header R${found.row + 1}:C${found.column + 1})`;
+    return tText("search.columnStatus", { column: target.column + 1, headerRow: found.row + 1, headerColumn: found.column + 1 });
   }
   if (normalized === SEARCH_SCOPE_ROW_TITLES) {
-    return `Row R${target.row + 1} (title R${found.row + 1}:C${found.column + 1})`;
+    return tText("search.rowStatus", { row: target.row + 1, titleRow: found.row + 1, titleColumn: found.column + 1 });
   }
-  return `R${target.row + 1}:C${target.column + 1}`;
+  return tText("search.cellStatus", { row: target.row + 1, column: target.column + 1 });
 }
 
 export function shouldSubmitSearchKey(key) {

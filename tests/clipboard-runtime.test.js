@@ -14,14 +14,14 @@ function replaceGlobal(name, value) {
   };
 }
 
-test("desktop clipboard uses the Tauri plugin instead of permission-gated Web Clipboard APIs", async () => {
+test("desktop clipboard uses bounded native commands instead of permission-gated Web Clipboard APIs", async () => {
   const calls = [];
   const restoreWindow = replaceGlobal("window", {
     __TAURI__: {
       core: {
         invoke: async (command, args) => {
           calls.push({ command, args });
-          return command.endsWith("read_text") ? "from desktop" : undefined;
+          return command === "read_clipboard_text" ? "from desktop" : undefined;
         }
       }
     }
@@ -37,8 +37,8 @@ test("desktop clipboard uses the Tauri plugin instead of permission-gated Web Cl
     await writeClipboardText("selected cells");
     assert.equal(await readClipboardText(), "from desktop");
     assert.deepEqual(calls, [
-      { command: "plugin:clipboard-manager|write_text", args: { text: "selected cells" } },
-      { command: "plugin:clipboard-manager|read_text", args: undefined }
+      { command: "write_clipboard_text", args: { text: "selected cells" } },
+      { command: "read_clipboard_text", args: undefined }
     ]);
   } finally {
     restoreNavigator();
@@ -66,15 +66,20 @@ test("browser clipboard retains the Web Clipboard fallback", async () => {
   }
 });
 
-test("desktop build registers clipboard text permissions and the plugin", () => {
+test("desktop build registers a serialized native clipboard worker", () => {
   const cargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const clipboardRust = readFileSync(new URL("../src-tauri/src/clipboard.rs", import.meta.url), "utf8");
   const capability = JSON.parse(readFileSync(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8"));
 
-  assert.match(cargo, /tauri-plugin-clipboard-manager = "2"/);
-  assert.match(rust, /\.plugin\(tauri_plugin_clipboard_manager::init\(\)\)/);
-  assert.ok(capability.permissions.includes("clipboard-manager:allow-read-text"));
-  assert.ok(capability.permissions.includes("clipboard-manager:allow-write-text"));
+  assert.match(cargo, /arboard = \{ version = "3\.6\.1", features = \["wayland-data-control"\] \}/);
+  assert.doesNotMatch(cargo, /tauri-plugin-clipboard-manager/);
+  assert.match(rust, /manage\(clipboard::ClipboardService::new\(\)\)/);
+  assert.match(rust, /clipboard::read_clipboard_text/);
+  assert.match(rust, /clipboard::write_clipboard_text/);
+  assert.match(clipboardRust, /std::thread::Builder/);
+  assert.doesNotMatch(clipboardRust, /spawn_blocking/);
+  assert.ok(!capability.permissions.some((permission) => permission.startsWith("clipboard-manager:")));
 });
 
 function editableDocument() {
@@ -101,8 +106,8 @@ test("copy, paste, and cut use the same command path for frozen and normal cells
     __TAURI__: {
       core: {
         invoke: async (command, args) => {
-          if (command.endsWith("write_text")) clipboardText = args.text;
-          if (command.endsWith("read_text")) return "pasted";
+          if (command === "write_clipboard_text") clipboardText = args.text;
+          if (command === "read_clipboard_text") return "pasted";
           return undefined;
         }
       }
@@ -136,6 +141,84 @@ test("copy, paste, and cut use the same command path for frozen and normal cells
       assert.equal(clipboardText, "pasted");
       assert.equal(doc.getCell(cell.row, cell.column), "");
     }
+  } finally {
+    restoreWindow();
+  }
+});
+
+test("a delayed clipboard read cannot paste into a different same-named tab", async () => {
+  let releaseRead;
+  const readPending = new Promise((resolve) => { releaseRead = resolve; });
+  const restoreWindow = replaceGlobal("window", {
+    __TAURI__: { core: { invoke: async (command) => command === "read_clipboard_text" ? readPending : undefined } }
+  });
+  const base = editableDocument();
+  const excel = editableDocument();
+  base.name = excel.name = "skills.txt";
+  base.path = "E:/mod/base/skills.txt";
+  excel.path = "E:/mod/excel/skills.txt";
+  let active = base;
+  let executed = 0;
+  const range = { top: 1, left: 1, bottom: 1, right: 1 };
+  const state = { selection: { ranges: [range], focus: { row: 1, column: 1 } } };
+  const controller = createEditCommandController({
+    state,
+    grid: { draw() {} },
+    activeDoc: () => active,
+    hasOpenDocument: () => true,
+    execute(command) { executed += 1; command.redo(active); },
+    saveSelectionState() {},
+    promptNumber: async () => null,
+    showError(error) { throw new Error(String(error)); }
+  });
+
+  try {
+    const paste = controller.pasteSelection();
+    active = excel;
+    releaseRead("must-not-cross-tabs");
+    await paste;
+    assert.equal(executed, 0);
+    assert.equal(base.getCell(1, 1), "normal-value");
+    assert.equal(excel.getCell(1, 1), "normal-value");
+  } finally {
+    restoreWindow();
+  }
+});
+
+test("a delayed clipboard write cannot cut a different same-named tab", async () => {
+  let releaseWrite;
+  const writePending = new Promise((resolve) => { releaseWrite = resolve; });
+  const restoreWindow = replaceGlobal("window", {
+    __TAURI__: { core: { invoke: async (command) => command === "write_clipboard_text" ? writePending : undefined } }
+  });
+  const base = editableDocument();
+  const excel = editableDocument();
+  base.name = excel.name = "skills.txt";
+  base.path = "E:/mod/base/skills.txt";
+  excel.path = "E:/mod/excel/skills.txt";
+  let active = base;
+  let executed = 0;
+  const range = { top: 1, left: 1, bottom: 1, right: 1 };
+  const state = { selection: { ranges: [range], focus: { row: 1, column: 1 } } };
+  const controller = createEditCommandController({
+    state,
+    grid: { draw() {} },
+    activeDoc: () => active,
+    hasOpenDocument: () => true,
+    execute(command) { executed += 1; command.redo(active); },
+    saveSelectionState() {},
+    promptNumber: async () => null,
+    showError(error) { throw new Error(String(error)); }
+  });
+
+  try {
+    const cut = controller.cutSelection();
+    active = excel;
+    releaseWrite();
+    await cut;
+    assert.equal(executed, 0);
+    assert.equal(base.getCell(1, 1), "normal-value");
+    assert.equal(excel.getCell(1, 1), "normal-value");
   } finally {
     restoreWindow();
   }

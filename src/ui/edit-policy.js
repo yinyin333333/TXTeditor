@@ -14,7 +14,7 @@ export function arrowNavigationDelta(key) {
   return { rowDelta: 0, columnDelta: 0 };
 }
 
-export function editorKeyAction({ key, shiftKey = false, editMode = null } = {}) {
+export function editorKeyAction({ key, shiftKey = false, ctrlKey = false, altKey = false, metaKey = false, editMode = null } = {}) {
   if (shouldCommitEditOnArrow(editMode, key)) {
     return { action: "commit-move", ...arrowNavigationDelta(key) };
   }
@@ -22,6 +22,7 @@ export function editorKeyAction({ key, shiftKey = false, editMode = null } = {})
     return { action: "commit-move", rowDelta: shiftKey ? -1 : 1, columnDelta: 0 };
   }
   if (key === "Tab") {
+    if (ctrlKey || altKey || metaKey) return { action: "none" };
     return { action: "commit-move", rowDelta: 0, columnDelta: shiftKey ? -1 : 1 };
   }
   if (key === "Escape") return { action: "cancel" };

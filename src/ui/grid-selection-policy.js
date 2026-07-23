@@ -52,8 +52,9 @@ export function hasFullColumnRange(ranges, rowCount) {
   return ranges.some((rect) => rect.top === 0 && rect.bottom >= rowCount - 1);
 }
 
-export function keyboardSelectionTarget({ key, shiftKey = false, ctrlKey = false, focus, rowCount, columnCount, jumpRow, jumpColumn }) {
+export function keyboardSelectionTarget({ key, shiftKey = false, ctrlKey = false, altKey = false, metaKey = false, focus, rowCount, columnCount, jumpRow, jumpColumn }) {
   let { row, column } = focus;
+  if (key === "Tab" && (ctrlKey || altKey || metaKey)) return null;
   if (key === "Tab") column += shiftKey ? -1 : 1;
   else if (key === "ArrowDown") row = ctrlKey ? jumpRow(row, 1) : row + 1;
   else if (key === "ArrowUp") row = ctrlKey ? jumpRow(row, -1) : row - 1;

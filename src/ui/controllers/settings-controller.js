@@ -25,14 +25,15 @@ import {
 } from "../app-settings-policy.js";
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
+import { LOCALE_OPTIONS, tText } from "../../core/i18n.js";
 
 export function shouldCloseSettingsKey(key) {
   return key === "Escape";
 }
 
 const JSON_RULE_ACTIONS = [
-  ["ignore", "Off"],
-  ["warn", "Warning"]
+  ["ignore", "settings.jsonActionOff"],
+  ["warn", "settings.jsonActionWarning"]
 ];
 const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
 
@@ -54,9 +55,9 @@ function normalizeJsonDiagnosticRules(value) {
   };
 }
 
-function jsonRuleActionOptions(selected) {
-  return JSON_RULE_ACTIONS.map(([value, label]) =>
-    `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`
+function jsonRuleActionOptions(selected, translate = tText) {
+  return JSON_RULE_ACTIONS.map(([value, labelKey]) =>
+    `<option value="${value}"${selected === value ? " selected" : ""}>${translate(labelKey)}</option>`
   ).join("");
 }
 
@@ -96,6 +97,7 @@ export function createSettingsController({
   setLintDiagnostics,
   updateGridDiagnostics,
   lspStartWorkspace,
+  stopVectorSession = async () => {},
   ensureDocumentSession = async () => {},
   resetLegacyWorkspaceIndex = () => {},
   refreshJsonEditorAppearance = () => {},
@@ -103,6 +105,8 @@ export function createSettingsController({
   renderChrome,
   reportBackgroundFailure,
   showError,
+  t = tText,
+  setLocale = async (locale) => locale,
   escapeHtml
 }) {
   let legacyReferenceSelectionRequest = 0;
@@ -209,25 +213,42 @@ export function createSettingsController({
     grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
     recordLintEngineEvent("engine-switch", { previous, next });
     if (isLegacyLintEngine()) {
+      stopVectorSession("lint-engine-legacy").catch(showError);
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else {
+    } else if (state.lint.enabled) {
       ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
     renderChrome();
   }
 
-  function toggleLint() {
+  async function toggleLint() {
     state.lint.enabled = !state.lint.enabled;
     if (!state.lint.enabled) {
       cancelLegacyLintJobs({ clearDiagnostics: false });
+      invalidateLspHover(true, "lint-disabled");
       setLintDiagnostics([]);
       updateGridDiagnostics();
+      grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+      const stopping = isVectorLintEngine()
+        ? stopVectorSession("lint-disabled")
+        : Promise.resolve();
+      saveLintSettings();
+      renderChrome();
+      await stopping;
+      return;
     } else if (isLegacyLintEngine() && state.problemsVisible) {
       const schedule = legacyLintImmediateSchedule("lint-enabled");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (isVectorLintEngine() && !state.lsp.started) {
-      ensureDocumentSession({}).catch(showError);
+    } else if (isVectorLintEngine()) {
+      grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
+      if (state.workspace?.path) {
+        await lspStartWorkspace(state.workspace.path, {
+          includeSubfolders: !state.excludeWorkspaceSubfolders
+        });
+      } else {
+        await ensureDocumentSession({ forceRestart: true });
+      }
     }
     saveLintSettings();
     renderChrome();
@@ -277,7 +298,7 @@ export function createSettingsController({
       state.config = updated;
     } catch (error) {
       if (request === legacyReferenceSelectionRequest) {
-        showError(`Failed to save bundled reference version: ${error}`);
+        showError(tText("error.referenceSave", { error }, state.locale));
         renderChrome();
       }
       return false;
@@ -326,6 +347,7 @@ export function createSettingsController({
   }
 
   function showAppSettings() {
+    const translate = (key, params = {}) => t(key, params, state.locale);
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
     const visualControls = appSettingsVisualControls({
@@ -351,10 +373,15 @@ export function createSettingsController({
         </div>
       </div>
     `).join("");
+    const localeOptions = LOCALE_OPTIONS.map(([value, label]) =>
+      `<option value="${value}"${state.locale === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
     backdrop.innerHTML = `
       <div class="modal settings-modal">
-        <h2>Settings</h2>
+        <h2 data-settings-i18n="toolbar.settings">${translate("toolbar.settings")}</h2>
         <div class="settings-stack">
+          <label class="settings-label" for="settingsLocale" data-settings-i18n="settings.language">${translate("settings.language")}</label>
+          <select class="modal-input settings-font-select" id="settingsLocale">${localeOptions}</select>
           <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.colorize.id}"${visualControls.colorize.checked ? " checked" : ""} />
             ${visualControls.colorize.label}
@@ -367,10 +394,10 @@ export function createSettingsController({
             <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
             ${visualControls.workspaceSubfolders.label}
           </label>
-          <div class="settings-label">Lint Engine</div>
-          <div class="settings-segmented" role="group" aria-label="Lint Engine">
-            <button class="${isVectorLintEngine() ? "active" : ""}" data-settings-lint-engine="vector-lsp">Vector-LSP</button>
-            <button class="${isLegacyLintEngine() ? "active" : ""}" data-settings-lint-engine="legacy">Legacy Lint</button>
+          <div class="settings-label" data-settings-i18n="settings.lintEngine">${translate("settings.lintEngine")}</div>
+          <div class="settings-segmented" role="group" aria-label="${translate("settings.lintEngine")}">
+            <button class="${isVectorLintEngine() ? "active" : ""}" data-settings-lint-engine="vector-lsp">${translate("settings.vectorEngine")}</button>
+            <button class="${isLegacyLintEngine() ? "active" : ""}" data-settings-lint-engine="legacy">${translate("settings.legacyEngine")}</button>
           </div>
           <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.vectorHover.id}"${visualControls.vectorHover.checked ? " checked" : ""}${visualControls.vectorHover.disabled ? " disabled" : ""} />
@@ -379,19 +406,19 @@ export function createSettingsController({
           <div class="settings-hint${visualControls.vectorHover.hintHidden ? " hidden" : ""}" id="${visualControls.vectorHover.hintId}">${visualControls.vectorHover.hintText}</div>
           <label class="settings-label" for="${visualControls.font.id}">${visualControls.font.label}</label>
           <select class="modal-input settings-font-select" id="${visualControls.font.id}">${fontOptions}</select>
-          <div class="settings-label">Theme</div>
-          <div class="settings-segmented" role="group" aria-label="Theme">
+          <div class="settings-label" data-settings-i18n="settings.theme">${translate("settings.theme")}</div>
+          <div class="settings-segmented" role="group" aria-label="${translate("settings.theme")}">
             ${themeControls}
           </div>
           <div class="settings-dock-row">
             ${dockControls}
           </div>
           <div class="settings-reset-row">
-            <button data-settings-reset-layout>Reset Layout</button>
+            <button data-settings-reset-layout data-settings-i18n="settings.resetLayout">${translate("settings.resetLayout")}</button>
           </div>
         </div>
         <div class="modal-actions">
-          <button data-settings-close>Close</button>
+          <button data-settings-close data-settings-i18n="common.close">${translate("common.close")}</button>
         </div>
       </div>`;
     document.body.append(backdrop);
@@ -402,6 +429,7 @@ export function createSettingsController({
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
     const fontInput = backdrop.querySelector("#settingsGridFont");
+    const localeInput = backdrop.querySelector("#settingsLocale");
     const lintEngineButtons = [...backdrop.querySelectorAll("[data-settings-lint-engine]")];
     const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
@@ -413,9 +441,15 @@ export function createSettingsController({
       hoverInput.disabled = isLegacyLintEngine();
       hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
       fontInput.value = state.gridFont;
+      localeInput.value = state.locale;
       for (const button of lintEngineButtons) button.classList.toggle("active", button.dataset.settingsLintEngine === state.lint.engine);
       for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
+    };
+    const refreshLocaleLabels = () => {
+      for (const element of backdrop.querySelectorAll("[data-settings-i18n]")) {
+        element.textContent = translate(element.dataset.settingsI18n);
+      }
     };
     colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
     mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
@@ -431,6 +465,12 @@ export function createSettingsController({
     });
     hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
+    localeInput.addEventListener("change", () => {
+      setLocale(localeInput.value).then(() => {
+        refresh();
+        refreshLocaleLabels();
+      }).catch(showError);
+    });
     for (const button of lintEngineButtons) {
       button.addEventListener("click", () => { setLintEngine(button.dataset.settingsLintEngine); refresh(); });
     }
@@ -448,25 +488,33 @@ export function createSettingsController({
       if (closed) return;
       closed = true;
       unbindEscape?.();
+      document.removeEventListener("txteditor-locale-changed", refreshForLocale);
       backdrop.remove();
       els.host.focus();
     };
+    const refreshForLocale = () => {
+      if (closed) return;
+      close();
+      showAppSettings();
+    };
+    document.addEventListener("txteditor-locale-changed", refreshForLocale);
     unbindEscape = bindEscapeToClose(close);
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop || event.target.closest("[data-settings-close]")) close();
     });
   }
 
-  async function showSettings() {
+  async function showSettings(draftConfig = null) {
     if (isLegacyLintEngine()) {
       state.lint.legacy.rulesOpen = true;
       renderChrome();
       return;
     }
-    const config = await getConfig().catch((error) => {
+    const config = draftConfig ?? await getConfig().catch((error) => {
       reportBackgroundFailure("Configuration load", error, "settings");
       return {};
     });
+    const translate = (key, params = {}) => t(key, params, state.locale);
     const mode = config.lintMode ?? "basic";
     const schemaVersion = config.schemaVersion ?? "3.2";
     const VERSIONS = ["3.2", "3.1", "2.4", "1.13"];
@@ -475,7 +523,7 @@ export function createSettingsController({
     ).join("");
     const referenceVersion = config.referenceVersion ?? "";
     const referenceVersionOptions = [
-      ["", "Use schema/profile version"],
+      ["", translate("settings.useSchemaProfileVersion")],
       ["3.2", "3.2"],
       ["3.1", "3.1"],
       ["2.4", "2.4"],
@@ -489,89 +537,89 @@ export function createSettingsController({
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML = `
       <div class="modal settings-modal">
-        <h2>Lint Options</h2>
+        <h2>${translate("lint.optionsTitle")}</h2>
         <div class="settings-tabs">
-          <button class="settings-tab${mode === "basic" ? " active" : ""}" data-settings-tab="basic">Basic</button>
-          <button class="settings-tab${mode === "advanced" ? " active" : ""}" data-settings-tab="advanced">Advanced</button>
+          <button class="settings-tab${mode === "basic" ? " active" : ""}" data-settings-tab="basic">${translate("settings.basic")}</button>
+          <button class="settings-tab${mode === "advanced" ? " active" : ""}" data-settings-tab="advanced">${translate("settings.advanced")}</button>
         </div>
         <div id="settingsBasicSection" class="settings-tab-panel${mode !== "basic" ? " hidden" : ""}">
-          <label class="settings-label">Schema Version</label>
+          <label class="settings-label">${translate("settings.schemaVersion")}</label>
           <select class="modal-input settings-version-select" id="settingsSchemaVersion">${versionOptions}</select>
         </div>
         <div id="settingsAdvancedSection" class="settings-tab-panel${mode !== "advanced" ? " hidden" : ""}">
-          <label class="settings-label">Plugin Folder</label>
+          <label class="settings-label">${translate("settings.pluginFolder")}</label>
           <div class="settings-row">
             <input class="modal-input" id="settingsPluginPath"
               value="${escapeHtml(config.pluginPath ?? "")}"
-              placeholder="Path to plugins directory" />
-            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowsePluginBtn">Browse&hellip;</button>` : ""}
+              placeholder="${translate("settings.pluginFolderPlaceholder")}" />
+            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowsePluginBtn">${translate("common.browse")}&hellip;</button>` : ""}
           </div>
-          <label class="settings-label">Schema Folder</label>
+          <label class="settings-label">${translate("settings.schemaFolder")}</label>
           <div class="settings-row">
             <input class="modal-input" id="settingsSchemaPath"
               value="${escapeHtml(config.schemaPath ?? "")}"
-              placeholder="Path to schema directory" />
-            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseSchemaBtn">Browse&hellip;</button>` : ""}
+              placeholder="${translate("settings.schemaFolderPlaceholder")}" />
+            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseSchemaBtn">${translate("common.browse")}&hellip;</button>` : ""}
           </div>
-          <label class="settings-label">Linter (vector-lsp) Path</label>
+          <label class="settings-label">${translate("settings.vectorLspPath")}</label>
           <div class="settings-row">
             <input class="modal-input" id="settingsLspPath"
               value="${escapeHtml(config.vectorLspPath ?? "")}"
-              placeholder="Path to vector-lsp executable (auto-detect if blank)" />
-            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">Browse&hellip;</button>` : ""}
+              placeholder="${translate("settings.vectorLspPathPlaceholder")}" />
+            ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">${translate("common.browse")}&hellip;</button>` : ""}
           </div>
         </div>
-        <label class="settings-label">Bundled Reference Data</label>
+        <label class="settings-label">${translate("settings.bundledReferenceData")}</label>
         <select class="modal-input settings-version-select" id="settingsReferenceVersion">${referenceVersionOptions}</select>
-        <div class="settings-hint">One version is used for the whole lint session. Advanced mode requires an explicit version; leave this disabled only when no baseline fallback is wanted.</div>
+        <div class="settings-hint">${translate("settings.referenceVersionHint")}</div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsJsonDiagnostics" aria-controls="settingsJsonDiagnosticRules"${config.jsonDiagnostics ? " checked" : ""} />
-            Enable localization JSON diagnostics
+            ${translate("settings.jsonDiagnostics")}
           </label>
-          <div class="settings-hint">Checks only JSON files present in this mod. Layout JSON is used only as Key Usage evidence.</div>
+          <div class="settings-hint">${translate("settings.jsonDiagnosticsHint")}</div>
           <div class="settings-json-rules" id="settingsJsonDiagnosticRules">
             <div class="settings-json-rule">
               <label for="settingsJsonDuplicateIdsAction">
-                <span>Duplicate IDs / keys</span>
+                <span>${translate("settings.jsonDuplicateIds")}</span>
                 <span class="settings-json-rule-code">Json/DuplicateIds</span>
               </label>
-              <select class="modal-input" id="settingsJsonDuplicateIdsAction">${jsonRuleActionOptions(jsonRules.duplicateIds.action)}</select>
+              <select class="modal-input" id="settingsJsonDuplicateIdsAction">${jsonRuleActionOptions(jsonRules.duplicateIds.action, translate)}</select>
             </div>
             <div class="settings-json-rule">
               <label for="settingsJsonStringFormatAction">
-                <span>Required string fields</span>
+                <span>${translate("settings.jsonStringFormat")}</span>
                 <span class="settings-json-rule-code">Json/StringFormat</span>
               </label>
-              <select class="modal-input" id="settingsJsonStringFormatAction">${jsonRuleActionOptions(jsonRules.stringFormat.action)}</select>
+              <select class="modal-input" id="settingsJsonStringFormatAction">${jsonRuleActionOptions(jsonRules.stringFormat.action, translate)}</select>
             </div>
             <div class="settings-json-rule">
               <label for="settingsJsonKeyUsageAction">
-                <span>Unused localization keys</span>
+                <span>${translate("settings.jsonKeyUsage")}</span>
                 <span class="settings-json-rule-code">Json/KeyUsage</span>
               </label>
-              <select class="modal-input" id="settingsJsonKeyUsageAction">${jsonRuleActionOptions(jsonRules.keyUsage.action)}</select>
+              <select class="modal-input" id="settingsJsonKeyUsageAction">${jsonRuleActionOptions(jsonRules.keyUsage.action, translate)}</select>
             </div>
             <div class="settings-json-key-usage-options${config.jsonDiagnostics && jsonRules.keyUsage.action !== "ignore" ? "" : " hidden"}" id="settingsJsonKeyUsageOptions">
               <div class="settings-json-id-start">
-                <label for="settingsJsonKeyUsageIdStart">Only check IDs greater than</label>
+                <label for="settingsJsonKeyUsageIdStart">${translate("settings.jsonKeyUsageIdStart")}</label>
                 <input class="modal-input" type="number" id="settingsJsonKeyUsageIdStart"
                   step="any" value="${jsonRules.keyUsage.idStart}" />
               </div>
-              <div class="settings-hint">With ${jsonRules.keyUsage.idStart}, ID ${jsonRules.keyUsage.idStart} is excluded and larger IDs are checked.</div>
+              <div class="settings-hint">${translate("settings.jsonKeyUsageHint", { id: jsonRules.keyUsage.idStart })}</div>
             </div>
           </div>
         </div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsDebugLogging"${config.debugLogging ? " checked" : ""} />
-            Enable debug logging (shows in Log panel)
+            ${translate("settings.debugLogging")}
           </label>
         </div>
         <div class="modal-actions settings-lint-actions">
-          <button data-settings-choice="save">Save</button>
-          <button data-settings-choice="cancel">Cancel</button>
-          ${state.lsp.started ? `<button data-settings-choice="restart-lsp" style="margin-left:auto">Restart LSP</button>` : ""}
+          <button data-settings-choice="save">${translate("common.save")}</button>
+          <button data-settings-choice="cancel">${translate("common.cancel")}</button>
+          ${state.lsp.started ? `<button data-settings-choice="restart-lsp" style="margin-left:auto">${translate("settings.restartLsp")}</button>` : ""}
         </div>
       </div>`;
     document.body.append(backdrop);
@@ -647,14 +695,41 @@ export function createSettingsController({
       let closed = false;
       let saving = false;
       let unbindEscape = null;
+      let refreshForLocale = null;
       const finish = () => {
         if (closed) return;
         closed = true;
         unbindEscape?.();
+        document.removeEventListener("txteditor-locale-changed", refreshForLocale);
         backdrop.remove();
         els.host.focus();
         resolve();
       };
+      refreshForLocale = () => {
+        if (closed) return;
+        const draft = {
+          ...config,
+          lintMode: backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? mode,
+          schemaVersion: versionSelect?.value || schemaVersion,
+          referenceVersion: referenceVersionSelect?.value || undefined,
+          pluginPath: pluginInput?.value ?? config.pluginPath,
+          schemaPath: schemaInput?.value ?? config.schemaPath,
+          vectorLspPath: lspInput?.value ?? config.vectorLspPath,
+          debugLogging: backdrop.querySelector("#settingsDebugLogging")?.checked ?? config.debugLogging,
+          jsonDiagnostics: jsonDiagnosticsEl?.checked ?? config.jsonDiagnostics,
+          jsonDiagnosticRules: {
+            duplicateIds: { action: normalizeJsonRuleAction(jsonDuplicateIdsActionEl?.value) },
+            stringFormat: { action: normalizeJsonRuleAction(jsonStringFormatActionEl?.value) },
+            keyUsage: {
+              action: normalizeJsonRuleAction(jsonKeyUsageActionEl?.value, "ignore"),
+              idStart: parseJsonKeyUsageIdStart(jsonKeyUsageIdStartEl?.value) ?? jsonRules.keyUsage.idStart
+            }
+          }
+        };
+        finish();
+        void showSettings(draft);
+      };
+      document.addEventListener("txteditor-locale-changed", refreshForLocale);
       unbindEscape = bindEscapeToClose(finish);
       backdrop.addEventListener("click", async (event) => {
         const choice = event.target.closest("[data-settings-choice]")?.dataset.settingsChoice;
@@ -670,7 +745,7 @@ export function createSettingsController({
           const parsedJsonKeyUsageIdStart = parseJsonKeyUsageIdStart(jsonKeyUsageIdStartEl?.value);
           const jsonKeyUsageNeedsThreshold = jsonDiagnosticsEnabled && jsonKeyUsageAction !== "ignore";
           if (jsonKeyUsageNeedsThreshold && parsedJsonKeyUsageIdStart === null) {
-            showError("Key Usage ID threshold must be a finite number.");
+            showError(tText("error.keyUsageThreshold", {}, state.locale));
             jsonKeyUsageIdStartEl?.focus();
             saving = false;
             if (saveButton) saveButton.disabled = false;
@@ -699,7 +774,7 @@ export function createSettingsController({
           try {
             await saveConfig(updated);
           } catch (err) {
-            showError(`Failed to save lint options: ${err}`);
+            showError(tText("error.lintOptionsSave", { error: err }, state.locale));
             saving = false;
             if (saveButton) saveButton.disabled = false;
             return;
@@ -784,7 +859,7 @@ export function createSettingsController({
       return;
     }
     els.lintRulesPanel.classList.remove("hidden");
-    els.lintRulesPanel.innerHTML = lintRuleGroupsForProfile(state.lint.legacy.settings.profile).map((group) => `
+    els.lintRulesPanel.innerHTML = lintRuleGroupsForProfile(state.lint.legacy.settings.profile, state.locale).map((group) => `
       <section class="lint-rule-group">
         <h3>${escapeHtml(group.group)}</h3>
         ${group.rules.map((entry) => {
@@ -820,6 +895,7 @@ export function createSettingsController({
     setLegacyLintReferenceVersion,
     setLegacyLintRuleEnabled,
     setLintEngine,
+    setLocale,
     setTheme,
     setVectorLspHover,
     showAppSettings,

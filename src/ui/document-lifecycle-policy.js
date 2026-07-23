@@ -1,4 +1,5 @@
 import { normalizePath } from "../core/lint-paths.js";
+import { tText } from "../core/i18n.js";
 
 export function documentOpenPlan(docs, doc) {
   const target = doc?.path ? normalizePath(doc.path) : "";
@@ -20,6 +21,12 @@ export function activeIndexAfterTabClose({ activeIndex, closeIndex, documentCoun
   return Math.max(0, Math.min(remainingCount - 1, next));
 }
 
+export function cyclicDocumentIndex({ activeIndex, documentCount, delta = 1 }) {
+  if (documentCount <= 0) return -1;
+  const current = Math.max(0, Math.min(documentCount - 1, Number(activeIndex) || 0));
+  return ((current + Number(delta || 0)) % documentCount + documentCount) % documentCount;
+}
+
 export function closeDialogMessage(doc) {
-  return `${doc.name} has unsaved changes.`;
+  return tText("dialog.fileUnsaved", { file: doc.name });
 }

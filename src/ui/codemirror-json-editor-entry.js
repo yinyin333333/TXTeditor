@@ -1,7 +1,8 @@
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
+  ViewPlugin,
   drawSelection,
   highlightActiveLine,
   highlightActiveLineGutter,
@@ -19,8 +20,10 @@ import {
   undo
 } from "@codemirror/commands";
 import {
+  closeSearchPanel,
   findNext,
   findPrevious,
+  gotoLine,
   highlightSelectionMatches,
   openSearchPanel,
   searchKeymap
@@ -36,6 +39,67 @@ import {
 import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { lintGutter, linter } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
+import { tText } from "../core/i18n.js";
+
+const jsonLocalePhrases = new Compartment();
+const JSON_EDITOR_PHRASE_KEYS = {
+  Find: "search.title",
+  Replace: "search.replace",
+  next: "search.next",
+  previous: "search.previous",
+  all: "search.all",
+  "match case": "json.matchCase",
+  regexp: "json.regexp",
+  "by word": "json.byWord",
+  replace: "search.replace",
+  "replace all": "search.replaceAll",
+  close: "common.close",
+  "Go to line": "json.goToLine",
+  go: "common.go",
+  "current match": "json.currentMatch",
+  "on line": "json.onLine",
+  "replaced match on line $": "json.replacedMatchOnLine",
+  "replaced $ matches": "json.replacedMatches"
+};
+
+function jsonEditorPhrases() {
+  return Object.fromEntries(Object.entries(JSON_EDITOR_PHRASE_KEYS).map(([phrase, key]) => [phrase, tText(key)]));
+}
+
+function localizeOpenJsonPanels(view) {
+  const searchPanel = view?.dom?.querySelector?.(".cm-search");
+  if (searchPanel) {
+    const searchInput = searchPanel.querySelector("input[name='search']");
+    const replaceInput = searchPanel.querySelector("input[name='replace']");
+    if (searchInput) {
+      searchInput.placeholder = tText("search.title");
+      searchInput.setAttribute("aria-label", tText("search.title"));
+    }
+    if (replaceInput) {
+      replaceInput.placeholder = tText("search.replace");
+      replaceInput.setAttribute("aria-label", tText("search.replace"));
+    }
+    const buttonKeys = { next: "search.next", prev: "search.previous", select: "search.all", replace: "search.replace", replaceAll: "search.replaceAll" };
+    for (const [name, key] of Object.entries(buttonKeys)) {
+      const button = searchPanel.querySelector(`button[name='${name}']`);
+      if (button) button.textContent = tText(key);
+    }
+    const checkboxKeys = { case: "json.matchCase", re: "json.regexp", word: "json.byWord" };
+    for (const [name, key] of Object.entries(checkboxKeys)) {
+      const input = searchPanel.querySelector(`input[name='${name}']`);
+      const textNode = input?.parentElement?.lastChild;
+      if (textNode?.nodeType === 3) textNode.nodeValue = tText(key);
+    }
+    searchPanel.querySelector("button[name='close']")?.setAttribute("aria-label", tText("common.close"));
+  }
+  const lineInput = view?.dom?.querySelector?.(".cm-dialog input[name='line']");
+  if (lineInput) {
+    const labelText = lineInput.parentElement?.firstChild;
+    if (labelText?.nodeType === 3) labelText.nodeValue = `${tText("json.goToLine")}: `;
+    const submit = lineInput.closest("form")?.querySelector("button[type='submit']");
+    if (submit) submit.textContent = tText("common.go");
+  }
+}
 
 const setDiagnosticHighlight = StateEffect.define();
 const diagnosticHighlightField = StateField.define({
@@ -67,6 +131,86 @@ const jsonHighlightStyle = HighlightStyle.define([
   { tag: tags.punctuation, color: "var(--json-punctuation)" }
 ]);
 
+function jsonPanelFromEvent(view, target) {
+  const ElementCtor = view.win.Element;
+  if (!ElementCtor || !(target instanceof ElementCtor)) return null;
+  const panel = target.closest(".cm-panel");
+  return panel && view.dom.contains(panel) ? panel : null;
+}
+
+function isJsonSearchPanel(panel) {
+  return panel.classList.contains("cm-search");
+}
+
+function isJsonGotoLinePanel(panel) {
+  return panel.classList.contains("cm-dialog")
+    && Boolean(panel.querySelector("input[name='line']"));
+}
+
+function isRepeatedJsonPanelShortcut(event, panel) {
+  const key = String(event.key ?? "").toLowerCase();
+  if (isJsonSearchPanel(panel)) {
+    return key === "f"
+      && (event.ctrlKey || event.metaKey)
+      && !event.altKey
+      && !event.shiftKey;
+  }
+  return isJsonGotoLinePanel(panel)
+    && key === "g"
+    && event.ctrlKey
+    && !event.altKey
+    && !event.metaKey
+    && !event.shiftKey;
+}
+
+function handleJsonPanelKeydown(view, event) {
+  const panel = jsonPanelFromEvent(view, event.target);
+  if (!panel || (!isJsonSearchPanel(panel) && !isJsonGotoLinePanel(panel))) return;
+  if (event.key !== "Escape" && !isRepeatedJsonPanelShortcut(event, panel)) return;
+
+  if (isJsonSearchPanel(panel)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeSearchPanel(view);
+    view.focus();
+    return;
+  }
+
+  const closeButton = panel.querySelector(".cm-dialog-close");
+  if (!closeButton) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeButton.click();
+  view.focus();
+}
+
+const jsonPanelKeyboard = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.handleKeydown = (event) => handleJsonPanelKeydown(view, event);
+    view.dom.addEventListener("keydown", this.handleKeydown, true);
+  }
+
+  destroy() {
+    this.view.dom.removeEventListener("keydown", this.handleKeydown, true);
+  }
+});
+
+function focusOpenJsonGotoLine(view) {
+  const input = view.dom.querySelector(".cm-dialog input[name='line']");
+  if (!input) return false;
+  input.focus();
+  input.select();
+  return true;
+}
+
+function openJsonGotoLine(view) {
+  if (focusOpenJsonGotoLine(view)) return true;
+  const opened = gotoLine(view);
+  focusOpenJsonGotoLine(view);
+  return opened;
+}
+
 const txteditorTheme = EditorView.theme({
   "&": {
     height: "100%",
@@ -88,11 +232,53 @@ const txteditorTheme = EditorView.theme({
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
     backgroundColor: "color-mix(in srgb, var(--accent) 28%, transparent) !important"
   },
-  ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--text)" },
-  ".cm-panel input": {
+  ".cm-panels": {
+    backgroundColor: "var(--panel)",
+    color: "var(--text)",
+    fontFamily: '"Segoe UI", Arial, sans-serif',
+    fontSize: "13px"
+  },
+  ".cm-panel.cm-search, .cm-panel.cm-dialog": {
+    padding: "6px 36px 6px 8px",
+    lineHeight: "1.5"
+  },
+  ".cm-panel label": {
+    fontSize: "13px"
+  },
+  ".cm-panel .cm-textfield": {
+    boxSizing: "border-box",
+    height: "28px",
+    padding: "0 8px",
     backgroundColor: "var(--input-bg, var(--surface))",
     color: "var(--text)",
-    border: "1px solid var(--border)"
+    border: "1px solid var(--button-border)",
+    borderRadius: "4px",
+    fontFamily: "inherit",
+    fontSize: "13px"
+  },
+  ".cm-panel button": {
+    boxSizing: "border-box",
+    minHeight: "28px",
+    padding: "0 8px",
+    backgroundColor: "var(--button-bg)",
+    backgroundImage: "none",
+    color: "var(--text)",
+    border: "1px solid var(--button-border)",
+    borderRadius: "4px",
+    fontFamily: "inherit",
+    fontSize: "13px"
+  },
+  ".cm-panel button:hover": { backgroundColor: "var(--hover)" },
+  ".cm-panel button[name='close'], .cm-panel .cm-dialog-close": {
+    width: "28px",
+    minWidth: "28px",
+    padding: "0",
+    backgroundColor: "transparent",
+    borderColor: "transparent"
+  },
+  ".cm-panel button[name='close']:hover, .cm-panel .cm-dialog-close:hover": {
+    backgroundColor: "var(--hover)",
+    borderColor: "var(--button-border)"
   },
   ".cm-tooltip": { backgroundColor: "var(--panel)", color: "var(--text)", border: "1px solid var(--border)" },
   ".cm-diagnostic-focus": {
@@ -110,6 +296,7 @@ export function createJsonEditorState({ text = "", lineSeparator = "\n", onChang
     doc: String(text),
     extensions: [
       EditorState.lineSeparator.of(outputLineSeparator),
+      jsonLocalePhrases.of(EditorState.phrases.of(jsonEditorPhrases())),
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightSpecialChars(),
@@ -126,7 +313,10 @@ export function createJsonEditorState({ text = "", lineSeparator = "\n", onChang
       linter(jsonParseLinter()),
       lintGutter(),
       EditorView.lineWrapping,
+      jsonPanelKeyboard,
       keymap.of([
+        { key: "Ctrl-g", run: openJsonGotoLine },
+        { key: "Mod-Alt-g", run: openJsonGotoLine },
         indentWithTab,
         ...defaultKeymap,
         ...historyKeymap,
@@ -171,6 +361,12 @@ export function refreshJsonEditorAppearance(view) {
   view?.requestMeasure();
 }
 
+export function refreshJsonEditorLocale(view) {
+  if (!view) return;
+  view.dispatch({ effects: jsonLocalePhrases.reconfigure(EditorState.phrases.of(jsonEditorPhrases())) });
+  localizeOpenJsonPanels(view);
+}
+
 export function focusJsonEditor(view) {
   view?.focus();
 }
@@ -185,6 +381,15 @@ export function redoJsonEditor(view) {
 
 export function openJsonSearch(view) {
   return Boolean(view && openSearchPanel(view));
+}
+
+export function openJsonReplace(view) {
+  if (!view) return false;
+  const opened = openSearchPanel(view);
+  const replaceInput = view.dom.querySelector(".cm-search input[name='replace']");
+  replaceInput?.focus();
+  replaceInput?.select();
+  return Boolean(opened);
 }
 
 export function findNextJson(view) {

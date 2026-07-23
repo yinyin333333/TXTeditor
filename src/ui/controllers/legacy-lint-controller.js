@@ -30,6 +30,7 @@ import {
   legacySiblingContextTargets
 } from "../../core/lint-sibling-context.js";
 import { documentKey, normalizePath } from "../../core/lint-paths.js";
+import { tText } from "../../core/i18n.js";
 
 export function createLegacyLintController({
   state,
@@ -129,7 +130,7 @@ export function createLegacyLintController({
     };
     let published = false;
     state.lint.legacy.running = true;
-    state.lint.legacy.status = state.workspace?.files?.length ? "Indexing workspace..." : `Linting ${state.lint.legacy.settings.profile}...`;
+    state.lint.legacy.status = state.workspace?.files?.length ? tText("lint.indexing") : tText("lint.lintingProfile", { profile: state.lint.legacy.settings.profile });
     recordLintEngineEvent("legacy-lint-start", timings);
     timings.renderMs += measureRenderChrome();
     try {
@@ -144,7 +145,7 @@ export function createLegacyLintController({
       const referenceStats = await ensureReferenceDataset(version, state.lint.legacy.settings.profile);
       Object.assign(timings, referenceStats);
       if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
-      state.lint.legacy.status = `Linting ${state.lint.legacy.settings.profile}...`;
+      state.lint.legacy.status = tText("lint.lintingProfile", { profile: state.lint.legacy.settings.profile });
       timings.renderMs += measureRenderChrome();
       await yieldToUi();
       const docs = activeDocuments();
@@ -153,7 +154,7 @@ export function createLegacyLintController({
       timings.usedWorkspaceIndexCache = indexResult.cached;
       const runStarted = perfNow();
       const diagnostics = indexResult.indexes
-        .flatMap((index) => runLintWithWorkspaceIndex(index, state.lint.legacy.settings))
+        .flatMap((index) => runLintWithWorkspaceIndex(index, state.lint.legacy.settings, { locale: state.locale }))
         .sort(compareDiagnostics);
       disambiguateDiagnosticIds(diagnostics);
       timings.runLintMs = elapsedMs(runStarted);

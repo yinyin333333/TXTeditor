@@ -105,18 +105,22 @@ export function vectorTooltipSections({ value = "", hoverText = "", diagnostics 
 export function diagnosticTooltipText(diagnostic = {}) {
   const message = String(diagnostic.message ?? "");
   const guidance = diagnosticUserGuidance(diagnostic);
+  const guidanceHeading = stringField(diagnostic.data?.localizedGuidanceHeading) || "What to do";
   const trimmedMessage = message.trim();
   const trimmedGuidance = guidance.trim();
   const alreadyIncluded = trimmedGuidance
     && (trimmedMessage === trimmedGuidance || trimmedMessage.endsWith(trimmedGuidance));
   return trimmedGuidance && !alreadyIncluded
-    ? `${message}\n\nWhat to do:\n${guidance}`
+    ? `${message}\n\n${guidanceHeading}:\n${guidance}`
     : message;
 }
 
 export function diagnosticUserGuidance(diagnostic = {}) {
   const data = diagnostic.data;
   if (!data || typeof data !== "object") return "";
+  const localizedGuidance = stringField(data.localizedGuidance);
+  if (localizedGuidance) return localizedGuidance;
+  if (data.localizedMessage === true) return "";
   const insertText = stringField(data.insertText) || stringField(data.expected);
   if (data.kind === "missing-token" && insertText) return `Insert '${insertText}' at the marked position.`;
   if (data.kind === "unexpected-character") {

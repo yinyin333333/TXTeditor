@@ -1,3 +1,5 @@
+import { tText } from "../core/i18n.js";
+
 export const DEFAULT_GRID_FONT = "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace";
 
 export const FONT_OPTIONS = [
@@ -64,35 +66,35 @@ export function appSettingsVisualControls({
   gridFont = DEFAULT_GRID_FONT
 } = {}) {
   return {
-    colorize: { id: "settingsColorizeColumns", label: "Colorize columns", checked: Boolean(colorizeColumns) },
+    colorize: { id: "settingsColorizeColumns", label: tText("settings.colorizeColumns"), checked: Boolean(colorizeColumns) },
     mouseResize: {
       id: "settingsMouseResizeLocked",
-      label: "Lock mouse row and column resizing",
+      label: tText("settings.lockResize"),
       checked: Boolean(mouseResizeLocked)
     },
     workspaceSubfolders: {
       id: "settingsExcludeWorkspaceSubfolders",
-      label: "Exclude subfolders when opening a folder",
+      label: tText("settings.excludeSubfolders"),
       checked: Boolean(excludeWorkspaceSubfolders)
     },
     vectorHover: {
       id: "settingsVectorLspHover",
-      label: "Vector-LSP Hover",
+      label: tText("settings.vectorHover"),
       checked: Boolean(vectorLspHover),
       disabled: Boolean(legacyLintEngine),
       hintId: "settingsVectorLspHoverHint",
       hintHidden: !legacyLintEngine,
-      hintText: "Vector-LSP Hover is only available when the Vector-LSP lint engine is selected."
+      hintText: tText("settings.vectorHoverHint")
     },
     font: {
       id: "settingsGridFont",
-      label: "Font",
+      label: tText("settings.font"),
       value: normaliseGridFont(gridFont),
       options: FONT_OPTIONS
     },
     themes: [
-      { theme: "dark", label: "Dark", active: theme !== "light" },
-      { theme: "light", label: "Light", active: theme === "light" }
+      { theme: "dark", label: tText("theme.dark"), active: theme !== "light" },
+      { theme: "light", label: tText("theme.light"), active: theme === "light" }
     ]
   };
 }

@@ -1,4 +1,5 @@
 mod app_bootstrap;
+mod clipboard;
 mod config;
 mod file_io;
 mod launch_paths;
@@ -16,10 +17,12 @@ use tauri::Manager;
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(clipboard::ClipboardService::new())
         .manage(lsp_service::LspManager::new())
         .setup(app_bootstrap::setup_app)
         .invoke_handler(tauri::generate_handler![
+            clipboard::read_clipboard_text,
+            clipboard::write_clipboard_text,
             file_io::open_files_dialog,
             file_io::open_folder_dialog,
             file_io::save_file_dialog,
@@ -34,6 +37,7 @@ pub fn run() {
             config::pick_file_path,
             reference_data::load_lint_reference_dataset,
             lsp_service::lsp_start,
+            lsp_service::lsp_stop,
             lsp_service::lsp_open_file,
             lsp_service::lsp_update_file,
             lsp_service::lsp_update_file_incremental,
@@ -48,6 +52,7 @@ pub fn run() {
         .expect("error while building txteditor");
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<clipboard::ClipboardService>().shutdown();
             app_handle.state::<lsp_service::LspManager>().shutdown();
         }
     });
