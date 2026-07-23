@@ -339,6 +339,29 @@ export function createJsonEditorView({ parent, state }) {
   return new EditorView({ parent, state });
 }
 
+export function jsonSearchSnapshot(view) {
+  if (!view) return null;
+  const selection = view.state.selection.main;
+  return {
+    text: view.state.doc.toString(),
+    from: selection.from,
+    to: selection.to
+  };
+}
+
+export function selectJsonSearchRange(view, { start, end = start } = {}) {
+  if (!view) return false;
+  const max = view.state.doc.length;
+  const anchor = Math.max(0, Math.min(max, Number(start) || 0));
+  const head = Math.max(anchor, Math.min(max, Number(end) || anchor));
+  view.dispatch({
+    selection: { anchor, head },
+    effects: EditorView.scrollIntoView(anchor, { y: "center" })
+  });
+  view.focus();
+  return true;
+}
+
 export function selectAndReveal(view, { start, end = start } = {}) {
   const max = view.state.doc.length;
   const anchor = Math.max(0, Math.min(max, Number(start) || 0));

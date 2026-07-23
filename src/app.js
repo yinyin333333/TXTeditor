@@ -71,12 +71,12 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
   onDocumentChanged: (doc, changeMeta = {}) => {
-    renderChrome(); lspController?.updateDoc(doc, { kind: "json", changes: changeMeta.changes })
+    searchController?.notifyDocumentChanged(doc); renderChrome(); lspController?.updateDoc(doc, { kind: "json", changes: changeMeta.changes })
       .catch((error) => handleLspUpdateError(doc, error, "json-edit"));
   },
   onLoadError: showError
@@ -327,7 +327,7 @@ documentController = createDocumentController({
   resetWorkspaceView: () => shellController?.resetWorkspaceView(),
   scrollProblemsToActiveFile
 });
-const searchController = createSearchController({
+searchController = createSearchController({
   state,
   els,
   grid,
@@ -336,6 +336,8 @@ const searchController = createSearchController({
   saveSelectionState,
   applyEdits,
   jsonSearch: jsonEditorController,
+  selectTableMatch: (start, end) => cellInputController?.selectTextRange(start, end),
+  escapeHtml,
   focusActiveEditor
 });
 const editCommandController = createEditCommandController({
@@ -513,6 +515,7 @@ function activeDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
 
 function activateDocument(doc = activeDoc(), options) {
   const result = documentEditorController.activateDocument(doc, options);
+  searchController?.notifyDocumentActivated(doc);
   cellInputController?.refresh({ force: true });
   return result;
 }
@@ -556,7 +559,10 @@ function execute(command) {
 function finishCommand(doc, command, context = "edit", started = perfNow()) {
   if (!isTableDocument(doc)) return;
   const contentChanged = command.contentChanged !== false;
-  if (contentChanged) markLegacyLintDocChanged(doc);
+  if (contentChanged) {
+    markLegacyLintDocChanged(doc);
+    searchController?.notifyDocumentChanged(doc);
+  }
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
   saveSelectionState(doc);
   grid.layout();

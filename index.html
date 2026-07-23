@@ -95,12 +95,17 @@
           <label for="searchReplaceInput" data-i18n="search.replaceWith">Replace with</label>
           <input id="searchReplaceInput" class="modal-input" type="text" autocomplete="off" spellcheck="false" />
         </div>
-        <fieldset class="search-scope" aria-label="Search scope" data-i18n-aria-label="search.scope">
-          <label><input type="radio" name="searchScope" value="all" checked /> <span data-i18n="search.allCells">All cells</span></label>
-          <label><input type="radio" name="searchScope" value="column-titles" /> <span data-i18n="search.columnOnly">Column only</span></label>
-          <label><input type="radio" name="searchScope" value="row-titles" /> <span data-i18n="search.rowOnly">Row only</span></label>
-        </fieldset>
-        <div id="searchStatus" class="search-status"></div>
+        <div class="search-options">
+          <fieldset id="searchScope" class="search-scope" aria-label="Search scope" data-i18n-aria-label="search.scope">
+            <label><input type="radio" name="searchScope" value="all" checked /> <span data-i18n="search.allCells">All cells</span></label>
+            <label><input type="radio" name="searchScope" value="column-titles" /> <span data-i18n="search.columnOnly">Column only</span></label>
+            <label><input type="radio" name="searchScope" value="row-titles" /> <span data-i18n="search.rowOnly">Row only</span></label>
+          </fieldset>
+          <label class="search-match-case"><input id="searchMatchCase" type="checkbox" /> <span data-i18n="search.matchCase">Match case</span></label>
+        </div>
+        <div id="searchStatus" class="search-status" aria-live="polite"></div>
+        <div id="searchResultsSummary" class="search-results-summary hidden" aria-live="polite"></div>
+        <div id="searchResults" class="search-results hidden" role="listbox" tabindex="0" data-i18n-aria-label="search.results"></div>
         <div id="searchReplaceActions" class="modal-actions search-replace-actions hidden">
           <button data-search-replace data-i18n="search.replace">Replace</button>
           <button data-search-replace-all data-i18n="search.replaceAll">Replace All</button>
@@ -108,6 +113,7 @@
         <div class="modal-actions">
           <button data-search-previous aria-keyshortcuts="Shift+Enter" data-i18n="search.previous">Find Prev</button>
           <button data-command="find-next" aria-keyshortcuts="Enter" data-i18n="search.next">Find Next</button>
+          <button id="searchFindAll" data-search-find-all data-i18n="search.findAll">Find All</button>
           <button data-search-close data-i18n="common.close">Close</button>
         </div>
       </div>
