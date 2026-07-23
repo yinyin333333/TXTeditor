@@ -1,7 +1,7 @@
 [package]
 name = "txteditor"
-version = "0.4.8"
-description = "TXTeditor 0.4.8 - a fast tabular text editor"
+version = "0.4.9"
+description = "TXTeditor 0.4.9 - a fast tabular text editor"
 authors = ["yinyin333333"]
 license = "GPL-3.0-or-later"
 edition = "2021"
