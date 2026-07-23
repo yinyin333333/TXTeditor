@@ -27,6 +27,8 @@ export function createCommandSurfaceController({
   showError,
   escapeHtml
 }) {
+  let diagnosticContextMenu = null;
+
   function showPalette() {
     hideContextMenu();
     els.palette.classList.remove("hidden");
@@ -51,6 +53,7 @@ export function createCommandSurfaceController({
   }
 
   function showContextMenu({ x, y, hit }) {
+    diagnosticContextMenu = null;
     state.contextHit = hit;
     state.contextMenuActiveGroup = "";
     setContextMenuOpen(true);
@@ -95,14 +98,42 @@ export function createCommandSurfaceController({
     positionContextMenu();
   }
 
+  function showDiagnosticContextMenu({ x, y, onCopyMessage, onCopyFull }) {
+    diagnosticContextMenu = { x, y, onCopyMessage, onCopyFull };
+    state.contextHit = null;
+    state.contextMenuActiveGroup = "";
+    setContextMenuOpen(true);
+    const entries = [
+      { id: "message", label: tText("problems.copyMessage") },
+      { id: "full", label: tText("problems.copyFull") }
+    ];
+    els.contextMenu.innerHTML = entries.map((entry) => (
+      `<button data-diagnostic-copy="${entry.id}"><span>${escapeHtml(entry.label)}</span></button>`
+    )).join("");
+    for (const button of els.contextMenu.querySelectorAll("button[data-diagnostic-copy]")) {
+      button.addEventListener("click", () => {
+        const callback = button.dataset.diagnosticCopy === "message" ? onCopyMessage : onCopyFull;
+        Promise.resolve(callback?.()).catch(showError);
+        hideContextMenu();
+      });
+    }
+    els.contextMenu.classList.remove("hidden");
+    els.contextMenu.dataset.x = String(x);
+    els.contextMenu.dataset.y = String(y);
+    positionContextMenu();
+  }
+
   function rerenderOpenSurface() {
     if (!els.palette.classList.contains("hidden")) renderPalette();
     if (!els.contextMenu.classList.contains("hidden")) {
-      showContextMenu({
-        x: Number(els.contextMenu.dataset.x),
-        y: Number(els.contextMenu.dataset.y),
-        hit: state.contextHit
-      });
+      if (diagnosticContextMenu) showDiagnosticContextMenu(diagnosticContextMenu);
+      else {
+        showContextMenu({
+          x: Number(els.contextMenu.dataset.x),
+          y: Number(els.contextMenu.dataset.y),
+          hit: state.contextHit
+        });
+      }
     }
   }
 
@@ -158,6 +189,7 @@ export function createCommandSurfaceController({
 
   function hideContextMenu() {
     els.contextMenu.classList.add("hidden");
+    diagnosticContextMenu = null;
     Object.assign(state, contextMenuHiddenState());
     setContextMenuOpen(false);
     closeContextSubmenu();
@@ -201,6 +233,7 @@ export function createCommandSurfaceController({
     renderPalette,
     setContextMenuOpen,
     showContextMenu,
+    showDiagnosticContextMenu,
     showPalette
   };
 }

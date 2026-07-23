@@ -1282,7 +1282,8 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
     }]
   });
   assert.match(jsonProblems, /skills\.json/);
-  assert.match(jsonProblems, /data-diagnostic-id="json:1" disabled aria-disabled="true"/);
+  assert.match(jsonProblems, /data-diagnostic-id="json:1" aria-disabled="true"/);
+  assert.doesNotMatch(jsonProblems, /\sdisabled(?:\s|>)/);
 });
 
 test("Find Next includes the current cell once when the query changes", () => {

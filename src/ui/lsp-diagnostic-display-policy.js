@@ -1,3 +1,5 @@
+import { rowLabelFor, tableFromDocument } from "../core/lint-table.js";
+
 export function mapLspDiagnosticToDisplay(diagnostic, {
   uri = "",
   fileKey = "",
@@ -19,6 +21,8 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
     ? numberOr(diagnostic?.startCharacter, tableColumnIndex)
     : tableColumnIndex;
   const cellValue = knownCellValue(doc, rowIndex, columnIndex);
+  const columnName = knownColumnName(doc, columnIndex);
+  const rowLabel = knownRowLabel(doc, rowIndex);
   const data = diagnostic?.data ?? null;
   const code = diagnostic?.code == null ? "" : String(diagnostic.code);
   const range = displayDiagnosticRange(diagnostic, cellValue, data);
@@ -37,6 +41,10 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
     rowIndex,
     endRowIndex,
     columnIndex,
+    columnName,
+    rowLabel,
+    recordKey: rowLabel,
+    ...(cellValue == null ? {} : { offendingValue: cellValue }),
     severity: diagnostic?.severity ?? "warning",
     message: diagnostic?.message ?? "",
     ruleId: code,
@@ -50,6 +58,18 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
 
 function isJsonResource(value) {
   return /\.json$/i.test(String(value ?? "").trim());
+}
+
+
+function knownColumnName(doc, columnIndex) {
+  if (!doc || typeof doc.getCell !== "function") return "";
+  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= Number(doc.columnCount)) return "";
+  return String(doc.getCell(0, columnIndex) ?? "");
+}
+
+function knownRowLabel(doc, rowIndex) {
+  const table = tableFromDocument(doc);
+  return table ? rowLabelFor(table, rowIndex) : "";
 }
 
 function knownCellValue(doc, rowIndex, columnIndex) {

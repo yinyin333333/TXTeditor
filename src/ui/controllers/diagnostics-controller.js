@@ -1,5 +1,13 @@
 import { TableDocument, clamp } from "../../core/table-model.js";
 import { isTauriRuntime, openNativePaths } from "../../core/io.js";
+import { tText } from "../../core/i18n.js";
+import { writeClipboardText } from "../app-runtime-utils.js";
+import {
+  DIAGNOSTIC_COPY_FULL,
+  DIAGNOSTIC_COPY_MESSAGE,
+  diagnosticCopyText,
+  isDiagnosticCopyShortcut
+} from "../diagnostic-copy-policy.js";
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { groupDiagnosticsByCell } from "../../core/lint-engine.js";
 import {
@@ -41,6 +49,7 @@ export function createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
+  showDiagnosticContextMenu = () => {},
   saveSelectionState = () => {},
   storage = localStorage
 }) {
@@ -180,7 +189,7 @@ export function createDiagnosticsController({
     if (!state.problemsVisible || !els.problemsList) return;
     const doc = activeDoc();
     if (!doc?.name) return;
-    const target = els.problemsList.querySelector(`details[data-file-name="${CSS.escape(doc.name)}"]`);
+    const target = els.problemsList.querySelector(`details[data-file-key="${CSS.escape(lintDocKey(doc))}"]`);
     if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
@@ -188,8 +197,48 @@ export function createDiagnosticsController({
     return diagnosticsForDoc(doc).length > 0;
   }
 
+  function diagnosticById(id) {
+    return state.lint.diagnostics.find((item) => item.id === id) ?? null;
+  }
+
+  async function copyDiagnostic(id, mode = DIAGNOSTIC_COPY_FULL) {
+    const diagnostic = diagnosticById(id);
+    if (!diagnostic) return false;
+    try {
+      await writeClipboardText(diagnosticCopyText(diagnostic, mode));
+      return true;
+    } catch (error) {
+      showError(tText("error.clipboardCopy", {
+        error: error instanceof Error ? error.message : String(error)
+      }));
+      return false;
+    }
+  }
+
+  function openDiagnosticContextMenu(event, button) {
+    const id = button?.dataset?.diagnosticId;
+    if (!id || !diagnosticById(id)) return;
+    event.preventDefault();
+    button.focus?.();
+    showDiagnosticContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      onCopyMessage: () => copyDiagnostic(id, DIAGNOSTIC_COPY_MESSAGE),
+      onCopyFull: () => copyDiagnostic(id, DIAGNOSTIC_COPY_FULL)
+    });
+  }
+
+  function handleDiagnosticKeydown(event, button) {
+    if (!isDiagnosticCopyShortcut(event)) return;
+    const id = button?.dataset?.diagnosticId;
+    if (!id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    copyDiagnostic(id, DIAGNOSTIC_COPY_FULL).catch(showError);
+  }
+
   async function goToDiagnostic(id) {
-    const diagnostic = state.lint.diagnostics.find((item) => item.id === id);
+    const diagnostic = diagnosticById(id);
     if (!diagnostic || diagnostic.navigationDisabled) return;
     if (diagnostic.documentKind === "json") {
       const doc = await openJsonDocumentPath(diagnostic.filePath, { requireCurrentMode: true, focus: false });
@@ -258,15 +307,17 @@ export function createDiagnosticsController({
     }
     els.problemsList.innerHTML = renderProblemsPanel();
     els.problemsList.dataset.renderKey = key;
-    for (const details of els.problemsList.querySelectorAll("details[data-file-name]")) {
+    for (const details of els.problemsList.querySelectorAll("details[data-file-key]")) {
       details.addEventListener("toggle", () => {
-        const fn = details.dataset.fileName;
-        if (details.open) collapsedProblemFiles.delete(fn);
-        else collapsedProblemFiles.add(fn);
+        const fileKey = details.dataset.fileKey;
+        if (details.open) collapsedProblemFiles.delete(fileKey);
+        else collapsedProblemFiles.add(fileKey);
       });
     }
     for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
       button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
+      button.addEventListener("contextmenu", (event) => openDiagnosticContextMenu(event, button));
+      button.addEventListener("keydown", (event) => handleDiagnosticKeydown(event, button));
     }
     const effect = problemsPanelRenderEffect(decision);
     if (effect.updateActiveHighlight) updateActiveProblemHighlight();
@@ -385,6 +436,7 @@ export function createDiagnosticsController({
   }
 
   return {
+    copyDiagnostic,
     docDiagnosticSeverity,
     docHasDiagnostics,
     goToDiagnostic,

@@ -1099,6 +1099,8 @@ test("Problems panel policy renders grouped diagnostics and summary text", () =>
       fileKey: "data/b.txt",
       rowIndex: 2,
       columnIndex: 3,
+      columnName: "par8",
+      rowLabel: "Fire Ball",
       severity: "warning",
       message: "Needs <value>",
       ruleId: "Rule/B",
@@ -1139,11 +1141,12 @@ test("Problems panel policy renders grouped diagnostics and summary text", () =>
     vectorEngine: true,
     lspStarted: true,
     diagnostics,
-    collapsedFiles: new Set(["b.txt"])
+    collapsedFiles: new Set(["data/b.txt"])
   });
-  assert.match(html, /data-file-name="a\.txt" open/);
-  assert.match(html, /data-file-name="b\.txt">/);
-  assert.match(html, /<span class="problem-location">R3:C4<\/span>/);
+  assert.match(html, /data-file-name="a\.txt" data-file-key="data\/a\.txt" open/);
+  assert.match(html, /data-file-name="b\.txt" data-file-key="data\/b\.txt">/);
+  assert.match(html, /<span class="problem-location">Display row 3 · par8<\/span>/);
+  assert.match(html, /<span class="problem-record">Record Fire Ball<\/span>/);
   assert.match(html, /Needs &lt;value&gt;/);
   assert.match(html, /data-diagnostic-id="b&amp;2"/);
   assert.match(html, /<span class="problem-rule">Rule\/B<\/span>/);

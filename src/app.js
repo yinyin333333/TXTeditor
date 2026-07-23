@@ -71,7 +71,7 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null, cellInputController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
@@ -101,6 +101,7 @@ const diagnosticsController = createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
+  showDiagnosticContextMenu: (options) => commandSurfaceController?.showDiagnosticContextMenu(options),
   saveSelectionState,
   storage: localStorage
 });
@@ -415,7 +416,7 @@ const commandController = createCommandController({
   }
 });
 const { commandLabels, commands } = commandController;
-const commandSurfaceController = createCommandSurfaceController({
+commandSurfaceController = createCommandSurfaceController({
   state,
   els,
   grid,
