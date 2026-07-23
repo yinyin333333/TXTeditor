@@ -89,7 +89,9 @@
 
     <div id="searchPanel" class="modal-backdrop search-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
       <div class="modal search-modal">
-        <h2 id="searchTitle" data-search-drag-handle data-i18n="search.title">Find</h2>
+        <header class="search-modal-header" data-search-drag-handle>
+          <h2 id="searchTitle" data-i18n="search.title">Find</h2>
+        </header>
         <input id="searchInput" class="modal-input" type="search" data-i18n-placeholder="search.placeholder" placeholder="Search in current table" autocomplete="off" spellcheck="false" />
         <div id="searchReplaceRow" class="search-replace-row hidden">
           <label for="searchReplaceInput" data-i18n="search.replaceWith">Replace with</label>

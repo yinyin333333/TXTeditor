@@ -1840,13 +1840,25 @@ details:not([open]) .problem-file-header::before {
   margin: 0;
 }
 
-.search-modal [data-search-drag-handle] {
+.search-modal-header {
+  display: flex;
+  box-sizing: border-box;
+  width: auto;
+  min-height: 45px;
+  margin: -18px -18px 0;
+  padding: 18px 18px 8px;
+  align-items: center;
+  border-radius: 7px 7px 0 0;
   cursor: move;
   touch-action: none;
   user-select: none;
 }
 
-.search-modal [data-search-drag-handle]:active {
+.search-modal-header h2 {
+  margin: 0;
+}
+
+.search-modal.search-modal-dragging .search-modal-header {
   cursor: grabbing;
 }
 

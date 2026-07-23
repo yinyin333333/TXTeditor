@@ -88,7 +88,7 @@ export function createSearchController({
   }
 
   function beginSearchDrag(event) {
-    if (!searchModal || event.button !== 0 || event.isPrimary === false) return;
+    if (!searchModal || event.button !== 0 || event.isPrimary === false || isInteractiveDragTarget(event.target)) return;
     const rect = searchModal.getBoundingClientRect();
     searchDrag = {
       pointerId: event.pointerId,
@@ -96,6 +96,7 @@ export function createSearchController({
       offsetY: event.clientY - rect.top
     };
     setSearchModalPosition(rect.left, rect.top);
+    searchModal.classList.add("search-modal-dragging");
     event.preventDefault();
     if (Number.isFinite(event.pointerId)) event.currentTarget.setPointerCapture?.(event.pointerId);
   }
@@ -113,6 +114,7 @@ export function createSearchController({
     if (!searchDrag || event.pointerId !== searchDrag.pointerId) return;
     if (Number.isFinite(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
     searchDrag = null;
+    searchModal?.classList.remove("search-modal-dragging");
   }
 
   function showSearch() {
@@ -152,6 +154,7 @@ export function createSearchController({
 
   function closeSearch() {
     searchDrag = null;
+    searchModal?.classList.remove("search-modal-dragging");
     findAllGeneration += 1;
     findAllPendingSnapshot = null;
     els.searchPanel.classList.add("hidden");
@@ -593,6 +596,10 @@ export function createSearchController({
     showSearch,
     wireEvents
   };
+}
+
+function isInteractiveDragTarget(target) {
+  return Boolean(target?.closest?.("input, button, select, textarea, a, [contenteditable='true']"));
 }
 
 function setElementHidden(element, hidden) {
