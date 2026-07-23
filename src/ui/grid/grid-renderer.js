@@ -223,6 +223,13 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
   const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
   ctx.fillStyle = baseBackground;
   ctx.fillRect(x, y, width, height);
+  const manualHighlight = !selected && !activeColumnHeader && typeof grid.manualHighlightColor === "function"
+    ? grid.manualHighlightColor(row, column)
+    : null;
+  if (manualHighlight) {
+    ctx.fillStyle = manualHighlight;
+    ctx.fillRect(x, y, width, height);
+  }
   const gridLine = cellGridLineColor({ selected, frozen });
   ctx.strokeStyle = gridLine;
   ctx.strokeRect(x, y, width, height);

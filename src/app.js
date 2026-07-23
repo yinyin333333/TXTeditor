@@ -54,6 +54,7 @@ import { createSettingsController } from "./ui/controllers/settings-controller.j
 import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
 import { createLocaleController, initializeLocale } from "./ui/controllers/locale-controller.js";
+import { createManualHighlightController } from "./ui/manual-highlight.js";
 import { t, tText } from "./core/i18n.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
@@ -71,7 +72,7 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null, manualHighlightController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
@@ -153,7 +154,6 @@ const {
   workspaceFileStatesForExplorer: legacyWorkspaceFileStatesForExplorer,
   workspaceTxtFiles: legacyWorkspaceTxtFiles
 } = legacyLintController;
-
 syncDockLayout();
 
 let shellController = null;
@@ -178,8 +178,9 @@ const grid = new CanvasGrid({
     saveSelectionState();
     diagnosticsController.handleSelectionChanged();
     cellInputController?.refresh();
-  }
+  }, highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
 });
+manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage, confirmClear: ({ message }) => Promise.resolve(globalThis.confirm?.(message) ?? true) });
 
 documentEditorController = createDocumentEditorController({
   grid,
@@ -188,7 +189,6 @@ documentEditorController = createDocumentEditorController({
   selection: state.selection,
   applyFreezeToDoc
 });
-
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
 grid.setMouseResizeLocked(state.mouseResizeLocked);
@@ -325,7 +325,7 @@ documentController = createDocumentController({
   isLegacyLintEngine,
   setLintDiagnostics, updateGridDiagnostics,
   resetWorkspaceView: () => shellController?.resetWorkspaceView(),
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile, ...manualHighlightController.documentLifecycleHooks()
 });
 searchController = createSearchController({
   state,
@@ -429,7 +429,7 @@ commandSurfaceController = createCommandSurfaceController({
   cellHasReference,
   clearVisibleLspHover,
   showError,
-  escapeHtml
+  escapeHtml, manualHighlights: manualHighlightController
 });
 shellController = createShellController({
   state,
@@ -526,7 +526,6 @@ function commitActiveEditor() {
 function focusActiveEditor() { documentEditorController.focusDocument(activeDoc()); }
 
 function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
-
 function saveSelectionState(doc = activeDoc()) { if (hasOpenDocument() && doc !== EMPTY_DOC) documentEditorController.saveViewState(doc); }
 
 function isVectorLintEngine() {
@@ -551,13 +550,14 @@ function execute(command) {
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
-  command.redo(doc);
+  manualHighlightController.executeTableCommand(doc, command);
   documentEditorController.pushTableCommand(doc, command);
   finishCommand(doc, command, "edit", started);
 }
 
 function finishCommand(doc, command, context = "edit", started = perfNow()) {
   if (!isTableDocument(doc)) return;
+  if (context === "undo" || context === "redo") manualHighlightController.afterCommand(doc, command, context);
   const contentChanged = command.contentChanged !== false;
   if (contentChanged) {
     markLegacyLintDocChanged(doc);

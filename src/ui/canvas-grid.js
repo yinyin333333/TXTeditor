@@ -3,6 +3,7 @@ import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction,
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
 import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
+import { MANUAL_HIGHLIGHT_IDS } from "./manual-highlight.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
 import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, clampedGridScrollOffsets, edgeCellScrollState, wheelScrollOffsets } from "./grid-viewport-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
@@ -28,7 +29,7 @@ export const VECTOR_LSP_HOVER_DELAY_MS = 0;
 export { gridColor } from "./grid-render-policy.js";
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged, highlightColorForCell = null }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -47,6 +48,8 @@ export class CanvasGrid {
     this.onHoverInvalidated = onHoverInvalidated;
     this.onViewportChanged = onViewportChanged;
     this.onSelectionChanged = onSelectionChanged;
+    this.highlightColorForCell = highlightColorForCell;
+    this.manualHighlightColors = new Map();
     this._lspHoverByCell = new Map();
     this._hoveredCell = null;
     this._lastTooltipX = 0;
@@ -252,6 +255,15 @@ export class CanvasGrid {
   syncTheme() {
     const style = getComputedStyle(document.documentElement);
     syncGridThemeFromStyle(style);
+    this.manualHighlightColors = new Map(MANUAL_HIGHLIGHT_IDS.map((id) => [
+      id,
+      style.getPropertyValue(`--grid-manual-highlight-${id}`).trim()
+    ]));
+  }
+
+  manualHighlightColor(row, column) {
+    const id = this.highlightColorForCell?.(this.doc, row, column);
+    return id ? this.manualHighlightColors.get(id) || null : null;
   }
 
   layoutCanvas(canvas, ctx, rect) {

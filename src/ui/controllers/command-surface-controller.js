@@ -13,6 +13,7 @@ import {
 } from "../context-menu-policy.js";
 import { shortcutDisplayForAction } from "../shortcut-policy.js";
 import { tText } from "../../core/i18n.js";
+import { MANUAL_HIGHLIGHT_PALETTE } from "../manual-highlight.js";
 
 export function createCommandSurfaceController({
   state,
@@ -25,7 +26,8 @@ export function createCommandSurfaceController({
   cellHasReference,
   clearVisibleLspHover,
   showError,
-  escapeHtml
+  escapeHtml,
+  manualHighlights = null
 }) {
   let diagnosticContextMenu = null;
 
@@ -68,6 +70,7 @@ export function createCommandSurfaceController({
       { id: "unhide-all", label: tText("menu.unhideAll"), disabled: !canUnhide },
       { type: "submenu", label: tText("menu.fill"), items: fillCommandItems() },
       { type: "submenu", label: tText("menu.math"), items: mathCommandItems() },
+      { type: "submenu", label: tText("highlight.menu"), items: highlightItems() },
       { id: "go-to-definition", label: tText("menu.goToDefinition"), disabled: !cellHasReference(focusRow, focusCol) },
       { id: "cut", label: tText("command.cut"), shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
       { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
@@ -77,6 +80,22 @@ export function createCommandSurfaceController({
     for (const button of els.contextMenu.querySelectorAll("button[data-run]")) {
       button.addEventListener("click", () => {
         Promise.resolve(runCommand(button.dataset.run)).catch(showError);
+        hideContextMenu();
+      });
+    }
+    for (const button of els.contextMenu.querySelectorAll("button[data-highlight-color]")) {
+      button.addEventListener("click", () => {
+        Promise.resolve(manualHighlights?.applyColor(button.dataset.highlightColor)).catch(showError);
+        hideContextMenu();
+      });
+    }
+    for (const button of els.contextMenu.querySelectorAll("button[data-highlight-action]")) {
+      button.addEventListener("click", () => {
+        const action = button.dataset.highlightAction;
+        const result = action === "remove"
+          ? manualHighlights?.removeSelection()
+          : manualHighlights?.clearAll();
+        Promise.resolve(result).catch(showError);
         hideContextMenu();
       });
     }
@@ -213,7 +232,41 @@ export function createCommandSurfaceController({
 
   function submenu(label, items) {
     const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(menuButton).join("")}</div></div>`;
+    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(submenuEntry).join("")}</div></div>`;
+  }
+
+  function submenuEntry(item) {
+    if (item.type === "separator") return `<div class="separator" role="separator"></div>`;
+    if (item.type === "highlight-color") {
+      return `<button data-highlight-color="${escapeHtml(item.color)}"><span class="highlight-menu-label"><span class="highlight-swatch" data-highlight-color="${escapeHtml(item.color)}"></span>${escapeHtml(item.label)}</span></button>`;
+    }
+    if (item.type === "highlight-action") {
+      return `<button data-highlight-action="${escapeHtml(item.action)}" ${item.disabled ? "disabled" : ""}><span>${escapeHtml(item.label)}</span></button>`;
+    }
+    return menuButton(item);
+  }
+
+  function highlightItems() {
+    return [
+      ...MANUAL_HIGHLIGHT_PALETTE.map(({ id, labelKey }) => ({
+        type: "highlight-color",
+        color: id,
+        label: tText(labelKey)
+      })),
+      { type: "separator" },
+      {
+        type: "highlight-action",
+        action: "remove",
+        label: tText("highlight.remove"),
+        disabled: !manualHighlights?.selectionHasHighlight?.()
+      },
+      {
+        type: "highlight-action",
+        action: "clear-all",
+        label: tText("highlight.clearAll"),
+        disabled: !manualHighlights?.hasAnyHighlights?.()
+      }
+    ];
   }
 
   function rowItems() {
