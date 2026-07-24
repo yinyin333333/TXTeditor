@@ -322,7 +322,8 @@ fn protect_fenced_code_blocks(text: &str) -> (String, Vec<String>) {
     let mut cursor = 0;
 
     while cursor < text.len() {
-        let at_line_start = cursor == 0 || text.as_bytes().get(cursor.wrapping_sub(1)) == Some(&b'\n');
+        let at_line_start =
+            cursor == 0 || text.as_bytes().get(cursor.wrapping_sub(1)) == Some(&b'\n');
         let remaining = &text[cursor..];
         let fence_len = if at_line_start {
             remaining.bytes().take_while(|byte| *byte == b'`').count()
@@ -849,7 +850,8 @@ mod tests {
 
     #[test]
     fn strip_markdown_for_tooltip_preserves_fenced_cell_values_verbatim() {
-        let text = "**Cell value**\n\n````text\n a```$!b!$**c** \n````\n\n**Character count: 16/255**";
+        let text =
+            "**Cell value**\n\n````text\n a```$!b!$**c** \n````\n\n**Character count: 16/255**";
         let plain = strip_markdown_for_tooltip(text);
         assert!(plain.contains(" a```$!b!$**c** "));
         assert!(plain.contains("Character count: 16/255"));
