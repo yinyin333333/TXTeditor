@@ -143,7 +143,11 @@ export function problemsPanelHtml({
         const location = diagnosticDisplayLocation(diagnostic);
         return `
         <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? ` aria-disabled="true" title="${t("problems.jsonReadOnly")}"` : ""}>
-          <span class="problem-location">${escapeHtml(location.locationText)}</span>
+          <span class="problem-location" title="${escapeHtml(location.locationText)}">
+            <span class="problem-row-location">${escapeHtml(location.rowText)}</span>
+            <span class="problem-location-separator" aria-hidden="true">·</span>
+            <span class="problem-column-location">${escapeHtml(location.columnText)}</span>
+          </span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
           ${diagnostic.profile ? `<span class="problem-rule">${escapeHtml(diagnostic.profile)}</span>` : ""}

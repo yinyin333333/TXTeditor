@@ -26,6 +26,8 @@ export function diagnosticDisplayLocation(diagnostic = {}, translate = tText) {
     rowId,
     column,
     record,
+    rowText: translate("problems.displayRow", { row: rowId }),
+    columnText: translate("problems.displayColumn", { column }),
     locationText: translate("problems.displayLocation", { row: rowId, column })
   };
 }

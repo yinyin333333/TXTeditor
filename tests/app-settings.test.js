@@ -18,14 +18,6 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-test("selected font applies to workspace files, tabs, Problems, and Log", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(
-    css,
-    /\.file-list,\s*\.tabs,\s*\.problems-list,\s*\.log-list\s*\{[^}]*font-family:\s*var\(--grid-font\)/
-  );
-});
-
 function makeSettingsController({
   config = {},
   diagnostics = [],

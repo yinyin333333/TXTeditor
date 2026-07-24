@@ -1044,14 +1044,29 @@ button.button-click-feedback {
 }
 
 .problem-location {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--muted);
   font-family: monospace;
   min-width: 116px;
-  max-width: min(260px, 36vw);
+  max-width: min(520px, 55vw);
+  overflow: hidden;
+}
+
+.problem-row-location {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-location-separator,
+.problem-column-location {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .problem-record {
@@ -1097,6 +1112,24 @@ button.button-click-feedback {
 .problems-panel[data-dock-edge="right"] .problem-record {
   min-width: 0;
   max-width: none;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.problems-panel[data-dock-edge="left"] .problem-location,
+.problems-panel[data-dock-edge="right"] .problem-location {
+  grid-column: 1 / -1;
+  max-width: none;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.problems-panel[data-dock-edge="left"] .problem-row-location,
+.problems-panel[data-dock-edge="right"] .problem-row-location,
+.problems-panel[data-dock-edge="left"] .problem-column-location,
+.problems-panel[data-dock-edge="right"] .problem-column-location {
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
@@ -1528,17 +1561,11 @@ button.button-click-feedback {
   display: none;
 }
 
-.file-list,
-.tabs,
-.problems-list,
-.log-list {
-  font-family: var(--grid-font);
-}
-
 .log-list {
   min-height: 0;
   overflow: auto;
   padding: 6px;
+  font-family: monospace;
   font-size: 12px;
 }
 

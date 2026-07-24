@@ -1145,7 +1145,8 @@ test("Problems panel policy renders grouped diagnostics and summary text", () =>
   });
   assert.match(html, /data-file-name="a\.txt" data-file-key="data\/a\.txt" open/);
   assert.match(html, /data-file-name="b\.txt" data-file-key="data\/b\.txt">/);
-  assert.match(html, /<span class="problem-location">Row ID: Fire Ball · Column: par8<\/span>/);
+  assert.match(html, /class="problem-row-location">Row ID: Fire Ball<\/span>/);
+  assert.match(html, /class="problem-column-location">Column: par8<\/span>/);
   assert.match(html, /Needs &lt;value&gt;/);
   assert.match(html, /data-diagnostic-id="b&amp;2"/);
   assert.match(html, /<span class="problem-rule">Rule\/B<\/span>/);

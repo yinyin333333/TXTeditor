@@ -56,7 +56,8 @@ test("#74 full copy includes stable file identity and raw structured fields", ()
 
 test("#74 panel shows the row identifier and column name together without record jargon", () => {
   const html = problemsPanelHtml({ lintEnabled: true, diagnostics: [diagnostic] });
-  assert.match(html, /Row ID: Fire Ball · Column: calc value \/ raw/);
+  assert.match(html, /class="problem-row-location">Row ID: Fire Ball<\/span>/);
+  assert.match(html, /class="problem-column-location">Column: calc value \/ raw<\/span>/);
   assert.doesNotMatch(html, /Record Fire Ball/);
 });
 
