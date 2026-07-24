@@ -719,6 +719,60 @@ test("activating an already-open document saves the outgoing selection and scrol
   assert.equal(document.activeElement, host);
 });
 
+test("native path delivery reads only new paths and replays successful documents in request order", async () => {
+  const originalWindow = globalThis.window;
+  const existing = TableDocument.fromText("existing.txt", "id\nopen", {
+    path: "E:\\Mods\\existing.txt"
+  });
+  const events = [];
+  const errors = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "read_text_files");
+          events.push(["read", ...args.paths]);
+          assert.deepEqual(args.paths, [
+            "E:\\Mods\\new.txt",
+            "E:\\Mods\\missing.txt"
+          ]);
+          return [
+            { Ok: { path: "E:\\Mods\\new.txt", name: "new.txt", text: "id\nnew", encoding: "utf-8" } },
+            { Err: "missing file" }
+          ];
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller, state } = testDocumentController(existing, {}, {
+      activateDocument: async (doc) => events.push(["activate", doc.name]),
+      showError: (error) => errors.push(error.message)
+    });
+
+    await controller.openDroppedNativePaths([
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\missing.txt",
+      "e:\\mods\\EXISTING.txt"
+    ]);
+
+    assert.deepEqual(events, [
+      ["read", "E:\\Mods\\new.txt", "E:\\Mods\\missing.txt"],
+      ["activate", "new.txt"],
+      ["activate", "new.txt"],
+      ["activate", "existing.txt"]
+    ]);
+    assert.deepEqual(state.docs.map((doc) => doc.name), ["existing.txt", "new.txt"]);
+    assert.equal(state.active, 0);
+    assert.deepEqual(errors, ["missing file"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("closing the active tab commits editor changes before checking dirty state", async () => {
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
   const { controller, state } = testDocumentController(doc, {
@@ -1647,6 +1701,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     grid,
     emptyDoc: TableDocument.fromText("empty.txt", ""),
     activeDoc: () => state.docs[state.active],
+    activateDocument: options.activateDocument,
     saveSelectionState: options.saveSelectionState ?? (() => {}),
     applyFreezeToDoc: () => {},
     renderChrome: () => {},

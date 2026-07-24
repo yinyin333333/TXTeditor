@@ -21,7 +21,7 @@ import {
   downloadText,
   encodeText,
   isTauriRuntime,
-  openNativePaths,
+  openNativePathsBulk,
   openWorkspaceNative,
   pickOpenFilePathsNative,
   readFileAsDocument,
@@ -245,9 +245,34 @@ export function createDocumentController({
     const tablePaths = candidates.filter(isTextLikePath);
     const jsonPaths = candidates.filter(isJsonPath);
     if (tablePaths.length) {
-      await showOpeningFeedback(`Opening ${tablePaths.length} file(s)...`);
-      const docs = await openNativePaths(tablePaths, TableDocument);
-      for (const doc of docs) await addDocument(doc);
+      const documentsByPath = new Map(state.docs
+        .filter((doc) => isTableDocument(doc) && doc.path)
+        .map((doc) => [normalizePath(doc.path), doc]));
+      const unopenedPaths = [];
+      const queuedPaths = new Set();
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        if (!documentsByPath.has(key) && !queuedPaths.has(key)) {
+          queuedPaths.add(key);
+          unopenedPaths.push(path);
+        }
+      }
+      const errors = [];
+      if (unopenedPaths.length) {
+        await showOpeningFeedback(`Opening ${unopenedPaths.length} file(s)...`);
+        const results = await openNativePathsBulk(unopenedPaths, TableDocument);
+        for (let index = 0; index < results.length; index += 1) {
+          const result = results[index];
+          if (result?.doc) documentsByPath.set(normalizePath(unopenedPaths[index]), result.doc);
+          else if (result?.error) errors.push(result.error);
+        }
+      }
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        const doc = documentsByPath.get(key);
+        if (doc) documentsByPath.set(key, await addDocument(doc));
+      }
+      if (errors.length) showError(new Error(errors.join("\n")));
     }
     for (const path of jsonPaths) {
       await openJsonDocumentPath(path, { requireCurrentMode: requireCurrentJsonMode });

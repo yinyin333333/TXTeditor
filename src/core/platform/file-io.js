@@ -36,6 +36,44 @@ export async function startupOpenPathsNative(invokeFn = null) {
     : [];
 }
 
+export async function takePendingOpenPathsNative(invokeFn = null) {
+  if (!invokeFn && !isTauriRuntime()) return [];
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  const paths = await invoke("take_pending_open_paths");
+  return Array.isArray(paths)
+    ? paths.filter((path) => typeof path === "string" && path.length > 0)
+    : [];
+}
+
+export async function listenForNativeOpenPaths(callback, onError = () => {}) {
+  if (!isTauriRuntime()) return () => {};
+  const api = await tauriApi();
+  if (!api.listen) return () => {};
+  const unlistenDrop = await api.listen(api.dragDropEvent, (payload) => {
+    const paths = payload.payload?.paths ?? payload.payload ?? [];
+    if (Array.isArray(paths)) return Promise.resolve(callback(paths)).catch(onError);
+    return undefined;
+  });
+  let delivery = Promise.resolve();
+  const scheduleDelivery = () => {
+    const next = delivery.then(async () => {
+      const paths = await takePendingOpenPathsNative(api.invoke);
+      if (paths.length) await callback(paths);
+    });
+    delivery = next.catch(() => {});
+    return next;
+  };
+  const unlistenSingleInstance = await api.listen(
+    "single-instance-open-paths",
+    () => scheduleDelivery().catch(onError)
+  );
+  await scheduleDelivery();
+  return () => {
+    unlistenDrop();
+    unlistenSingleInstance();
+  };
+}
+
 export async function pickOpenFilePathsNative(invokeFn = null) {
   const invoke = invokeFn ?? (await tauriApi()).invoke;
   const paths = await invoke("open_files_dialog");
@@ -126,17 +164,6 @@ export async function saveTextNative(defaultName, text) {
     encoding: "utf-8"
   }));
   return true;
-}
-
-export async function listenForNativeDrops(callback) {
-  if (!isTauriRuntime()) return () => {};
-  const api = await tauriApi();
-  if (!api.listen) return () => {};
-  const unlisten = await api.listen(api.dragDropEvent, (payload) => {
-    const paths = payload.payload?.paths ?? payload.payload ?? [];
-    if (Array.isArray(paths)) callback(paths);
-  });
-  return unlisten;
 }
 
 function perfNow() {

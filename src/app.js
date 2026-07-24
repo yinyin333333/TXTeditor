@@ -5,7 +5,7 @@ import { makeCellCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument } from "./core/document-undo-state.js";
 import {
   isTauriRuntime,
-  listenForNativeDrops,
+  listenForNativeOpenPaths,
   startupOpenPathsNative
 } from "./core/io.js";
 import { exposeTxteditorPerf } from "./core/perf-instrumentation.js";
@@ -505,7 +505,7 @@ settingsController.loadConfig().catch((error) => {
   state.config = {};
   reportStartupFailure("Configuration load", error);
 });
-listenForNativeDrops((paths) => openDroppedNativePaths(paths)).catch(showError);
+listenForNativeOpenPaths((paths) => openDroppedNativePaths(paths), showError).catch(showError);
 lspController.startListeners();
 startupOpenPathsNative()
   .then((paths) => openDroppedNativePaths(paths))

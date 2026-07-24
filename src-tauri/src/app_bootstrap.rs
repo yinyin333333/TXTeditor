@@ -1,4 +1,5 @@
 use crate::config::{load_app_config_from, AppConfigState};
+use crate::launch_paths::{forwarded_open_paths, PendingOpenPaths};
 use crate::lsp_service::LspManager;
 use std::fs;
 use std::path::PathBuf;
@@ -36,4 +37,18 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         });
     }
     Ok(())
+}
+
+pub(crate) fn handle_second_instance(app: &tauri::AppHandle, args: Vec<String>, cwd: String) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let paths = forwarded_open_paths(args, &cwd);
+    if paths.is_empty() {
+        return;
+    }
+    app.state::<PendingOpenPaths>().extend(paths);
+    let _ = app.emit("single-instance-open-paths", ());
 }

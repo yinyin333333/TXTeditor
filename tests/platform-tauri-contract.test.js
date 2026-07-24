@@ -222,7 +222,8 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
   const jsCommands = [...platformSources.matchAll(/(?:^|[^\w.])(?:api\.)?invoke\("([^"]+)"/g)]
     .map((match) => match[1])
     .sort();
-  const rustCommands = [...rust.matchAll(/\b[a-z_]+::([a-z_]+),/g)]
+  const rustHandler = rust.match(/tauri::generate_handler!\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const rustCommands = [...rustHandler.matchAll(/\b[a-z_]+::([a-z_]+),/g)]
     .map((match) => match[1])
     .sort();
 
@@ -251,6 +252,7 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "save_config",
     "save_file_dialog",
     "startup_open_paths",
+    "take_pending_open_paths",
     "write_clipboard_text",
     "write_text_file_chunk_safe",
     "write_text_file_safe"

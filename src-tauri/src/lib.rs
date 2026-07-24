@@ -16,8 +16,12 @@ use tauri::Manager;
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(
+            app_bootstrap::handle_second_instance,
+        ))
         .plugin(tauri_plugin_dialog::init())
         .manage(clipboard::ClipboardService::new())
+        .manage(launch_paths::PendingOpenPaths::default())
         .manage(lsp_service::LspManager::new())
         .setup(app_bootstrap::setup_app)
         .invoke_handler(tauri::generate_handler![
@@ -42,6 +46,7 @@ pub fn run() {
             lsp_service::lsp_update_file,
             lsp_service::lsp_update_file_incremental,
             lsp_service::lsp_close_file,
+            launch_paths::take_pending_open_paths,
             lsp_service::lsp_get_diagnostics,
             lsp_service::lsp_get_diagnostics_batch,
             lsp_service::lsp_hover,
