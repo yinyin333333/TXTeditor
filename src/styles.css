@@ -1719,6 +1719,15 @@ details:not([open]) .problem-file-header::before {
   gap: 8px;
 }
 
+.submenu-highlight {
+  max-height: none;
+  overflow: visible;
+}
+
+.submenu-highlight button {
+  white-space: nowrap;
+}
+
 .highlight-swatch {
   width: 13px;
   height: 13px;

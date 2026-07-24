@@ -45,13 +45,19 @@ test("#74 full copy includes stable file identity and raw structured fields", ()
   const copied = diagnosticCopyText(diagnostic, DIAGNOSTIC_COPY_FULL);
   assert.match(copied, /^File: skills\.txt$/m);
   assert.match(copied, /^Path: workspace-a\/data\/skills\.txt$/m);
-  assert.match(copied, /^Display row: 8$/m);
+  assert.match(copied, /^Row ID: Fire Ball$/m);
   assert.match(copied, /^Column: calc value \/ raw$/m);
-  assert.match(copied, /^Record key: Fire Ball$/m);
+  assert.doesNotMatch(copied, /Record key:/);
   assert.ok(copied.includes(`Message:\n${rawMessage}`));
   assert.match(copied, /^Rule ID: calc\/check$/m);
   assert.match(copied, /^Rule profile: RotW$/m);
   assert.ok(copied.includes(`Cell value:\n${diagnostic.offendingValue}`));
+});
+
+test("#74 panel shows the row identifier and column name together without record jargon", () => {
+  const html = problemsPanelHtml({ lintEnabled: true, diagnostics: [diagnostic] });
+  assert.match(html, /Row ID: Fire Ball · Column: calc value \/ raw/);
+  assert.doesNotMatch(html, /Record Fire Ball/);
 });
 
 test("#74 Ctrl/Cmd+C recognizes the focused diagnostic copy shortcut", () => {

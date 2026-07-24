@@ -70,7 +70,7 @@ export function createCommandSurfaceController({
       { id: "unhide-all", label: tText("menu.unhideAll"), disabled: !canUnhide },
       { type: "submenu", label: tText("menu.fill"), items: fillCommandItems() },
       { type: "submenu", label: tText("menu.math"), items: mathCommandItems() },
-      { type: "submenu", label: tText("highlight.menu"), items: highlightItems() },
+      { type: "submenu", id: "highlight", label: tText("highlight.menu"), items: highlightItems() },
       { id: "go-to-definition", label: tText("menu.goToDefinition"), disabled: !cellHasReference(focusRow, focusCol) },
       { id: "cut", label: tText("command.cut"), shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
       { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
@@ -226,13 +226,14 @@ export function createCommandSurfaceController({
   }
 
   function menuEntry(entry) {
-    if (entry.type === "submenu") return submenu(entry.label, entry.items);
+    if (entry.type === "submenu") return submenu(entry.label, entry.items, entry.id);
     return menuButton(entry);
   }
 
-  function submenu(label, items) {
-    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(submenuEntry).join("")}</div></div>`;
+  function submenu(label, items, id = "") {
+    const key = id || label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const submenuClass = id ? ` submenu-${id}` : "";
+    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu${submenuClass}">${items.map(submenuEntry).join("")}</div></div>`;
   }
 
   function submenuEntry(item) {

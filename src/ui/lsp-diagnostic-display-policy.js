@@ -21,9 +21,11 @@ export function mapLspDiagnosticToDisplay(diagnostic, {
     ? numberOr(diagnostic?.startCharacter, tableColumnIndex)
     : tableColumnIndex;
   const cellValue = knownCellValue(doc, rowIndex, columnIndex);
-  const columnName = knownColumnName(doc, columnIndex);
-  const rowLabel = knownRowLabel(doc, rowIndex);
   const data = diagnostic?.data ?? null;
+  const columnName = displayContextValue(data, "displayColumnName")
+    || knownColumnName(doc, columnIndex);
+  const rowLabel = displayContextValue(data, "displayRowId")
+    || knownRowLabel(doc, rowIndex);
   const code = diagnostic?.code == null ? "" : String(diagnostic.code);
   const range = displayDiagnosticRange(diagnostic, cellValue, data);
   const navigationDisabled = resourceIsJson ? !jsonNavigationEnabled : false;
@@ -60,6 +62,11 @@ function isJsonResource(value) {
   return /\.json$/i.test(String(value ?? "").trim());
 }
 
+function displayContextValue(data, key) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  const value = data[key];
+  return value == null ? "" : String(value);
+}
 
 function knownColumnName(doc, columnIndex) {
   if (!doc || typeof doc.getCell !== "function") return "";

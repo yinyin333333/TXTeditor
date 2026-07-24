@@ -180,7 +180,7 @@ const grid = new CanvasGrid({
     cellInputController?.refresh();
   }, highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
 });
-manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage, confirmClear: ({ message }) => Promise.resolve(globalThis.confirm?.(message) ?? true) });
+manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage });
 
 documentEditorController = createDocumentEditorController({
   grid,

@@ -1,6 +1,5 @@
 import { normalizePath } from "../core/lint-paths.js";
 import { isTableDocument } from "../core/document-file-state.js";
-import { tText } from "../core/i18n.js";
 
 export const MANUAL_HIGHLIGHT_STORAGE_KEY = "txteditor.manualHighlights.v1";
 
@@ -34,9 +33,7 @@ export function createManualHighlightController({
   state,
   activeDoc,
   grid,
-  storage = globalThis.localStorage,
-  confirmClear = ({ message }) => Promise.resolve(globalThis.confirm?.(message) ?? true),
-  translate = tText
+  storage = globalThis.localStorage
 }) {
   const documentStates = new WeakMap();
   const commandSnapshots = new WeakMap();
@@ -173,13 +170,10 @@ export function createManualHighlightController({
     return true;
   }
 
-  async function clearAll(doc = activeDoc()) {
+  function clearAll(doc = activeDoc()) {
     if (!isTableDocument(doc)) return false;
     const runtime = ensureDocument(doc);
     if (!hasAnyHighlights(doc)) return false;
-    const message = translate("highlight.clearConfirm", { file: doc.name || "Untitled.txt" });
-    const confirmed = await confirmClear({ doc, message, scope: "document" });
-    if (!confirmed) return false;
     clearWorkingHighlights(runtime);
     clearWorkingHighlights(runtime.committed);
     persistCommitted(runtime);

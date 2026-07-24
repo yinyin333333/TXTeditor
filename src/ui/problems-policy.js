@@ -144,7 +144,6 @@ export function problemsPanelHtml({
         return `
         <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? ` aria-disabled="true" title="${t("problems.jsonReadOnly")}"` : ""}>
           <span class="problem-location">${escapeHtml(location.locationText)}</span>
-          ${location.recordText ? `<span class="problem-record">${escapeHtml(location.recordText)}</span>` : ""}
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
           ${diagnostic.profile ? `<span class="problem-rule">${escapeHtml(diagnostic.profile)}</span>` : ""}

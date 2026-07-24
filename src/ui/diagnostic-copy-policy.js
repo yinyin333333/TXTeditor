@@ -7,7 +7,7 @@ export function diagnosticColumnName(diagnostic = {}) {
   const raw = diagnostic.columnName;
   if (raw != null && String(raw) !== "") return String(raw);
   const index = Number(diagnostic.columnIndex);
-  return Number.isFinite(index) ? `C${Math.max(0, Math.trunc(index)) + 1}` : "C1";
+  return Number.isFinite(index) ? String(Math.max(0, Math.trunc(index)) + 1) : "1";
 }
 
 export function diagnosticRecordKey(diagnostic = {}) {
@@ -20,12 +20,13 @@ export function diagnosticDisplayLocation(diagnostic = {}, translate = tText) {
   const row = Number.isFinite(rowIndex) ? Math.max(0, Math.trunc(rowIndex)) + 1 : 1;
   const column = diagnosticColumnName(diagnostic);
   const record = diagnosticRecordKey(diagnostic);
+  const rowId = record || String(row);
   return {
     row,
+    rowId,
     column,
     record,
-    locationText: translate("problems.displayLocation", { row, column }),
-    recordText: record ? translate("problems.recordLocation", { record }) : ""
+    locationText: translate("problems.displayLocation", { row: rowId, column })
   };
 }
 
@@ -33,7 +34,7 @@ export function diagnosticCopyText(diagnostic = {}, mode = DIAGNOSTIC_COPY_FULL,
   const message = String(diagnostic.message ?? "");
   if (mode === DIAGNOSTIC_COPY_MESSAGE) return message;
 
-  const { row, column, record } = diagnosticDisplayLocation(diagnostic, translate);
+  const { rowId, column } = diagnosticDisplayLocation(diagnostic, translate);
   const inlineSeparator = translate("problems.copy.inlineSeparator");
   const blockSeparator = translate("problems.copy.blockSeparator");
   const inline = (labelKey, value) => `${translate(labelKey)}${inlineSeparator}${String(value ?? "")}`;
@@ -45,9 +46,8 @@ export function diagnosticCopyText(diagnostic = {}, mode = DIAGNOSTIC_COPY_FULL,
     ...(identityPath && identityPath !== fileName
       ? [inline("problems.copy.path", identityPath)]
       : []),
-    inline("problems.copy.row", row),
+    inline("problems.copy.row", rowId),
     inline("problems.copy.column", column),
-    ...(record ? [inline("problems.copy.record", record)] : []),
     block("problems.copy.messageLabel", message),
     ...(diagnostic.ruleId ? [inline("problems.copy.rule", diagnostic.ruleId)] : []),
     ...(diagnostic.profile ? [inline("problems.copy.profile", diagnostic.profile)] : []),

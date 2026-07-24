@@ -22,7 +22,7 @@ function memoryStorage(initial = {}) {
   };
 }
 
-function harness(doc, { storage = memoryStorage(), confirmClear = async () => true } = {}) {
+function harness(doc, { storage = memoryStorage() } = {}) {
   const selection = new SelectionModel();
   selection.set(0, 0);
   let draws = 0;
@@ -30,8 +30,7 @@ function harness(doc, { storage = memoryStorage(), confirmClear = async () => tr
     state: { selection },
     activeDoc: () => doc,
     grid: { draw: () => { draws += 1; } },
-    storage,
-    confirmClear
+    storage
   });
   controller.openDocument(doc);
   return { controller, selection, storage, get draws() { return draws; } };
@@ -192,24 +191,15 @@ test("#77 inserted rows keep existing logical records and Save As copies annotat
   assert.equal(newHarness.controller.colorForCell(newFile, 3, 1), "sky");
 });
 
-test("#77 clear-all confirmation names the document and corrupt annotation storage never blocks opening", async () => {
+test("#77 clear-all immediately removes every highlight and corrupt annotation storage never blocks opening", () => {
   const storage = memoryStorage({ [MANUAL_HIGHLIGHT_STORAGE_KEY]: "{not-json" });
   const doc = TableDocument.fromText("unicode-한글.txt", "id\tvalue\na\t1", { dirty: false });
-  const messages = [];
-  const { controller, selection } = harness(doc, {
-    storage,
-    confirmClear: async ({ message, scope }) => {
-      messages.push({ message, scope });
-      return true;
-    }
-  });
+  const { controller, selection } = harness(doc, { storage });
   assert.equal(controller.hasAnyHighlights(doc), false);
   selection.set(1, 1);
   controller.applyColor("pink");
-  assert.equal(await controller.clearAll(), true);
+  assert.equal(controller.clearAll(), true);
   assert.equal(controller.hasAnyHighlights(doc), false);
-  assert.equal(messages[0].scope, "document");
-  assert.match(messages[0].message, /unicode-한글\.txt/);
   assert.equal(persistedDocuments(storage)[manualHighlightDocumentKey(doc)], undefined);
 });
 
@@ -270,4 +260,9 @@ test("#77 renderer layers subtle theme-adapted highlights below selection, diagn
   assert.ok(surfaceSource.indexOf('tText("highlight.menu")') < surfaceSource.indexOf('id: "go-to-definition"'));
   assert.match(surfaceSource, /type: "separator"/);
   assert.match(surfaceSource, /data-highlight-action/);
+  assert.match(surfaceSource, /id: "highlight"/);
+  assert.match(css, /\.submenu-highlight\s*\{[^}]*overflow: visible;/s);
+
+  const highlightSource = readFileSync(new URL("../src/ui/manual-highlight.js", import.meta.url), "utf8");
+  assert.doesNotMatch(highlightSource, /plugin:dialog|confirmClear|highlight\.clearConfirm/);
 });
