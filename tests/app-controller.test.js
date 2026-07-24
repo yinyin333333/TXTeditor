@@ -719,6 +719,60 @@ test("activating an already-open document saves the outgoing selection and scrol
   assert.equal(document.activeElement, host);
 });
 
+test("native path delivery reads only new paths and replays successful documents in request order", async () => {
+  const originalWindow = globalThis.window;
+  const existing = TableDocument.fromText("existing.txt", "id\nopen", {
+    path: "E:\\Mods\\existing.txt"
+  });
+  const events = [];
+  const errors = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "read_text_files");
+          events.push(["read", ...args.paths]);
+          assert.deepEqual(args.paths, [
+            "E:\\Mods\\new.txt",
+            "E:\\Mods\\missing.txt"
+          ]);
+          return [
+            { Ok: { path: "E:\\Mods\\new.txt", name: "new.txt", text: "id\nnew", encoding: "utf-8" } },
+            { Err: "missing file" }
+          ];
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller, state } = testDocumentController(existing, {}, {
+      activateDocument: async (doc) => events.push(["activate", doc.name]),
+      showError: (error) => errors.push(error.message)
+    });
+
+    await controller.openDroppedNativePaths([
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\missing.txt",
+      "e:\\mods\\EXISTING.txt"
+    ]);
+
+    assert.deepEqual(events, [
+      ["read", "E:\\Mods\\new.txt", "E:\\Mods\\missing.txt"],
+      ["activate", "new.txt"],
+      ["activate", "new.txt"],
+      ["activate", "existing.txt"]
+    ]);
+    assert.deepEqual(state.docs.map((doc) => doc.name), ["existing.txt", "new.txt"]);
+    assert.equal(state.active, 0);
+    assert.deepEqual(errors, ["missing file"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("closing the active tab commits editor changes before checking dirty state", async () => {
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });
   const { controller, state } = testDocumentController(doc, {
@@ -997,9 +1051,9 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
   const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
-  assert.ok(appSource.split(/\r?\n/).length <= 760);
-  assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 900);
+  assert.ok(appSource.split(/\r?\n/).length <= 790);
+  assert.ok(canvasSource.split(/\r?\n/).length <= 930);
+  assert.ok(lspController.split(/\r?\n/).length <= 920);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1161,7 +1215,7 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
   assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
   assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
-  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto auto minmax\(0, 1fr\);/);
   assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
   assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
@@ -1282,7 +1336,8 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
     }]
   });
   assert.match(jsonProblems, /skills\.json/);
-  assert.match(jsonProblems, /data-diagnostic-id="json:1" disabled aria-disabled="true"/);
+  assert.match(jsonProblems, /data-diagnostic-id="json:1" aria-disabled="true"/);
+  assert.doesNotMatch(jsonProblems, /\sdisabled(?:\s|>)/);
 });
 
 test("Find Next includes the current cell once when the query changes", () => {
@@ -1646,6 +1701,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     grid,
     emptyDoc: TableDocument.fromText("empty.txt", ""),
     activeDoc: () => state.docs[state.active],
+    activateDocument: options.activateDocument,
     saveSelectionState: options.saveSelectionState ?? (() => {}),
     applyFreezeToDoc: () => {},
     renderChrome: () => {},

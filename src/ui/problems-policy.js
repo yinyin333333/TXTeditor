@@ -1,4 +1,5 @@
 import { t, tText } from "../core/i18n.js";
+import { diagnosticDisplayLocation } from "./diagnostic-copy-policy.js";
 
 export function lintPanelActive({ problemsVisible = false, lintEnabled = false } = {}) {
   return Boolean(problemsVisible && lintEnabled);
@@ -112,10 +113,15 @@ export function diagnosticCounts(diagnostics = []) {
 export function groupDiagnosticsByFile(diagnostics = []) {
   const groups = new Map();
   for (const diagnostic of diagnostics) {
-    if (!groups.has(diagnostic.fileName)) groups.set(diagnostic.fileName, []);
-    groups.get(diagnostic.fileName).push(diagnostic);
+    const fileKey = diagnostic.fileKey || diagnostic.filePath || diagnostic.fileName;
+    if (!groups.has(fileKey)) groups.set(fileKey, []);
+    groups.get(fileKey).push(diagnostic);
   }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return [...groups.entries()]
+    .map(([fileKey, items]) => [items[0]?.fileName ?? fileKey, items, fileKey])
+    .sort(([leftName, , leftKey], [rightName, , rightKey]) => (
+      leftName.localeCompare(rightName) || String(leftKey).localeCompare(String(rightKey))
+    ));
 }
 
 export function problemsPanelHtml({
@@ -130,17 +136,24 @@ export function problemsPanelHtml({
   if (vectorEngine && !lspStarted) return `<div class="empty-problems">${t("lint.openFolder")}</div>`;
   if (!diagnostics.length) return `<div class="empty-problems">${t("lint.none")}</div>`;
   const collapsed = collapsedFiles instanceof Set ? collapsedFiles : new Set(collapsedFiles);
-  return groupDiagnosticsByFile(diagnostics).map(([fileName, fileDiagnostics]) => `
-    <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}"${collapsed.has(fileName) ? "" : " open"}>
+  return groupDiagnosticsByFile(diagnostics).map(([fileName, fileDiagnostics, fileKey]) => `
+    <details class="problem-file-group" data-file-name="${escapeHtml(fileName)}" data-file-key="${escapeHtml(fileKey)}"${collapsed.has(fileKey) || collapsed.has(fileName) ? "" : " open"}>
       <summary class="problem-file-header">${escapeHtml(fileName)} <span class="problem-file-count">(${fileDiagnostics.length})</span></summary>
-      ${fileDiagnostics.map((diagnostic) => `
-        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? ` disabled aria-disabled="true" title="${t("problems.jsonReadOnly")}"` : ""}>
-          <span class="problem-location">R${diagnostic.rowIndex + 1}:C${diagnostic.columnIndex + 1}</span>
+      ${fileDiagnostics.map((diagnostic) => {
+        const location = diagnosticDisplayLocation(diagnostic);
+        return `
+        <button class="problem-item" data-severity="${escapeHtml(diagnostic.severity)}" data-diagnostic-id="${escapeHtml(diagnostic.id)}"${diagnostic.navigationDisabled ? ` aria-disabled="true" title="${t("problems.jsonReadOnly")}"` : ""}>
+          <span class="problem-location" title="${escapeHtml(location.locationText)}">
+            <span class="problem-row-location">${escapeHtml(location.rowText)}</span>
+            <span class="problem-location-separator" aria-hidden="true">·</span>
+            <span class="problem-column-location">${escapeHtml(location.columnText)}</span>
+          </span>
           <span class="problem-message">${escapeHtml(diagnostic.message)}</span>
           ${diagnostic.ruleId ? `<span class="problem-rule">${escapeHtml(diagnostic.ruleId)}</span>` : ""}
           ${diagnostic.profile ? `<span class="problem-rule">${escapeHtml(diagnostic.profile)}</span>` : ""}
         </button>
-      `).join("")}
+      `;
+      }).join("")}
     </details>
   `).join("");
 }

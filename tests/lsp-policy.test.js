@@ -1017,6 +1017,29 @@ test("Vector-LSP display diagnostics do not invent precise local ranges without 
   assert.equal(diagnostic.locationLabel, "Row 5, Col 3");
 });
 
+test("Vector-LSP display diagnostics use server location identities before the file is opened", () => {
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 89,
+    col: 34,
+    severity: "error",
+    message: "Reference value not found",
+    data: {
+      displayRowId: "Bone Prison",
+      displayColumnName: "EDmgSymPerCalc"
+    }
+  }, {
+    uri: "file:///monstats.txt",
+    fileKey: "monstats.txt",
+    fileName: "monstats.txt",
+    index: 0,
+    doc: null
+  });
+
+  assert.equal(diagnostic.rowLabel, "Bone Prison");
+  assert.equal(diagnostic.recordKey, "Bone Prison");
+  assert.equal(diagnostic.columnName, "EDmgSymPerCalc");
+});
+
 test("unopened localization JSON diagnostics remain visible but are not editor navigation targets", () => {
   const diagnostic = mapLspDiagnosticToDisplay({
     row: 8,

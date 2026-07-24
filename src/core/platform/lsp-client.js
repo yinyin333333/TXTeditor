@@ -66,6 +66,12 @@ export async function lspHover(uri, line, character, generation) {
   return api.invoke("lsp_hover", withGeneration({ uri, line, character }, generation));
 }
 
+export async function lspFieldMetadata(uri, columnName, generation) {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("lsp_field_metadata", withGeneration({ uri, columnName }, generation));
+}
+
 export async function lspDefinition(uri, line, character, generation) {
   if (!isTauriRuntime()) return null;
   const api = await tauriApi();

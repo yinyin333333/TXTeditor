@@ -21,7 +21,7 @@ import {
   downloadText,
   encodeText,
   isTauriRuntime,
-  openNativePaths,
+  openNativePathsBulk,
   openWorkspaceNative,
   pickOpenFilePathsNative,
   readFileAsDocument,
@@ -77,7 +77,11 @@ export function createDocumentController({
   setLintDiagnostics = () => {},
   updateGridDiagnostics,
   resetWorkspaceView = () => {},
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile,
+  onTableDocumentOpened = () => {},
+  onTableDocumentClosed = () => {},
+  captureTableAnnotationIdentity = () => "",
+  onTableDocumentSaved = () => {}
 }) {
   let pendingCloseResolve = null;
   let pendingExternalResolve = null;
@@ -150,6 +154,7 @@ export function createDocumentController({
       resetUndoManagerForDocument(doc);
       doc.zoom = 1;
       applyFreezeToDoc(doc);
+      onTableDocumentOpened(doc);
     }
     state.docs.push(doc);
     saveSelectionState();
@@ -240,9 +245,34 @@ export function createDocumentController({
     const tablePaths = candidates.filter(isTextLikePath);
     const jsonPaths = candidates.filter(isJsonPath);
     if (tablePaths.length) {
-      await showOpeningFeedback(`Opening ${tablePaths.length} file(s)...`);
-      const docs = await openNativePaths(tablePaths, TableDocument);
-      for (const doc of docs) await addDocument(doc);
+      const documentsByPath = new Map(state.docs
+        .filter((doc) => isTableDocument(doc) && doc.path)
+        .map((doc) => [normalizePath(doc.path), doc]));
+      const unopenedPaths = [];
+      const queuedPaths = new Set();
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        if (!documentsByPath.has(key) && !queuedPaths.has(key)) {
+          queuedPaths.add(key);
+          unopenedPaths.push(path);
+        }
+      }
+      const errors = [];
+      if (unopenedPaths.length) {
+        await showOpeningFeedback(`Opening ${unopenedPaths.length} file(s)...`);
+        const results = await openNativePathsBulk(unopenedPaths, TableDocument);
+        for (let index = 0; index < results.length; index += 1) {
+          const result = results[index];
+          if (result?.doc) documentsByPath.set(normalizePath(unopenedPaths[index]), result.doc);
+          else if (result?.error) errors.push(result.error);
+        }
+      }
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        const doc = documentsByPath.get(key);
+        if (doc) documentsByPath.set(key, await addDocument(doc));
+      }
+      if (errors.length) showError(new Error(errors.join("\n")));
     }
     for (const path of jsonPaths) {
       await openJsonDocumentPath(path, { requireCurrentMode: requireCurrentJsonMode });
@@ -352,6 +382,9 @@ export function createDocumentController({
     state.lint.status = "";
     state.workspace = null;
     resetWorkspaceView();
+    for (const doc of state.docs) {
+      if (isTableDocument(doc)) onTableDocumentClosed(doc);
+    }
     state.docs.splice(0, state.docs.length);
     state.active = -1;
     await activateDocument(emptyDoc, { focus: false });
@@ -384,10 +417,12 @@ export function createDocumentController({
 
   async function saveFileNow(doc) {
     const previousUri = docToUri(doc);
+    const previousAnnotationIdentity = isTableDocument(doc) ? captureTableAnnotationIdentity(doc) : "";
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, false, { validateTarget: (path) => validateSaveTarget(doc, path) });
       if (!saved) return false;
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: false, previousKey: previousAnnotationIdentity });
       grid.draw();
       renderChrome();
       return true;
@@ -398,6 +433,7 @@ export function createDocumentController({
     await writable.close();
     markDocumentSaved(doc, snapshot.revision, snapshot);
     await lspRebindSavedDoc(doc, previousUri);
+    if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: false, previousKey: previousAnnotationIdentity });
     renderChrome();
     return true;
   }
@@ -416,10 +452,12 @@ export function createDocumentController({
 
   async function saveAsNow(doc) {
     const previousUri = docToUri(doc);
+    const previousAnnotationIdentity = isTableDocument(doc) ? captureTableAnnotationIdentity(doc) : "";
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, true, { validateTarget: (path) => validateSaveTarget(doc, path) });
       if (!saved) return false;
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
       grid.draw();
       renderChrome();
       return true;
@@ -434,12 +472,14 @@ export function createDocumentController({
       doc.name = handle.name ?? doc.name;
       markDocumentSaved(doc, snapshot.revision, snapshot);
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
       renderChrome();
       return true;
     }
     const snapshot = documentTextSnapshot(doc);
     downloadText(doc.name, snapshot.text, doc.encoding);
     markDocumentSaved(doc, snapshot.revision, snapshot);
+    if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
     renderChrome();
     return true;
   }
@@ -483,6 +523,7 @@ export function createDocumentController({
       : null;
     if (!lspClosePromise && isTableDocument(doc)) cancelLegacyLintJobs({ clearDiagnostics: false });
     const documentCountBeforeClose = state.docs.length;
+    if (isTableDocument(doc)) onTableDocumentClosed(doc);
     state.docs.splice(index, 1);
     if (!state.docs.length) {
       state.active = -1;

@@ -1,7 +1,7 @@
 export { isTauriRuntime } from "./platform/tauri-api.js";
 export { decodeBuffer, encodeText } from "./platform/text-codec.js";
 export {
-  listenForNativeDrops,
+  listenForNativeOpenPaths,
   listSiblingTextFilesNative,
   listWorkspaceNative,
   openFilesNative,
@@ -13,7 +13,8 @@ export {
   readTextFilesNative,
   saveDocumentNative,
   saveTextNative,
-  startupOpenPathsNative
+  startupOpenPathsNative,
+  takePendingOpenPathsNative
 } from "./platform/file-io.js";
 export {
   closeWindow,
@@ -26,6 +27,7 @@ export {
 export {
   lspCloseFile,
   lspDefinition,
+  lspFieldMetadata,
   lspGetDiagnostics,
   lspGetDiagnosticsBatch,
   lspHover,

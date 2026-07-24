@@ -3,6 +3,7 @@ import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction,
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
 import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
+import { MANUAL_HIGHLIGHT_IDS } from "./manual-highlight.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
 import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, clampedGridScrollOffsets, edgeCellScrollState, wheelScrollOffsets } from "./grid-viewport-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
@@ -28,7 +29,7 @@ export const VECTOR_LSP_HOVER_DELAY_MS = 0;
 export { gridColor } from "./grid-render-policy.js";
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged, highlightColorForCell = null }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -47,6 +48,8 @@ export class CanvasGrid {
     this.onHoverInvalidated = onHoverInvalidated;
     this.onViewportChanged = onViewportChanged;
     this.onSelectionChanged = onSelectionChanged;
+    this.highlightColorForCell = highlightColorForCell;
+    this.manualHighlightColors = new Map();
     this._lspHoverByCell = new Map();
     this._hoveredCell = null;
     this._lastTooltipX = 0;
@@ -72,6 +75,7 @@ export class CanvasGrid {
     this.vectorLspHoverEnabled = true;
     this.hoverSuspended = false;
     this.diagnosticsByCell = new Map();
+    this._cellInputPreview = null;
     this.metrics = new GridMetrics();
     this.raf = 0;
     this.renderStats = createGridRenderStats();
@@ -115,6 +119,7 @@ export class CanvasGrid {
     if (this._tooltip && shouldClearHoverForInteraction({ documentChanged: true })) this.clearHoverState();
     else this.hideFirstColumnHoverPreview();
     this.doc = doc;
+    this._cellInputPreview = null;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
     typeof this.selection.restore === "function" ? this.selection.restore(doc.selectionState, doc.rowCount, doc.columnCount) : this.selection.set(0, 0);
@@ -172,6 +177,19 @@ export class CanvasGrid {
   setDiagnostics(diagnosticsByCell, { redraw = true } = {}) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     if (redraw) this.draw();
+    if (this._hoveredCell && this._tooltip.style.display !== "none") this._renderTooltip(this._hoveredCell.row, this._hoveredCell.col, this._lastTooltipX, this._lastTooltipY);
+  }
+  setCellInputPreview(preview) {
+    this._cellInputPreview = preview && Number.isInteger(preview.row) && Number.isInteger(preview.column)
+      ? { row: preview.row, column: preview.column, value: String(preview.value ?? "") }
+      : null;
+    this.draw();
+  }
+
+  cellDisplayValue(row, column) {
+    const preview = this._cellInputPreview;
+    if (preview?.row === row && preview?.column === column) return preview.value;
+    return this.doc.getCell(row, column);
   }
 
   notifySelectionChanged(reason = "selection") {
@@ -210,6 +228,10 @@ export class CanvasGrid {
     }, { passive: false });
     window.addEventListener("mouseup", () => this.onMouseUp());
     this.editor.addEventListener("keydown", (event) => this.onEditorKeyDown(event));
+    this.editor.addEventListener("input", () => {
+      this.draw();
+      this.notifySelectionChanged("edit-input");
+    });
     this.editor.addEventListener("blur", () => this.commitEdit());
     for (const eventName of ["pointerdown", "mousedown", "mousemove", "mouseup", "click", "dblclick", "selectstart"]) {
       this.editor.addEventListener(eventName, (event) => event.stopPropagation());
@@ -233,6 +255,15 @@ export class CanvasGrid {
   syncTheme() {
     const style = getComputedStyle(document.documentElement);
     syncGridThemeFromStyle(style);
+    this.manualHighlightColors = new Map(MANUAL_HIGHLIGHT_IDS.map((id) => [
+      id,
+      style.getPropertyValue(`--grid-manual-highlight-${id}`).trim()
+    ]));
+  }
+
+  manualHighlightColor(row, column) {
+    const id = this.highlightColorForCell?.(this.doc, row, column);
+    return id ? this.manualHighlightColors.get(id) || null : null;
   }
 
   layoutCanvas(canvas, ctx, rect) {

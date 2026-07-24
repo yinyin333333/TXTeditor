@@ -223,6 +223,13 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
   const baseBackground = activeColumnHeader && !selected ? GRID_COLORS.activeHeader : cellBackground(row, selected, frozen, firstColumnLabel);
   ctx.fillStyle = baseBackground;
   ctx.fillRect(x, y, width, height);
+  const manualHighlight = !selected && !activeColumnHeader && typeof grid.manualHighlightColor === "function"
+    ? grid.manualHighlightColor(row, column)
+    : null;
+  if (manualHighlight) {
+    ctx.fillStyle = manualHighlight;
+    ctx.fillRect(x, y, width, height);
+  }
   const gridLine = cellGridLineColor({ selected, frozen });
   ctx.strokeStyle = gridLine;
   ctx.strokeRect(x, y, width, height);
@@ -233,7 +240,9 @@ function drawCell(grid, row, column, x, y, width, height, options = {}) {
     ctx.lineTo(x + width - .5, y + height);
     ctx.stroke();
   }
-  const value = grid.doc.getCell(row, column);
+  const value = typeof grid.cellDisplayValue === "function"
+    ? grid.cellDisplayValue(row, column)
+    : grid.doc.getCell(row, column);
   if (shouldDrawCellText(row, column, editing)) {
     ctx.fillStyle = activeColumnHeader && !selected ? GRID_COLORS.activeHeaderText : cellTextColor(row, column, value, selected, grid.colorizeColumns, firstColumnLabel);
     ctx.textBaseline = "middle";
