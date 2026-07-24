@@ -88,15 +88,19 @@ export function normalizeVectorLspTooltip(value, hoverText) {
 }
 
 export function vectorTooltipSections({ value = "", hoverText = "", diagnostics = [] } = {}) {
-  if (diagnostics.length) {
-    return diagnostics.map((diagnostic) => ({
-      kind: "diagnostic",
-      className: `cell-tooltip-diag cell-tooltip-diag-${diagnostic.severity}`,
-      text: diagnosticTooltipText(diagnostic)
-    }));
-  }
   const tooltip = normalizeVectorLspTooltip(value, hoverText);
-  const sections = [];
+  const sections = diagnostics.map((diagnostic) => ({
+    kind: "diagnostic",
+    className: `cell-tooltip-diag cell-tooltip-diag-${diagnostic.severity}`,
+    text: diagnosticTooltipText(diagnostic)
+  }));
+  if (diagnostics.length) {
+    const calculationDetail = calculationHoverDetail(value, hoverText);
+    if (calculationDetail) {
+      sections.push({ kind: "hover", className: "cell-tooltip-hover", text: calculationDetail });
+    }
+    return sections;
+  }
   if (tooltip.title) sections.push({ kind: "value", className: "cell-tooltip-value", text: tooltip.title });
   if (tooltip.detail) sections.push({ kind: "hover", className: "cell-tooltip-hover", text: tooltip.detail });
   return sections;
@@ -154,6 +158,21 @@ function splitHoverText(hoverText) {
   const title = lines.shift()?.trim() ?? "";
   while (lines.length && lines[0].trim() === "") lines.shift();
   return { title, detail: lines.join("\n").trim() };
+}
+
+function calculationHoverDetail(value, hoverText) {
+  const cellValue = String(value ?? "").trim();
+  if (!cellValue) return "";
+  const lines = String(hoverText ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let valueLine = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim() !== cellValue) continue;
+    valueLine = index;
+    break;
+  }
+  if (valueLine < 0) return "";
+  const detail = lines.slice(valueLine + 1).join("\n").trim();
+  return /(?:^|\D)\d+\s*\/\s*255(?:\D|$)/.test(detail) ? detail : "";
 }
 
 function stringField(value) {
