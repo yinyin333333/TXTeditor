@@ -48,7 +48,7 @@ export function hideGridVectorTooltip(grid) {
 }
 
 export function updateGridTooltip(grid, event, hit) {
-  const value = hit.kind === "cell" ? grid.doc.getCell(hit.row, hit.column) : "";
+  const value = hit.kind === "cell" ? hoverCellValue(grid, hit.row, hit.column) : "";
   const key = hit.kind === "cell" ? `${hit.row}:${hit.column}` : "";
   const diags = grid.diagnosticsByCell.get(key) ?? [];
   const hoverText = grid._lspHoverByCell.get(key) ?? null;
@@ -119,7 +119,7 @@ export function scheduleGridHoverRequest(grid, row, col) {
 }
 
 export function renderGridTooltip(grid, row, col, clientX, clientY) {
-  const value = grid.doc.getCell(row, col);
+  const value = hoverCellValue(grid, row, col);
   const diags = grid.diagnosticsByCell.get(`${row}:${col}`) ?? [];
   const hoverText = grid._lspHoverByCell.get(`${row}:${col}`) ?? null;
   const sections = vectorTooltipSections({ value, hoverText, diagnostics: diags });
@@ -156,7 +156,7 @@ export function setGridLspHover(grid, row, col, text) {
   if (text) grid._lspHoverByCell.set(key, text);
   else grid._lspHoverByCell.delete(key);
   const diags = grid.diagnosticsByCell.get(key) ?? [];
-  const value = grid.doc.getCell(row, col);
+  const value = hoverCellValue(grid, row, col);
   if (vectorTooltipShouldOwnCell({ hoverText: text, diagnostics: diags, value })) {
     grid.hideFirstColumnHoverPreview();
     grid._renderTooltip(row, col, grid._lastTooltipX, grid._lastTooltipY);
@@ -171,7 +171,7 @@ export function updateFirstColumnHoverPreview(grid, hit, event) {
     grid.hideFirstColumnHoverPreview();
     return;
   }
-  const value = hit.kind === "cell" ? grid.doc.getCell(hit.row, hit.column) : "";
+  const value = hit.kind === "cell" ? hoverCellValue(grid, hit.row, hit.column) : "";
   if (!shouldShowFirstColumnHover(hit, value)) {
     grid.hideFirstColumnHoverPreview();
     return;
@@ -190,6 +190,12 @@ export function updateFirstColumnHoverPreview(grid, hit, event) {
   if (top + box.height > window.innerHeight - 8) top = Math.max(8, event.clientY - box.height - gap);
   grid.hoverPreview.style.left = `${left}px`;
   grid.hoverPreview.style.top = `${top}px`;
+}
+
+function hoverCellValue(grid, row, column) {
+  return typeof grid.cellDisplayValue === "function"
+    ? grid.cellDisplayValue(row, column)
+    : grid.doc.getCell(row, column);
 }
 
 export function showLegacyHoverPreview(grid, hit, event, value) {

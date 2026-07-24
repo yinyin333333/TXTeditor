@@ -1,3 +1,5 @@
+import { tText } from "../core/i18n.js";
+
 export function isGridHoverAllowed({ hoverSuspended = false, resizing = null, dragging = false } = {}) {
   return !hoverSuspended && !resizing && !dragging;
 }
@@ -88,14 +90,15 @@ export function normalizeVectorLspTooltip(value, hoverText) {
 }
 
 export function vectorTooltipSections({ value = "", hoverText = "", diagnostics = [] } = {}) {
-  const tooltip = normalizeVectorLspTooltip(value, hoverText);
+  const currentHoverText = refreshCalculationHover(value, hoverText);
+  const tooltip = normalizeVectorLspTooltip(value, currentHoverText);
   const sections = diagnostics.map((diagnostic) => ({
     kind: "diagnostic",
     className: `cell-tooltip-diag cell-tooltip-diag-${diagnostic.severity}`,
     text: diagnosticTooltipText(diagnostic)
   }));
   if (diagnostics.length) {
-    const calculationDetail = calculationHoverDetail(value, hoverText);
+    const calculationDetail = calculationHoverDetail(value, currentHoverText);
     if (calculationDetail) {
       sections.push({ kind: "hover", className: "cell-tooltip-hover", text: calculationDetail });
     }
@@ -104,6 +107,35 @@ export function vectorTooltipSections({ value = "", hoverText = "", diagnostics 
   if (tooltip.title) sections.push({ kind: "value", className: "cell-tooltip-value", text: tooltip.title });
   if (tooltip.detail) sections.push({ kind: "hover", className: "cell-tooltip-hover", text: tooltip.detail });
   return sections;
+}
+
+function refreshCalculationHover(value, hoverText) {
+  const lines = String(hoverText ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let countLine = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (!/(?:^|\D)\d+\s*\/\s*255(?:\D|$)/.test(lines[index])) continue;
+    countLine = index;
+    break;
+  }
+  if (countLine < 0) return String(hoverText ?? "");
+
+  const currentValue = String(value ?? "");
+  const current = [...currentValue].length;
+  const limit = 255;
+  let valueLine = countLine - 1;
+  while (valueLine >= 0 && !lines[valueLine].trim()) valueLine -= 1;
+  if (valueLine >= 0) lines[valueLine] = currentValue;
+  lines[countLine] = tText("cellInput.count", { current, limit });
+
+  let warningLine = countLine + 1;
+  while (warningLine < lines.length && !lines[warningLine].trim()) warningLine += 1;
+  if (warningLine < lines.length && lines[warningLine].trim().startsWith("⚠")) {
+    lines.splice(warningLine, 1);
+  }
+  if (current > limit) {
+    lines.splice(countLine + 1, 0, "", `⚠ ${tText("cellInput.overLimit", { over: current - limit })}`);
+  }
+  return lines.join("\n").trim();
 }
 
 export function diagnosticTooltipText(diagnostic = {}) {

@@ -31,3 +31,19 @@ test("calculation hover details remain visible alongside cell diagnostics", () =
   assert.deepEqual(sections.map((section) => section.kind), ["diagnostic", "hover"]);
   assert.match(sections[1].text, /Character count: 31\/255/);
 });
+
+test("calculation hover count follows the live cell input preview", () => {
+  const savedFormula = "x".repeat(95);
+  const editedFormula = "x".repeat(93);
+  const sections = vectorTooltipSections({
+    value: editedFormula,
+    hoverText: `Cell value\n\n${savedFormula}\n\nCharacter count: 95/255`,
+    diagnostics: [{
+      severity: "error",
+      message: "Unknown calculation value."
+    }]
+  });
+
+  assert.match(sections[1].text, /Character count: 93\/255/);
+  assert.doesNotMatch(sections[1].text, /95\/255/);
+});
