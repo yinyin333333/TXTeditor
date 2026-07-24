@@ -4,6 +4,7 @@ import {
   calculationMetadata,
   unicodeCharacterCount
 } from "../src/ui/controllers/cell-input-controller.js";
+import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { vectorTooltipSections } from "../src/ui/hover-policy.js";
 
 test("cell input counts Unicode characters rather than UTF-16 code units", () => {
@@ -46,4 +47,26 @@ test("calculation hover count follows the live cell input preview", () => {
 
   assert.match(sections[1].text, /Character count: 93\/255/);
   assert.doesNotMatch(sections[1].text, /95\/255/);
+});
+
+test("an open hover is refreshed as soon as cell diagnostics change", () => {
+  const calls = [];
+  const diagnostics = new Map([["758:141", [{ severity: "error" }]]]);
+  const grid = {
+    diagnosticsByCell: new Map(),
+    _hoveredCell: { row: 758, col: 141 },
+    _tooltip: { style: { display: "block" } },
+    _lastTooltipX: 320,
+    _lastTooltipY: 180,
+    draw: () => calls.push(["draw"]),
+    _renderTooltip: (...args) => calls.push(["tooltip", ...args])
+  };
+
+  CanvasGrid.prototype.setDiagnostics.call(grid, diagnostics);
+
+  assert.equal(grid.diagnosticsByCell, diagnostics);
+  assert.deepEqual(calls, [
+    ["draw"],
+    ["tooltip", 758, 141, 320, 180]
+  ]);
 });

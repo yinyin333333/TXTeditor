@@ -177,8 +177,8 @@ export class CanvasGrid {
   setDiagnostics(diagnosticsByCell, { redraw = true } = {}) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     if (redraw) this.draw();
+    if (this._hoveredCell && this._tooltip.style.display !== "none") this._renderTooltip(this._hoveredCell.row, this._hoveredCell.col, this._lastTooltipX, this._lastTooltipY);
   }
-
   setCellInputPreview(preview) {
     this._cellInputPreview = preview && Number.isInteger(preview.row) && Number.isInteger(preview.column)
       ? { row: preview.row, column: preview.column, value: String(preview.value ?? "") }
