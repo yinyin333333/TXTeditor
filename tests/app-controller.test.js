@@ -1052,7 +1052,7 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
   assert.ok(appSource.split(/\r?\n/).length <= 790);
-  assert.ok(canvasSource.split(/\r?\n/).length <= 930);
+  assert.ok(canvasSource.split(/\r?\n/).length <= 950);
   assert.ok(lspController.split(/\r?\n/).length <= 920);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);

@@ -491,7 +491,7 @@ export class CanvasGrid {
     }
     const toggle = event.ctrlKey || event.metaKey;
     this.applyHitSelection(hit, event.shiftKey, toggle);
-    this.dragging = !toggle && (hit.kind === "cell" || hit.kind === "column-header") ? hit.kind : false;
+    this.dragging = !toggle && (hit.kind === "cell" || hit.kind === "row-header" || hit.kind === "column-header") ? hit.kind : false;
     if (this.dragging) this.clearHoverState();
     this.draw();
     this.notifySelectionChanged("pointer-selection");
@@ -529,9 +529,10 @@ export class CanvasGrid {
       this.notifySelectionChanged("drag-selection");
       return;
     }
-    if (this.dragging === "column-header" && hit.kind === "column-header") {
+    if (this.dragging === hit.kind && (hit.kind === "row-header" || hit.kind === "column-header")) {
       this.clearHoverState();
-      this.selection.extendColumns(hit.column, this.doc.rowCount);
+      if (hit.kind === "row-header") this.selection.extendRows(hit.row, this.doc.columnCount);
+      else this.selection.extendColumns(hit.column, this.doc.rowCount);
       this.draw();
       this.notifySelectionChanged("drag-selection");
       return;

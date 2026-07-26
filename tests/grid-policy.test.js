@@ -271,6 +271,61 @@ test("column index range selection extends contiguous whole-column ranges", () =
   assert.equal(selection.hasFullColumn(5, bounds.rowCount), false);
 });
 
+test("#83 row index dragging extends whole-row selection in both directions", () => {
+  for (const targetRow of [1, 6]) {
+    const selection = new SelectionModel();
+    const hits = [
+      { kind: "row-header", row: 4, column: 0, x: 12, y: 130 },
+      { kind: "row-header", row: targetRow, column: 0, x: 12, y: targetRow * 26 + 30 }
+    ];
+    let draws = 0;
+    const notifications = [];
+    const grid = {
+      host: { focus() {}, style: {} },
+      doc: { rowCount: 8, columnCount: 4 },
+      selection,
+      dragging: false,
+      resizing: null,
+      hideFirstColumnHoverPreview() {},
+      isScrollbarEvent: () => false,
+      hitTest: () => hits.shift(),
+      resizeHit: () => null,
+      applyHitSelection(hit, extend, toggle) {
+        return applySelectionForHit(selection, hit, {
+          rowCount: this.doc.rowCount,
+          columnCount: this.doc.columnCount,
+          extend,
+          toggle
+        });
+      },
+      clearHoverState() {},
+      draw() { draws += 1; },
+      notifySelectionChanged(reason) { notifications.push(reason); },
+      _updateTooltip() {}
+    };
+
+    CanvasGrid.prototype.onMouseDown.call(grid, {
+      button: 0,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false
+    });
+    assert.equal(grid.dragging, "row-header");
+
+    CanvasGrid.prototype.onMouseMove.call(grid, {});
+    assert.deepEqual(selection.rect, {
+      top: Math.min(4, targetRow),
+      left: 0,
+      bottom: Math.max(4, targetRow),
+      right: 3
+    });
+    assert.equal(selection.hasFullRow(4, grid.doc.columnCount), true);
+    assert.equal(selection.hasFullRow(targetRow, grid.doc.columnCount), true);
+    assert.equal(draws, 2);
+    assert.deepEqual(notifications, ["pointer-selection", "drag-selection"]);
+  }
+});
+
 test("clear after column-index selection edits table cells but not generated labels", () => {
   const doc = TableDocument.fromText("x.txt", "description\tenabled\tversion\nname\t1\t0.4.4\nname2\t0\t0.4.5");
   const selection = new SelectionModel();
