@@ -21,6 +21,7 @@ import {
   downloadText,
   encodeText,
   isTauriRuntime,
+  listWorkspaceNative,
   openNativePathsBulk,
   openWorkspaceNative,
   pickOpenFilePathsNative,
@@ -39,6 +40,8 @@ import {
   unsavedDocuments
 } from "../document-lifecycle-policy.js";
 import { tText } from "../../core/i18n.js";
+
+export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
 
 export function createDocumentController({
   state,
@@ -64,6 +67,7 @@ export function createDocumentController({
   reportLspCloseFailure,
   lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
+  lspClaimSession = async () => 0,
   lspStopSession = async () => 0,
   ensureDocumentSession = async () => {},
   scheduleHoverPrewarm,
@@ -81,7 +85,8 @@ export function createDocumentController({
   onTableDocumentOpened = () => {},
   onTableDocumentClosed = () => {},
   captureTableAnnotationIdentity = () => "",
-  onTableDocumentSaved = () => {}
+  onTableDocumentSaved = () => {},
+  storage = globalThis.localStorage
 }) {
   let pendingCloseResolve = null;
   let pendingExternalResolve = null;
@@ -327,20 +332,51 @@ export function createDocumentController({
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
-      state.workspace = workspace;
-      resetLegacyWorkspaceIndex();
-      if (isVectorLintEngine()) {
-        if (state.lint.enabled) {
-          lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
-        }
-      } else {
-        const schedule = legacyLintImmediateSchedule("workspace-opened");
-        scheduleLegacyLintFull(schedule.reason, schedule.delay);
-      }
-      renderChrome();
+      activateWorkspace(workspace, includeSubfolders, true);
     } catch (error) {
       showError(error);
     }
+  }
+
+  async function restoreWorkspace() {
+    if (!isTauriRuntime()) return false;
+    await lspClaimSession();
+    const path = readWorkspacePath();
+    if (!path) return false;
+    const includeSubfolders = !state.excludeWorkspaceSubfolders;
+    try {
+      const workspace = await listWorkspaceNative(path, null, { includeSubfolders });
+      activateWorkspace(workspace, includeSubfolders, false);
+      return true;
+    } catch {
+      state.workspace = null;
+      renderChrome();
+      return false;
+    }
+  }
+
+  function activateWorkspace(workspace, includeSubfolders, persist) {
+    state.workspace = workspace;
+    if (persist) writeWorkspacePath(workspace.path);
+    resetLegacyWorkspaceIndex();
+    if (isVectorLintEngine()) {
+      if (state.lint.enabled) lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
+    } else {
+      const schedule = legacyLintImmediateSchedule("workspace-opened");
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
+    renderChrome();
+  }
+
+  function readWorkspacePath() {
+    try { return storage?.getItem(WORKSPACE_PATH_STORAGE_KEY) || ""; } catch { return ""; }
+  }
+
+  function writeWorkspacePath(path) {
+    try {
+      if (path) storage?.setItem(WORKSPACE_PATH_STORAGE_KEY, path);
+      else storage?.removeItem(WORKSPACE_PATH_STORAGE_KEY);
+    } catch {}
   }
 
   async function closeAll() {
@@ -381,6 +417,7 @@ export function createDocumentController({
     setLintDiagnostics([]);
     state.lint.status = "";
     state.workspace = null;
+    writeWorkspacePath("");
     resetWorkspaceView();
     for (const doc of state.docs) {
       if (isTableDocument(doc)) onTableDocumentClosed(doc);
@@ -730,6 +767,7 @@ export function createDocumentController({
     openDroppedNativePaths,
     openFile,
     openFolder,
+    restoreWorkspace,
     openJsonDocumentPath,
     saveAs,
     saveFile,

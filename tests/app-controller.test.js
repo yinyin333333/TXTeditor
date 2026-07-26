@@ -13,7 +13,10 @@ import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
-import { createDocumentController } from "../src/ui/controllers/document-controller.js";
+import {
+  createDocumentController,
+  WORKSPACE_PATH_STORAGE_KEY
+} from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
   canRunCommandWithoutDocument,
@@ -622,6 +625,159 @@ test("opening a standalone native TXT starts a sibling-only Vector session at it
 
     assert.deepEqual(starts, [["E:\\Mods\\Example\\TXT", { contextMode: "sibling" }]]);
     assert.deepEqual(opens, []);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 startup restores the saved workspace from current disk state with existing folder options", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\SavedWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const calls = [];
+  const starts = [];
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command, args) => {
+      calls.push([command, args]);
+      return {
+        path: args.path,
+        files: [{ path: `${args.path}\\current.txt`, name: "current.txt" }]
+      };
+    } } }
+  };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      excludeWorkspaceSubfolders: true,
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async (...args) => starts.push(args)
+    });
+
+    assert.equal(await controller.restoreWorkspace(), true);
+    await Promise.resolve();
+    assert.deepEqual(calls, [["list_workspace_files", {
+      path: "E:\\SavedWorkspace",
+      includeSubfolders: false
+    }]]);
+    assert.deepEqual(state.workspace, {
+      path: "E:\\SavedWorkspace",
+      files: [{ path: "E:\\SavedWorkspace\\current.txt", name: "current.txt" }]
+    });
+    assert.deepEqual(starts, [["E:\\SavedWorkspace", { includeSubfolders: false }]]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 manual folder selection persists its path while unavailable restore remains non-blocking", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\MissingWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const native = { active: 1, starting: true, watcherActive: true, latest: 1 };
+  let unavailable = true;
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command, args) => {
+      if (command === "open_folder_dialog") return "E:\\PickedWorkspace";
+      if (unavailable) throw new Error("workspace unavailable");
+      return { path: args.path, files: [] };
+    } } }
+  };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async () => {},
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      },
+      showError: (error) => { throw error; }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(state.workspace, null);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 2 });
+    unavailable = false;
+    await controller.openFolder();
+    assert.equal(state.workspace.path, "E:\\PickedWorkspace");
+    assert.equal(values.get(WORKSPACE_PATH_STORAGE_KEY), "E:\\PickedWorkspace");
+
+    assert.equal(await controller.closeAll(), true);
+    assert.equal(values.has(WORKSPACE_PATH_STORAGE_KEY), false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 failed restore claims and clears a native generation greater than 1", async () => {
+  const originalWindow = globalThis.window;
+  const storage = { getItem: () => "E:\\DeletedWorkspace" };
+  const native = { active: 5, starting: true, watcherActive: true, latest: 5 };
+  globalThis.window = { __TAURI__: { core: { invoke: async () => {
+    throw new Error("workspace unavailable");
+  } } } };
+
+  try {
+    const { controller } = testDocumentController([], {}, {
+      storage,
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 6 });
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 startup claims a leftover standalone LSP session without a saved workspace", async () => {
+  const originalWindow = globalThis.window;
+  const native = { active: 7, starting: true, watcherActive: true, latest: 7 };
+  let listCalls = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => { listCalls += 1; } } } };
+
+  try {
+    const { controller } = testDocumentController([], {}, {
+      storage: { getItem: () => null },
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(listCalls, 0);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 8 });
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
@@ -1675,6 +1831,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs],
     active: 0,
     workspace: options.workspace ?? null,
+    excludeWorkspaceSubfolders: options.excludeWorkspaceSubfolders ?? false,
     lint: {
       engine: options.lintEngine ?? "legacy",
       enabled: options.lintEnabled ?? true,
@@ -1704,13 +1861,14 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     activateDocument: options.activateDocument,
     saveSelectionState: options.saveSelectionState ?? (() => {}),
     applyFreezeToDoc: () => {},
-    renderChrome: () => {},
+    renderChrome: options.renderChrome ?? (() => {}),
     showError: options.showError ?? ((error) => { throw error; }),
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
     lspCloseDoc: options.lspCloseDoc ?? (() => {}),
     reportLspCloseFailure: () => {},
+    lspClaimSession: options.lspClaimSession ?? (() => 0),
     lspStopSession: options.lspStopSession ?? (() => 0),
     lspStartWorkspace: options.lspStartWorkspace ?? (() => {}),
     ensureDocumentSession: options.ensureDocumentSession ?? (() => {}),
@@ -1725,7 +1883,8 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     setLintDiagnostics: options.setLintDiagnostics ?? ((diagnostics) => { state.lint.diagnostics = diagnostics; }),
     updateGridDiagnostics: () => {},
     resetWorkspaceView: options.resetWorkspaceView ?? (() => {}),
-    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
+    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {}),
+    storage: options.storage
   });
   return { controller, state, document: hostDocument, host };
 }

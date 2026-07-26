@@ -313,7 +313,7 @@ documentController = createDocumentController({
   handleLspUpdateError,
   reportLspCloseFailure,
   lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
-  lspStartWorkspace, lspStopSession: (reason) => lspController.stopSession(reason),
+  lspStartWorkspace, lspClaimSession: () => lspController.claimSession(), lspStopSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: lspController.ensureStandaloneSession,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -507,7 +507,7 @@ settingsController.loadConfig().catch((error) => {
 });
 listenForNativeOpenPaths((paths) => openDroppedNativePaths(paths), showError).catch(showError);
 lspController.startListeners();
-startupOpenPathsNative()
+documentController.restoreWorkspace().then(() => startupOpenPathsNative())
   .then((paths) => openDroppedNativePaths(paths))
   .catch(showError);
 

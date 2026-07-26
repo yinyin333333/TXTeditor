@@ -35,6 +35,7 @@ export {
   lspLogListen,
   lspOpenFile,
   lspReadyListen,
+  lspReserveGeneration,
   lspStart,
   lspStop,
   lspStoppedListen,

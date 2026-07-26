@@ -352,6 +352,7 @@ function createBulkController(state, renderSnapshots) {
     applyFreezeToDoc() {},
     updateActiveProblemHighlight() {},
     lintPathKey: pathKey,
+    reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
     lspHoverRequest: async () => null
   });
 }

@@ -40,6 +40,7 @@ pub fn run() {
             config::save_config,
             config::pick_file_path,
             reference_data::load_lint_reference_dataset,
+            lsp_service::lsp_reserve_generation,
             lsp_service::lsp_start,
             lsp_service::lsp_stop,
             lsp_service::lsp_open_file,

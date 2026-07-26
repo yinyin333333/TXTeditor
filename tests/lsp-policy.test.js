@@ -337,6 +337,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -456,6 +457,7 @@ test("closing active standalone tab reuses the existing sibling session for the 
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -670,6 +672,7 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase(),
       lspHoverRequest: async (...args) => {
         hoverCalls.push(args);
@@ -796,6 +799,7 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => gridCalls.push(["active-problem"]),
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -2287,6 +2291,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
     });
 

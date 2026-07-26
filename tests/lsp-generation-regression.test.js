@@ -53,7 +53,7 @@ function createState(docs = []) {
   };
 }
 
-function createController(state, { errors = [] } = {}) {
+function createController(state, { errors = [], reserveLspGeneration } = {}) {
   return createLspController({
     state,
     els: { logList: null, host: { focus() {} } },
@@ -80,9 +80,153 @@ function createController(state, { errors = [] } = {}) {
     applyFreezeToDoc() {},
     updateActiveProblemHighlight() {},
     lintPathKey: (pathValue) => String(pathValue ?? "").replace(/\\/g, "/").toLowerCase(),
+    reserveLspGeneration: reserveLspGeneration
+      ?? (async () => (Number(state.lsp.generation) || 0) + 1),
     lspHoverRequest: async () => null
   });
 }
+
+async function assertReloadReplacesNativeSession(initialGeneration) {
+  const originalWindow = globalThis.window;
+  const state = createState();
+  const listeners = new Map();
+  const stopped = [];
+  const native = {
+    latest: initialGeneration,
+    active: initialGeneration,
+    starting: new Set([initialGeneration])
+  };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          if (command === "lsp_start") {
+            assert.equal(args.generation, native.latest);
+            native.active = args.generation;
+            return { generation: args.generation, workspacePath: args.workspacePath, installed: true };
+          }
+          if (command === "lsp_stop") {
+            stopped.push(args.generation);
+            if (native.active <= args.generation) native.active = null;
+            for (const generation of native.starting) {
+              if (generation <= args.generation) native.starting.delete(generation);
+            }
+            native.latest = Math.max(native.latest, args.generation + 1);
+            return 1;
+          }
+          throw new Error(`unexpected invoke: ${command}`);
+        }
+      },
+      event: {
+        listen: async (event, callback) => {
+          listeners.set(event, callback);
+          return () => listeners.delete(event);
+        }
+      }
+    }
+  };
+
+  try {
+    const controller = createController(state, {
+      reserveLspGeneration: async () => {
+        const generation = ++native.latest;
+        if (native.active < generation) native.active = null;
+        for (const candidate of native.starting) {
+          if (candidate < generation) native.starting.delete(candidate);
+        }
+        return generation;
+      }
+    });
+    controller.startListeners();
+    await waitFor(() => listeners.has("lsp-stopped"));
+
+    await controller.startWorkspace("E:\\RestoredWorkspace");
+    const ownedGeneration = initialGeneration + 1;
+    assert.deepEqual({
+      generation: state.lsp.generation,
+      started: state.lsp.started,
+      workspacePath: state.lsp.workspacePath,
+      nativeActive: native.active,
+      oldStartingSessions: native.starting.size
+    }, {
+      generation: ownedGeneration,
+      started: true,
+      workspacePath: "E:\\RestoredWorkspace",
+      nativeActive: ownedGeneration,
+      oldStartingSessions: 0
+    });
+
+    await listeners.get("lsp-stopped")({
+      payload: { generation: initialGeneration, reason: "stale reload event" }
+    });
+    assert.equal(state.lsp.started, true);
+    assert.equal(state.lsp.generation, ownedGeneration);
+
+    await controller.stopSession("lint-disabled");
+    assert.deepEqual(stopped, [ownedGeneration]);
+    assert.equal(native.active, null);
+    assert.equal(state.lsp.started, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+}
+
+test("WebView reload replaces an active native generation 1 and Lint Off stops the owned session", async () => {
+  await assertReloadReplacesNativeSession(1);
+});
+
+test("WebView reload advances beyond a native generation greater than 1", async () => {
+  await assertReloadReplacesNativeSession(5);
+});
+
+test("startup claim rejects orphan generation events and Lint Off stops the claimed generation", async () => {
+  const originalWindow = globalThis.window;
+  const state = createState();
+  const listeners = new Map();
+  const stops = [];
+  const native = { latest: 5, active: 5, starting: true, watcherActive: true };
+  globalThis.window = {
+    __TAURI__: {
+      core: { invoke: async (command, args) => {
+        assert.equal(command, "lsp_stop");
+        stops.push(args.generation);
+        if (native.active <= args.generation) native.active = null;
+        native.latest = Math.max(native.latest, args.generation + 1);
+        return 1;
+      } },
+      event: { listen: async (event, callback) => {
+        listeners.set(event, callback);
+        return () => listeners.delete(event);
+      } }
+    }
+  };
+
+  try {
+    const controller = createController(state, { reserveLspGeneration: async () => {
+      native.latest += 1;
+      native.active = null;
+      native.starting = false;
+      native.watcherActive = false;
+      return native.latest;
+    } });
+    controller.startListeners();
+    await waitFor(() => listeners.has("lsp-stopped"));
+    assert.equal(await controller.claimSession(), 6);
+    assert.deepEqual(native, { latest: 6, active: null, starting: false, watcherActive: false });
+
+    await listeners.get("lsp-stopped")({ payload: { generation: 5, reason: "stale" } });
+    assert.equal(state.lsp.generation, 6);
+    assert.equal(state.lint.status, "");
+
+    await controller.stopSession("lint-disabled");
+    assert.deepEqual(stops, [6]);
+    assert.equal(state.lsp.started, false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
 
 test("latest start request B owns frontend state when B completes before A", async () => {
   const originalWindow = globalThis.window;

@@ -61,6 +61,7 @@ function createLspHarness(state, doc, overrides = {}) {
     applyFreezeToDoc() {},
     updateActiveProblemHighlight() {},
     lintPathKey: (pathValue) => String(pathValue ?? "").replace(/\\/g, "/").toLowerCase(),
+    reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
     lspHoverRequest: async () => null,
     ...overrides
   });
@@ -1235,6 +1236,7 @@ test("syncOpenDocs stops the old generation after a workspace restart without co
     const oldSync = controller.syncOpenDocs();
     await oldOpenStarted.promise;
     const restart = controller.startWorkspace("E:\\A", { forceRestart: true });
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(state.lsp.generation, 2);
     assert.equal(state.lsp.started, false);
     assert.equal(state.lsp.openFileCount, 0);
@@ -1322,6 +1324,7 @@ test("stale didOpen completion cannot clear the current generation open promise 
 
     restartPromise = controller.startWorkspace("E:\\A", { forceRestart: true });
     await currentOpenStarted.promise;
+    await new Promise((resolve) => setImmediate(resolve));
     const currentOpenPromise = lspDocumentState(doc).openPromise;
     assert.ok(currentOpenPromise);
 

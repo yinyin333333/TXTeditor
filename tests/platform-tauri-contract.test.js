@@ -21,6 +21,7 @@ import {
   lspLogListen,
   lspOpenFile,
   lspReadyListen,
+  lspReserveGeneration,
   lspStart,
   lspStop,
   lspStoppedListen,
@@ -239,10 +240,11 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "lsp_get_diagnostics",
     "lsp_get_diagnostics_batch",
     "lsp_hover",
-      "lsp_open_file",
-      "lsp_start",
-      "lsp_stop",
-      "lsp_update_file",
+    "lsp_open_file",
+    "lsp_reserve_generation",
+    "lsp_start",
+    "lsp_stop",
+    "lsp_update_file",
     "lsp_update_file_incremental",
     "open_files_dialog",
     "open_folder_dialog",
@@ -340,6 +342,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       files: [{ path: "E:\\Mod\\global\\excel\\ItemTypes.txt", name: "ItemTypes.txt" }]
     }]],
     ["save_file_dialog", ["E:\\SavedAs.txt", "E:\\Export.txt"]],
+    ["lsp_reserve_generation", [7]],
     ["lsp_get_diagnostics", [[{ row: 1, column: 2, message: "warn" }]]],
     ["lsp_get_diagnostics_batch", [[{
       generation: 7,
@@ -410,6 +413,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(saveAsDoc.dirty, false);
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
+    assert.equal(await lspReserveGeneration(), 7);
     await lspStart("E:\\Workspace", 7);
     await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace", true, "koKR");
     await lspStart("E:\\Workspace", 9, "workspace", "", false);
@@ -468,6 +472,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", encoding: "utf-8", transactionId: chunkTransactionIds[1], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
+      ["invoke", "lsp_reserve_generation", undefined],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7, locale: "enUS" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8, locale: "koKR" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", includeSubfolders: false, generation: 9, locale: "enUS" }],
