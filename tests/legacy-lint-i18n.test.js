@@ -58,7 +58,7 @@ test("Legacy lint message rendering preserves values, escapes only on request, a
 
 test("Korean Legacy Lint catalog has complete native copy without mechanical particles", () => {
   const korean = legacyLintCatalogs.koKR;
-  assert.equal(Object.keys(korean).length, 86);
+  assert.equal(Object.keys(korean).length, 87);
   for (const [key, template] of Object.entries(korean)) {
     assert.equal(template.includes("(은)"), false, key);
     assert.equal(template.includes("(는)"), false, key);
@@ -66,12 +66,73 @@ test("Korean Legacy Lint catalog has complete native copy without mechanical par
     assert.equal(template.includes("(가)"), false, key);
     assert.equal(template.includes("(을)"), false, key);
     assert.equal(template.includes("(를)"), false, key);
-    assert.equal(["}은", "}는", "}이", "}가", "}을", "}를", "\"은", "\"는", "\"이", "\"가", "\"을", "\"를"].some((suffix) => template.includes(suffix)), false, key);
+    if (!new Set(["basic.booleanRawByte", "basic.booleanStandard"]).has(key)) {
+      assert.equal(["}은", "}는", "}이", "}가", "}을", "}를", "\"은", "\"는", "\"이", "\"가", "\"을", "\"를"].some((suffix) => template.includes(suffix)), false, key);
+    }
   }
   assert.match(korean["items.chargeCap"], /최대 충전 횟수/);
   assert.match(korean["basic.unknownSummode"], /summode/);
+  assert.match(korean["basic.booleanRawByte"], /숫자 형식.*끄려면 0.*켜려면 1/);
   assert.match(korean["cube.stopsAfterModifier"], /기본 아이템/);
   assert.match(legacyRuleMetadata("TC/ValidNegativePicks", "koKR").label, /음수 Picks/);
+});
+
+test("BooleanFields translations give friendly integer corrections without implementation details", () => {
+  const numberFormatTerms = {
+    enUS: /number format/,
+    zhTW: /數字格式/,
+    deDE: /Zahlenformat/,
+    esES: /formato numérico/,
+    frFR: /format numérique/,
+    itIT: /formato numerico/,
+    koKR: /숫자 형식/,
+    plPL: /formatu liczbowego/,
+    esMX: /formato numérico/,
+    jaJP: /数値形式/,
+    ptBR: /formato numérico/,
+    ruRU: /формат числа/,
+    zhCN: /数字格式/
+  };
+  const semanticTerms = {
+    enUS: { integer: /signed decimal integer/, correction: /0.*off.*1.*on/, otherValid: /other signed decimal integers remain valid/ },
+    zhTW: { integer: /帶符號十進位整數/, correction: /關閉.*0.*開啟.*1/, otherValid: /其他帶符號十進位整數也有效/ },
+    deDE: { integer: /vorzeichenbehaftete Dezimal-Ganzzahl/, correction: /0.*Ausschalten.*1.*Einschalten/, otherValid: /andere vorzeichenbehaftete Dezimal-Ganzzahlen bleiben gültig/ },
+    esES: { integer: /enteros? decimal(?:es)? con signo/, correction: /0.*desactivar.*1.*activar/, otherValid: /demás enteros decimales con signo siguen siendo válidos/ },
+    frFR: { integer: /entiers? décim(?:al|aux) signés?/, correction: /0.*désactiver.*1.*activer/, otherValid: /autres entiers décimaux signés restent valides/ },
+    itIT: { integer: /inter[io] decimal[ei] con segno/, correction: /0.*disattivare.*1.*attivare/, otherValid: /altri interi decimali con segno restano validi/ },
+    koKR: { integer: /부호 있는 10진 정수/, correction: /끄려면 0.*켜려면 1/, otherValid: /다른 부호 있는 10진 정수도 유효/ },
+    plPL: { integer: /dziesiętn(?:ej|ych) liczb(?:y)? całkowit(?:ej|ych) ze znakiem/, correction: /0.*wyłączyć.*1.*włączyć/, otherValid: /inne dziesiętne liczby całkowite ze znakiem pozostają prawidłowe/ },
+    esMX: { integer: /enteros? decimal(?:es)? con signo/, correction: /0.*desactivar.*1.*activar/, otherValid: /demás enteros decimales con signo siguen siendo válidos/ },
+    jaJP: { integer: /符号付き10進整数/, correction: /オフ.*0.*オン.*1/, otherValid: /ほかの符号付き10進整数も有効/ },
+    ptBR: { integer: /inteiros? decima(?:l|is) com sinal/, correction: /0.*desativar.*1.*ativar/, otherValid: /outros inteiros decimais com sinal continuam válidos/i },
+    ruRU: { integer: /знакового десятичного целого числа|знаковых десятичных целых чисел/, correction: /0.*выключить.*1.*включить/, otherValid: /другие знаковые десятичные целые числа также допустимы/ },
+    zhCN: { integer: /有符号十进制整数/, correction: /关闭.*0.*开启.*1/, otherValid: /其他有符号十进制整数也有效/ }
+  };
+
+  assert.equal(legacyLintCatalogs.enUS["basic.booleanRawByte"], "'{value}' is not a number format accepted in this field. Enter 0 to turn it off or 1 to turn it on.");
+  assert.equal(legacyLintCatalogs.koKR["basic.booleanRawByte"], "'{value}'는 이 칸에서 사용할 수 있는 숫자 형식이 아닙니다. 끄려면 0, 켜려면 1을 입력하세요.");
+  const forbidden = /type-29|raw[- ]byte|low byte|least-significant byte|\bu32\b|bitfield|serializ|storage layout/i;
+
+  for (const locale of LEGACY_LINT_LOCALES) {
+    const terms = semanticTerms[locale];
+    const general = legacyLintCatalogs[locale]["basic.booleanType29"];
+    const rawByte = legacyLintCatalogs[locale]["basic.booleanRawByte"];
+    const metadata = legacyRuleMetadata("Basic/BooleanFields", locale).note;
+
+    assert.match(general, numberFormatTerms[locale], `${locale}:general-number-format`);
+    assert.match(rawByte, numberFormatTerms[locale], `${locale}:stored-number-format`);
+    assert.match(general, terms.correction, `${locale}:general-correction`);
+    assert.match(rawByte, terms.correction, `${locale}:stored-correction`);
+    assert.match(metadata, terms.integer, `${locale}:integer-metadata`);
+    assert.match(metadata, terms.otherValid, `${locale}:other-integers-remain-valid`);
+    assert.doesNotMatch(`${general}\n${rawByte}\n${metadata}`, forbidden, `${locale}:implementation-details`);
+    assert.doesNotMatch(metadata, /SuperUniques\.Replaceable/i, `${locale}:replaceable-excluded`);
+    if (locale !== "enUS") {
+      assert.notEqual(general, legacyLintCatalogs.enUS["basic.booleanType29"], `${locale}:translated-general`);
+      assert.notEqual(rawByte, legacyLintCatalogs.enUS["basic.booleanRawByte"], `${locale}:translated-raw-byte`);
+      assert.notEqual(metadata, legacyRuleMetadata("Basic/BooleanFields", "enUS").note, `${locale}:translated-metadata`);
+    }
+  }
 });
 
 test("High-risk Legacy Lint translations preserve identifiers and game semantics", () => {

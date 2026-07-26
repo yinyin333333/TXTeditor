@@ -228,7 +228,7 @@ test("policy-only Legacy wording does not export unverified runtime rejection cl
   assert.match(version.d2rMessage, /Use 0, 1, or 100 for this profile/);
 });
 
-test("column and boolean policy warnings do not claim unverified loader rejection", () => {
+test("column policy warnings do not claim unverified loader rejection", () => {
   const columnDiagnostics = diagnosticsFor([
     TableDocument.fromText("cubemain.txt", "enabled\tnuminputs\tinput 1\toutput\top\tparam\tvalue\n1\t1\tcap\tcap\t0\t\t")
   ], "Basic/ExcelColumns");
@@ -239,19 +239,16 @@ test("column and boolean policy warnings do not claim unverified loader rejectio
   assert.equal(description.severity, "warning");
   assert.match(description.d2rMessage, /TXTEditor uses it to label recipes/);
 
-  const booleanDiagnostics = diagnosticsFor([
-    TableDocument.fromText("misc.txt", "code\tautobelt\nkey\t2")
-  ], "Basic/BooleanFields");
-  assert.equal(booleanDiagnostics.length, 1);
-  assert.equal(booleanDiagnostics[0].columnName, "autobelt");
-  assert.equal(booleanDiagnostics[0].offendingValue, "2");
-  assert.equal(booleanDiagnostics[0].severity, "warning");
-  assert.match(booleanDiagnostics[0].message, /'2' is not a standard boolean value/);
-  assert.match(booleanDiagnostics[0].message, /Use 0 for false or 1 for true/);
-  assert.match(booleanDiagnostics[0].d2rMessage, /'2' is not a standard boolean value/);
 });
 
-test("type-29 booleans use numeric zero versus nonzero semantics without canonical warnings", () => {
+test("SuperUniques.Replaceable is excluded from BooleanFields diagnostics", () => {
+  const diagnostics = diagnosticsFor([
+    TableDocument.fromText("superuniques.txt", "superunique\treplaceable\nkey\t2\nother\ttrue")
+  ], "Basic/BooleanFields");
+  assert.deepEqual(diagnostics, []);
+});
+
+test("verified general booleans accept arbitrary signed decimal integers", () => {
   const diagnostics = diagnosticsFor([
     TableDocument.fromText(
       "missiles.txt",
@@ -259,7 +256,7 @@ test("type-29 booleans use numeric zero versus nonzero semantics without canonic
       "zero\t0\t-0\n" +
       "one\t1\t000\n" +
       "two\t2\t3\n" +
-      "large\t999999\t184467440737095516160000\n" +
+      "large\t4294967296\t184467440737095516160000\n" +
       "negative\t-1\t-987654321\n" +
       "invalid\ttrue\t+1\n" +
       "spaced\t 1\t\t"
@@ -268,8 +265,46 @@ test("type-29 booleans use numeric zero versus nonzero semantics without canonic
 
   assert.equal(diagnostics.length, 3, JSON.stringify(diagnostics, null, 2));
   assert.deepEqual(diagnostics.map((item) => item.offendingValue).sort(), [" 1", "+1", "true"]);
-  assert.ok(diagnostics.every((item) => /Use 0 for false or any nonzero integer for true/.test(item.message)));
-  assert.ok(diagnostics.every((item) => /not a number/.test(item.d2rMessage)));
+  assert.ok(diagnostics.every((item) => /number format accepted/.test(item.message)));
+  assert.ok(diagnostics.every((item) => /0 to turn it off or 1 to turn it on/.test(item.d2rMessage)));
+});
+
+test("revalidated type-29 boolean fields accept every signed decimal", () => {
+  const monstatsFields = ["enabled", "rangedtype", "placespawn", "setboss", "bossxfer", "isspawn", "ismelee", "npc", "zoo", "cannotdesecrate"];
+  const stateFields = ["remhit", "nosend", "transform", "aura", "curable", "curse", "active", "restrict", "notondead"];
+  const diagnostics = diagnosticsFor([
+    TableDocument.fromText("monstats.txt", `${monstatsFields.join("\t")}\n${monstatsFields.map((_, index) => ["2", "-1", "255", "256"][index % 4]).join("\t")}\ntrue\t${monstatsFields.slice(1).map(() => "0").join("\t")}`),
+    TableDocument.fromText("states.txt", `${stateFields.join("\t")}\n${stateFields.map((_, index) => ["2", "-1", "255", "256"][index % 4]).join("\t")}\n+1\t${stateFields.slice(1).map(() => "0").join("\t")}`)
+  ], "Basic/BooleanFields");
+
+  assert.deepEqual(diagnostics.map((item) => [item.fileName, item.columnName, item.offendingValue]), [
+    ["monstats.txt", "enabled", "true"],
+    ["states.txt", "remhit", "+1"]
+  ]);
+  assert.ok(diagnostics.every((item) => /number format accepted/.test(item.message)));
+});
+
+test("verified stored booleans accept arbitrary signed decimal integers", () => {
+  const diagnostics = diagnosticsFor([
+    TableDocument.fromText("misc.txt", "code\tautobelt\tmultibuy\nkey\t2\t256\nbad\ttrue\t+1"),
+    TableDocument.fromText("states.txt", "state\tcanstack\nok\t-256\nbad\tfalse\ntrailing\t1 "),
+    TableDocument.fromText("superuniques.txt", "superunique\tautopos\tstacks\treplaceable\nok\t-1\t255\t1\nbad\tyes\t 1\t0"),
+    TableDocument.fromText("weapons.txt", "code\t1or2handed\t2handed\naxe\t256\t-256\nbad\tno\t+2")
+  ], "Basic/BooleanFields");
+
+  assert.equal(diagnostics.length, 8);
+  assert.deepEqual(diagnostics.map((item) => [item.fileName, item.columnName, item.offendingValue]), [
+    ["misc.txt", "autobelt", "true"],
+    ["misc.txt", "multibuy", "+1"],
+    ["states.txt", "canstack", "false"],
+    ["states.txt", "canstack", "1 "],
+    ["superuniques.txt", "autopos", "yes"],
+    ["superuniques.txt", "stacks", " 1"],
+    ["weapons.txt", "1or2handed", "no"],
+    ["weapons.txt", "2handed", "+2"]
+  ]);
+  assert.ok(diagnostics.every((item) => /number format accepted/.test(item.message)));
+  assert.ok(diagnostics.every((item) => /0 to turn it off or 1 to turn it on/.test(item.d2rMessage)));
 });
 
 test("cube inputs accept qty comma and id but preserve prefixes before exact-modifier failures", () => {

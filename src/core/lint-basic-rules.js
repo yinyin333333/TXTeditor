@@ -1,6 +1,6 @@
 import { duplicateRowPairs } from "./lint-duplicates.js";
 import { acceptedColumnsForProfile, nonStandardColumnsForProfile, numericBoundsForProfile } from "./lint-profile-data.js";
-import { BOOLEAN_FIELDS, DUPLICATE_KEYS, DUPLICATE_KEY_COMPARISONS, REQUIRED_COLUMNS, TYPE29_BOOLEAN_FIELDS, VERSION_CHECKS } from "./lint-rule-data.js";
+import { BOOLEAN_FIELDS, DUPLICATE_KEYS, DUPLICATE_KEY_COMPARISONS, RAW_BYTE_BOOLEAN_FIELDS, REQUIRED_COLUMNS, TYPE29_BOOLEAN_FIELDS, VERSION_CHECKS } from "./lint-rule-data.js";
 import { asciiCaseInsensitiveValues, asciiLower, fixed4cc, fixed4ccValues, fixed4Key, propertyGroupsEnabled, referenceTable } from "./lint-reference-semantics.js";
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { numberedFields } from "./lint-stat-data.js";
@@ -402,7 +402,8 @@ export function hitSummonModeResult(rawValue) {
 export function lintBooleanFields(index, ctx) {
   for (const table of index.tables) {
     const type29Fields = new Set(TYPE29_BOOLEAN_FIELDS[table.fileName] ?? []);
-    const fields = [...new Set([...(BOOLEAN_FIELDS[table.fileName] ?? []), ...type29Fields])];
+    const rawByteFields = new Set(RAW_BYTE_BOOLEAN_FIELDS[table.fileName] ?? []);
+    const fields = [...new Set([...(BOOLEAN_FIELDS[table.fileName] ?? []), ...type29Fields, ...rawByteFields])];
     for (const columnName of fields) {
       if (!table.hasColumn(columnName)) continue;
       table.eachRow((row) => {
@@ -410,6 +411,17 @@ export function lintBooleanFields(index, ctx) {
           const rawValue = String(row.get(columnName) ?? "");
           if (rawValue.trim() && !isSignedDecimalText(rawValue)) {
             const message = legacyMessage("basic.booleanType29", { value: rawValue, column: columnName });
+            ctx.add(table, row.rowIndex, columnName, message, {
+              severity: "warning",
+              d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
+            });
+          }
+          return;
+        }
+        if (rawByteFields.has(columnName)) {
+          const rawValue = String(row.get(columnName) ?? "");
+          if (rawValue.trim() && !isSignedDecimalText(rawValue)) {
+            const message = legacyMessage("basic.booleanRawByte", { value: rawValue, column: columnName });
             ctx.add(table, row.rowIndex, columnName, message, {
               severity: "warning",
               d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`

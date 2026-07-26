@@ -670,7 +670,7 @@ test("Basic/LinkedExcel covers d2rlint item type, sound, skilldesc, and summode 
 
 test("lint checks numeric bounds, boolean fields, cube rules, and treasure class rules", () => {
   const docs = [
-    TableDocument.fromText("misc.txt", "code\tautobelt\nabc\t2"),
+    TableDocument.fromText("misc.txt", "code\tautobelt\nabc\ttrue"),
     TableDocument.fromText("armor.txt", "code\ncap"),
     TableDocument.fromText("weapons.txt", "code\naxe"),
     TableDocument.fromText("itemtypes.txt", "code\tTreasureClass\narmo\t1"),
@@ -860,7 +860,7 @@ test("lint profile affects D2R 2.4 missile range semantics", () => {
 });
 
 test("fixed lint diagnostics disappear after re-running on edited data", () => {
-  const doc = TableDocument.fromText("misc.txt", "code\tautobelt\nabc\t2");
+  const doc = TableDocument.fromText("misc.txt", "code\tautobelt\nabc\ttrue");
   assert.equal(runLint([doc], createDefaultLintSettings()).some((item) => item.ruleId === "Basic/BooleanFields"), true);
   doc.setCell(1, 1, "1");
   assert.equal(runLint([doc], createDefaultLintSettings()).some((item) => item.ruleId === "Basic/BooleanFields"), false);

@@ -105,14 +105,25 @@ export const BOOLEAN_FIELDS = {
   "misc.txt": ["autobelt", "multibuy"],
   "monstats.txt": ["enabled", "rangedtype", "placespawn", "setboss", "bossxfer", "isspawn", "ismelee", "npc", "zoo", "cannotdesecrate"],
   "states.txt": ["remhit", "nosend", "transform", "aura", "curable", "curse", "active", "restrict", "notondead", "canstack"],
-  "superuniques.txt": ["autopos", "stacks", "replaceable"],
+  "superuniques.txt": ["autopos", "stacks"],
   "weapons.txt": ["1or2handed", "2handed"]
 };
 
 // Binary-revalidated type-29 bitfields. Their loader meaning is parsed
 // numeric zero=false and every parsed nonzero value=true, not a 0/1 enum.
 export const TYPE29_BOOLEAN_FIELDS = {
-  "missiles.txt": ["explosion", "nomultishot"]
+  "missiles.txt": ["explosion", "nomultishot"],
+  "monstats.txt": ["enabled", "rangedtype", "placespawn", "setboss", "bossxfer", "isspawn", "ismelee", "npc", "zoo", "cannotdesecrate"],
+  "states.txt": ["remhit", "nosend", "transform", "aura", "curable", "curse", "active", "restrict", "notondead"]
+};
+
+// Binary-revalidated integer fields stored as one byte and consumed by byte
+// truthiness. The effective value is the parsed signed decimal's low byte.
+export const RAW_BYTE_BOOLEAN_FIELDS = {
+  "misc.txt": ["autobelt", "multibuy"],
+  "states.txt": ["canstack"],
+  "superuniques.txt": ["autopos", "stacks"],
+  "weapons.txt": ["1or2handed", "2handed"]
 };
 
 const TREASURE_PROBABILITY_BOUNDS = Object.fromEntries(
