@@ -15,7 +15,8 @@ import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
 import {
   createDocumentController,
-  WORKSPACE_PATH_STORAGE_KEY
+  WORKSPACE_PATH_STORAGE_KEY,
+  WORKSPACE_RELOAD_STORAGE_KEY
 } from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
@@ -631,7 +632,39 @@ test("opening a standalone native TXT starts a sibling-only Vector session at it
   }
 });
 
-test("#84 startup restores the saved workspace from current disk state with existing folder options", async () => {
+test("#85 a fresh app launch clears the previous workspace without skipping native LSP cleanup", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\PreviousWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const sessionStorage = workspaceReloadSessionStorage(false);
+  let claimCalls = 0;
+  let listCalls = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => { listCalls += 1; } } } };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      sessionStorage,
+      lspClaimSession: async () => { claimCalls += 1; }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(claimCalls, 1);
+    assert.equal(listCalls, 0);
+    assert.equal(values.has(WORKSPACE_PATH_STORAGE_KEY), false);
+    assert.equal(sessionStorage.getItem(WORKSPACE_RELOAD_STORAGE_KEY), "1");
+    assert.equal(state.workspace, null);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 WebView reload restores the saved workspace from current disk state with existing folder options", async () => {
   const originalWindow = globalThis.window;
   const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\SavedWorkspace"]]);
   const storage = {
@@ -654,6 +687,7 @@ test("#84 startup restores the saved workspace from current disk state with exis
   try {
     const { controller, state } = testDocumentController([], {}, {
       storage,
+      sessionStorage: workspaceReloadSessionStorage(),
       excludeWorkspaceSubfolders: true,
       lintEngine: "vector-lsp",
       isVectorLintEngine: () => true,
@@ -699,6 +733,7 @@ test("#84 manual folder selection persists its path while unavailable restore re
   try {
     const { controller, state } = testDocumentController([], {}, {
       storage,
+      sessionStorage: workspaceReloadSessionStorage(),
       lintEngine: "vector-lsp",
       isVectorLintEngine: () => true,
       isLegacyLintEngine: () => false,
@@ -740,6 +775,7 @@ test("#84 failed restore claims and clears a native generation greater than 1", 
   try {
     const { controller } = testDocumentController([], {}, {
       storage,
+      sessionStorage: workspaceReloadSessionStorage(),
       lspClaimSession: async () => {
         native.latest += 1;
         native.active = null;
@@ -766,6 +802,7 @@ test("#84 startup claims a leftover standalone LSP session without a saved works
   try {
     const { controller } = testDocumentController([], {}, {
       storage: { getItem: () => null },
+      sessionStorage: workspaceReloadSessionStorage(),
       lspClaimSession: async () => {
         native.latest += 1;
         native.active = null;
@@ -1884,9 +1921,19 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     updateGridDiagnostics: () => {},
     resetWorkspaceView: options.resetWorkspaceView ?? (() => {}),
     scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {}),
-    storage: options.storage
+    storage: options.storage,
+    sessionStorage: options.sessionStorage
   });
   return { controller, state, document: hostDocument, host };
+}
+
+function workspaceReloadSessionStorage(marked = true) {
+  const values = new Map(marked ? [[WORKSPACE_RELOAD_STORAGE_KEY, "1"]] : []);
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
 }
 
 function deferred() {

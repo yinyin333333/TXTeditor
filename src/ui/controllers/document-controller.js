@@ -42,6 +42,7 @@ import {
 import { tText } from "../../core/i18n.js";
 
 export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
+export const WORKSPACE_RELOAD_STORAGE_KEY = "txteditor.workspaceReload";
 
 export function createDocumentController({
   state,
@@ -86,7 +87,8 @@ export function createDocumentController({
   onTableDocumentClosed = () => {},
   captureTableAnnotationIdentity = () => "",
   onTableDocumentSaved = () => {},
-  storage = globalThis.localStorage
+  storage = globalThis.localStorage,
+  sessionStorage = globalThis.sessionStorage
 }) {
   let pendingCloseResolve = null;
   let pendingExternalResolve = null;
@@ -341,6 +343,10 @@ export function createDocumentController({
   async function restoreWorkspace() {
     if (!isTauriRuntime()) return false;
     await lspClaimSession();
+    if (!isWorkspaceReload()) {
+      writeWorkspacePath("");
+      return false;
+    }
     const path = readWorkspacePath();
     if (!path) return false;
     const includeSubfolders = !state.excludeWorkspaceSubfolders;
@@ -377,6 +383,16 @@ export function createDocumentController({
       if (path) storage?.setItem(WORKSPACE_PATH_STORAGE_KEY, path);
       else storage?.removeItem(WORKSPACE_PATH_STORAGE_KEY);
     } catch {}
+  }
+
+  function isWorkspaceReload() {
+    try {
+      const reload = sessionStorage?.getItem(WORKSPACE_RELOAD_STORAGE_KEY) === "1";
+      sessionStorage?.setItem(WORKSPACE_RELOAD_STORAGE_KEY, "1");
+      return reload;
+    } catch {
+      return false;
+    }
   }
 
   async function closeAll() {
