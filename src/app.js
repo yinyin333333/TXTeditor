@@ -325,7 +325,7 @@ documentController = createDocumentController({
   isLegacyLintEngine,
   setLintDiagnostics, updateGridDiagnostics,
   resetWorkspaceView: () => shellController?.resetWorkspaceView(),
-  scrollProblemsToActiveFile, ...manualHighlightController.documentLifecycleHooks()
+  scrollProblemsToActiveFile, resizeOpenedDocumentToFit: () => gridCommandController.resizeFit(false), ...manualHighlightController.documentLifecycleHooks()
 });
 searchController = createSearchController({
   state,

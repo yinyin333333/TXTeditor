@@ -27,6 +27,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedGridFont = normaliseGridFont(storage.getItem("txteditor.gridFont"));
   const savedColorize = storage.getItem("txteditor.colorize") === "on";
   const savedMouseResizeLocked = storage.getItem("txteditor.mouseResizeLocked") === "on";
+  const savedAutoResizeToFitOnOpen = storage.getItem("txteditor.autoResizeToFitOnOpen") === "on";
   const savedExcludeWorkspaceSubfolders = storage.getItem("txteditor.excludeWorkspaceSubfolders") === "on";
   const savedVectorLspHover = vectorLspHoverFromStorage(storage.getItem("txteditor.vectorLspHover"));
   const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
@@ -60,6 +61,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     gridFont: savedGridFont,
     colorizeColumns: savedColorize,
     mouseResizeLocked: savedMouseResizeLocked,
+    autoResizeToFitOnOpen: savedAutoResizeToFitOnOpen,
     excludeWorkspaceSubfolders: savedExcludeWorkspaceSubfolders,
     vectorLspHover: savedVectorLspHover,
     shortcuts: savedShortcuts,

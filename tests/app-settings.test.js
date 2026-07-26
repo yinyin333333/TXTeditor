@@ -61,6 +61,7 @@ function makeSettingsController({
     locale: "enUS",
     colorizeColumns: true,
     mouseResizeLocked: false,
+    autoResizeToFitOnOpen: false,
     excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
@@ -150,6 +151,7 @@ test("App Settings modal renders visual controls in the controller behavior path
 
   assert.equal(document.body.querySelector("#settingsColorizeColumns")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsMouseResizeLocked")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsAutoResizeToFitOnOpen")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
@@ -283,6 +285,23 @@ test("mouse resize lock defaults off, applies immediately, and is restored from 
     ["mouse-resize-locked", true]
   ]);
   assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, true);
+});
+
+test("automatic Resize To Fit on open defaults off and is restored from storage", () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.autoResizeToFitOnOpen, false);
+
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsAutoResizeToFitOnOpen");
+  assert.equal(input.checked, false);
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+
+  assert.equal(state.autoResizeToFitOnOpen, true);
+  assert.equal(localStorage.getItem("txteditor.autoResizeToFitOnOpen"), "on");
+  assert.equal(calls.includes("render"), true);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.autoResizeToFitOnOpen, true);
 });
 
 test("App Settings closes on Escape and removes its temporary key listener", () => {

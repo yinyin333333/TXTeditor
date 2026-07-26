@@ -155,6 +155,12 @@ export function createSettingsController({
     renderChrome();
   }
 
+  function setAutoResizeToFitOnOpen(enabled) {
+    state.autoResizeToFitOnOpen = Boolean(enabled);
+    localStorage.setItem("txteditor.autoResizeToFitOnOpen", state.autoResizeToFitOnOpen ? "on" : "off");
+    renderChrome();
+  }
+
   async function setExcludeWorkspaceSubfolders(excluded) {
     const next = Boolean(excluded);
     const request = ++workspaceScopeRequest;
@@ -353,6 +359,7 @@ export function createSettingsController({
     const visualControls = appSettingsVisualControls({
       colorizeColumns: state.colorizeColumns,
       mouseResizeLocked: state.mouseResizeLocked,
+      autoResizeToFitOnOpen: state.autoResizeToFitOnOpen,
       excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       vectorLspHover: state.vectorLspHover,
       legacyLintEngine: isLegacyLintEngine(),
@@ -391,6 +398,10 @@ export function createSettingsController({
             ${visualControls.mouseResize.label}
           </label>
           <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.autoResizeToFitOnOpen.id}"${visualControls.autoResizeToFitOnOpen.checked ? " checked" : ""} />
+            ${visualControls.autoResizeToFitOnOpen.label}
+          </label>
+          <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
             ${visualControls.workspaceSubfolders.label}
           </label>
@@ -425,6 +436,7 @@ export function createSettingsController({
 
     const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
     const mouseResizeInput = backdrop.querySelector("#settingsMouseResizeLocked");
+    const autoResizeToFitOnOpenInput = backdrop.querySelector("#settingsAutoResizeToFitOnOpen");
     const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
@@ -436,6 +448,7 @@ export function createSettingsController({
     const refresh = () => {
       colorizeInput.checked = state.colorizeColumns;
       mouseResizeInput.checked = state.mouseResizeLocked;
+      autoResizeToFitOnOpenInput.checked = state.autoResizeToFitOnOpen;
       workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       hoverInput.checked = state.vectorLspHover;
       hoverInput.disabled = isLegacyLintEngine();
@@ -453,6 +466,10 @@ export function createSettingsController({
     };
     colorizeInput.addEventListener("change", () => { setColorizeColumns(colorizeInput.checked); refresh(); });
     mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
+    autoResizeToFitOnOpenInput.addEventListener("change", () => {
+      setAutoResizeToFitOnOpen(autoResizeToFitOnOpenInput.checked);
+      refresh();
+    });
     workspaceSubfoldersInput.addEventListener("change", () => {
       setExcludeWorkspaceSubfolders(workspaceSubfoldersInput.checked)
         .then((applied) => {
@@ -890,6 +907,7 @@ export function createSettingsController({
     saveLintSettings,
     setColorizeColumns,
     setMouseResizeLocked,
+    setAutoResizeToFitOnOpen,
     setExcludeWorkspaceSubfolders,
     setLegacyLintProfile,
     setLegacyLintReferenceVersion,

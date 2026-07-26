@@ -59,6 +59,7 @@ export function fontLabelFromFamily(fontFamily) {
 export function appSettingsVisualControls({
   colorizeColumns = false,
   mouseResizeLocked = false,
+  autoResizeToFitOnOpen = false,
   excludeWorkspaceSubfolders = false,
   vectorLspHover = true,
   legacyLintEngine = false,
@@ -71,6 +72,11 @@ export function appSettingsVisualControls({
       id: "settingsMouseResizeLocked",
       label: tText("settings.lockResize"),
       checked: Boolean(mouseResizeLocked)
+    },
+    autoResizeToFitOnOpen: {
+      id: "settingsAutoResizeToFitOnOpen",
+      label: tText("settings.autoResizeToFitOnOpen"),
+      checked: Boolean(autoResizeToFitOnOpen)
     },
     workspaceSubfolders: {
       id: "settingsExcludeWorkspaceSubfolders",

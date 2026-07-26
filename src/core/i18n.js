@@ -414,6 +414,22 @@ Object.assign(CATALOG_ROWS, {
   "error.jsonEditingDesktop": ["Localization JSON editing is available in the desktop app.", "本地化 JSON 編輯僅適用於桌面版應用程式。", "Die Bearbeitung von Lokalisierungs-JSON ist in der Desktop-App verfügbar.", "La edición de JSON de localización está disponible en la aplicación de escritorio.", "L’édition des JSON de localisation est disponible dans l’application de bureau.", "La modifica dei JSON di localizzazione è disponibile nell’app desktop.", "현지화 JSON 편집은 데스크톱 앱에서 사용할 수 있습니다.", "Edycja lokalizacyjnych JSON jest dostępna w aplikacji desktopowej.", "La edición de JSON de localización está disponible en la aplicación de escritorio.", "ローカリゼーション JSON の編集はデスクトップアプリで利用できます。", "A edição de JSON de localização está disponível no app de desktop.", "Редактирование JSON локализации доступно в настольном приложении.", "本地化 JSON 编辑仅在桌面应用中可用。"]
 });
 
+CATALOG_ROWS["settings.autoResizeToFitOnOpen"] = [
+  "Automatically apply Resize To Fit when opening a file",
+  "開啟檔案時自動套用「調整為合適大小」",
+  "Beim Öffnen einer Datei automatisch an den Inhalt anpassen",
+  "Aplicar automáticamente Ajustar al contenido al abrir un archivo",
+  "Ajuster automatiquement au contenu à l’ouverture d’un fichier",
+  "Adatta automaticamente al contenuto all’apertura di un file",
+  "파일을 열 때 자동으로 내용에 맞게 크기 조정",
+  "Automatycznie dopasuj do zawartości przy otwieraniu pliku",
+  "Aplicar automáticamente Ajustar al contenido al abrir un archivo",
+  "ファイルを開くときに内容に合わせて自動調整",
+  "Ajustar automaticamente ao conteúdo ao abrir um arquivo",
+  "Автоматически подгонять по содержимому при открытии файла",
+  "打开文件时自动调整为适合内容"
+];
+
 for (const [key, values] of Object.entries(CATALOG_ROWS)) {
   if (values.length !== SUPPORTED_LOCALES.length) throw new Error(`Catalog locale count mismatch: ${key}`);
 }

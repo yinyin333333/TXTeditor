@@ -590,7 +590,9 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
       doc.toText();
     },
     scheduleHoverPrewarm: () => calls.push("hover-prewarm"),
-    scheduleLegacyLintForOpen: () => calls.push("legacy-open")
+    scheduleLegacyLintForOpen: () => calls.push("legacy-open"),
+    autoResizeToFitOnOpen: true,
+    resizeOpenedDocumentToFit: () => calls.push("resize-to-fit")
   });
 
   await controller.addDocument(doc);
@@ -600,6 +602,39 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
   assert.equal(toTextCalls, 0);
   assert.deepEqual(calls, []);
   assert.match(state.lint.status, /Large file mode/);
+});
+
+test("new table documents use full Resize To Fit only when the open setting is enabled", async () => {
+  const enabledDoc = TableDocument.fromText("enabled.txt", "a\tb\nlong value\t2", { dirty: false });
+  const enabledCalls = [];
+  const enabled = testDocumentController([], {
+    autoFitInitialColumns: () => enabledCalls.push("initial-fit"),
+    layout: () => enabledCalls.push("layout")
+  }, {
+    autoResizeToFitOnOpen: true,
+    activateDocument: async () => enabledCalls.push("activate"),
+    resizeOpenedDocumentToFit: async () => enabledCalls.push("resize-to-fit")
+  });
+
+  await enabled.controller.addDocument(enabledDoc);
+
+  assert.deepEqual(enabledCalls.slice(0, 2), ["activate", "resize-to-fit"]);
+  assert.equal(enabledCalls.includes("initial-fit"), false);
+  assert.equal(enabledDoc.initialColumnFitApplied, true);
+
+  const disabledDoc = TableDocument.fromText("disabled.txt", "a\tb\nlong value\t2", { dirty: false });
+  const disabledCalls = [];
+  const disabled = testDocumentController([], {
+    autoFitInitialColumns: () => disabledCalls.push("initial-fit"),
+    layout: () => disabledCalls.push("layout")
+  }, {
+    resizeOpenedDocumentToFit: async () => disabledCalls.push("resize-to-fit")
+  });
+
+  await disabled.controller.addDocument(disabledDoc);
+
+  assert.equal(disabledCalls.includes("resize-to-fit"), false);
+  assert.deepEqual(disabledCalls.slice(0, 2), ["initial-fit", "layout"]);
 });
 
 test("opening a standalone native TXT starts a sibling-only Vector session at its parent", async () => {
@@ -1462,6 +1497,7 @@ test("Settings modal exposes immediate visual settings without save cancel apply
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const controls = appSettingsVisualControls({
     colorizeColumns: true,
+    autoResizeToFitOnOpen: true,
     vectorLspHover: true,
     legacyLintEngine: true,
     theme: "light",
@@ -1472,6 +1508,11 @@ test("Settings modal exposes immediate visual settings without save cancel apply
     id: "settingsExcludeWorkspaceSubfolders",
     label: "Exclude subfolders when opening a folder",
     checked: false
+  });
+  assert.deepEqual(controls.autoResizeToFitOnOpen, {
+    id: "settingsAutoResizeToFitOnOpen",
+    label: "Automatically apply Resize To Fit when opening a file",
+    checked: true
   });
   assert.equal(controls.vectorHover.id, "settingsVectorLspHover");
   assert.equal(controls.vectorHover.label, "Vector-LSP Hover");
@@ -1868,6 +1909,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs],
     active: 0,
     workspace: options.workspace ?? null,
+    autoResizeToFitOnOpen: options.autoResizeToFitOnOpen ?? false,
     excludeWorkspaceSubfolders: options.excludeWorkspaceSubfolders ?? false,
     lint: {
       engine: options.lintEngine ?? "legacy",
@@ -1921,6 +1963,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     updateGridDiagnostics: () => {},
     resetWorkspaceView: options.resetWorkspaceView ?? (() => {}),
     scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {}),
+    resizeOpenedDocumentToFit: options.resizeOpenedDocumentToFit ?? (async () => {}),
     storage: options.storage,
     sessionStorage: options.sessionStorage
   });

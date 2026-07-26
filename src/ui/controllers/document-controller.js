@@ -87,6 +87,7 @@ export function createDocumentController({
   onTableDocumentClosed = () => {},
   captureTableAnnotationIdentity = () => "",
   onTableDocumentSaved = () => {},
+  resizeOpenedDocumentToFit = async () => {},
   storage = globalThis.localStorage,
   sessionStorage = globalThis.sessionStorage
 }) {
@@ -167,7 +168,7 @@ export function createDocumentController({
     saveSelectionState();
     state.active = plan.activeIndex;
     await activateDocument(doc, { focus: false });
-    if (isTableDocument(doc)) prepareOpenedTable(doc);
+    if (isTableDocument(doc)) await prepareOpenedTable(doc);
     renderChrome();
     if (scrollProblems) scrollProblemsToActiveFile();
     if (focus) focusActiveEditor();
@@ -182,14 +183,17 @@ export function createDocumentController({
     return doc;
   }
 
-  function prepareOpenedTable(doc) {
+  async function prepareOpenedTable(doc) {
     if (doc.largeFileMode) {
       doc.initialColumnFitApplied = true;
       state.lint.status = `Large file mode: lint paused for ${doc.name}.`;
     } else if (isOpenStatus(state.lint.status)) {
       state.lint.status = "";
     }
-    if (!doc.largeFileMode && !doc.initialColumnFitApplied) {
+    if (!doc.largeFileMode && state.autoResizeToFitOnOpen) {
+      await resizeOpenedDocumentToFit();
+      doc.initialColumnFitApplied = true;
+    } else if (!doc.largeFileMode && !doc.initialColumnFitApplied) {
       grid.autoFitInitialColumns();
       doc.initialColumnFitApplied = true;
       grid.layout();
