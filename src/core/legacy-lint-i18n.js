@@ -72,12 +72,15 @@ const EN_MESSAGES = {
   "items.unknownGambleCode": 'Unknown item code "{code}". Check the four-character code and letter case.',
   "items.characterOnlyGamble": 'Item "{code}" belongs to the character-only item type tree. Remove it from gamble.txt unless this is intentional.',
   "items.statParameterInteger": '{column} value "{value}" is not a normal integer; {behavior}. Use a plain whole number or valid skill name.',
+  "items.statParameterIntegerNumeric": '{column} value "{value}" is not a normal integer; the game reads it as {effective}. Use a plain whole number.',
   "items.statParameterNumericPrefix": '{column} value "{value}" is not a normal integer; the game reads the initial integer as {effective}. Use a plain whole number or valid skill name.',
+  "items.statParameterNumericPrefixNumeric": '{column} value "{value}" is not a normal integer; the game reads the initial integer as {effective}. Use a plain whole number.',
   "items.statParameterSkillFallback": '{column} value "{value}" is not a normal integer; the game tries it as a skill name and uses 0 if no name matches. Use a plain whole number or valid skill name.',
   "items.statParameterZeroFallback": '{column} value "{value}" is not a normal integer; the game reads it as 0. Use a plain whole number or valid skill name.',
   "items.statParameterRange": "{column} value {value} is {direction} for saved item data. Use {lower} through {upper}.",
   "items.statParameterBelowRange": "{column} value {value} is below the minimum {lower} for saved item data. Use {lower} through {upper}.",
   "items.statParameterAboveRange": "{column} value {value} is above the maximum {upper} for saved item data. Use {lower} through {upper}.",
+  "items.propertyGroupMemberIssue": 'PropertyGroups member "{memberCode}" is possible through {groupField} value "{groupValue}"; {detail}',
   "items.unknownSkill": '{column} "{value}" is not a known skill. The game uses skill 0 instead; choose a valid skill name.',
   "items.skillOutOfRange": "{column} resolves to skill id {skillId}, outside the allowed range 0..{maximum}. Choose a skill from skills.txt within this range.",
   "items.chargeCap": "{column} maximum charges {value} exceeds 255. The game limits it to 255; enter 255 or less.",
@@ -509,11 +512,74 @@ const LEGACY_LINT_LEGEND_TERMS = Object.freeze({
   zhCN: { spaceLegend: " ␠ 表示空格。", tabLegend: " ⇥ 表示制表符。", spaceTabLegend: " ␠ 表示空格，⇥ 表示制表符。" }
 });
 
+const LEGACY_LINT_ADDITIONAL_TRANSLATIONS = Object.freeze({
+  zhTW: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} 值「{value}」不是普通整數；遊戲將其讀取為 {effective}。請使用純整數。",
+    "items.statParameterNumericPrefixNumeric": "{column} 值「{value}」不是普通整數；遊戲將開頭整數讀取為 {effective}。請使用純整數。",
+    "items.propertyGroupMemberIssue": "PropertyGroups 成員「{memberCode}」可能透過 {groupField} 值「{groupValue}」選取；{detail}"
+  }),
+  deDE: Object.freeze({
+    "items.statParameterIntegerNumeric": "Der Wert {column} „{value}“ ist keine normale Ganzzahl; das Spiel liest ihn als {effective}. Verwenden Sie eine einfache Ganzzahl.",
+    "items.statParameterNumericPrefixNumeric": "Der Wert {column} „{value}“ ist keine normale Ganzzahl; das Spiel liest die anfängliche Ganzzahl als {effective}. Verwenden Sie eine einfache Ganzzahl.",
+    "items.propertyGroupMemberIssue": "Das PropertyGroups-Mitglied „{memberCode}“ ist über den Wert „{groupValue}“ des Feldes {groupField} möglich; {detail}"
+  }),
+  esES: Object.freeze({
+    "items.statParameterIntegerNumeric": "El valor {column} «{value}» no es un entero normal; el juego lo interpreta como {effective}. Usa un entero simple.",
+    "items.statParameterNumericPrefixNumeric": "El valor {column} «{value}» no es un entero normal; el juego lee el entero inicial como {effective}. Usa un entero simple.",
+    "items.propertyGroupMemberIssue": "El miembro de PropertyGroups «{memberCode}» es posible mediante el valor «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  frFR: Object.freeze({
+    "items.statParameterIntegerNumeric": "La valeur {column} « {value} » n’est pas un entier normal ; le jeu la lit comme {effective}. Utilisez un entier simple.",
+    "items.statParameterNumericPrefixNumeric": "La valeur {column} « {value} » n’est pas un entier normal ; le jeu lit l’entier initial comme {effective}. Utilisez un entier simple.",
+    "items.propertyGroupMemberIssue": "Le membre PropertyGroups « {memberCode} » est possible via la valeur « {groupValue} » du champ {groupField} ; {detail}"
+  }),
+  itIT: Object.freeze({
+    "items.statParameterIntegerNumeric": "Il valore {column} «{value}» non è un intero normale; il gioco lo legge come {effective}. Usa un intero semplice.",
+    "items.statParameterNumericPrefixNumeric": "Il valore {column} «{value}» non è un intero normale; il gioco legge l'intero iniziale come {effective}. Usa un intero semplice.",
+    "items.propertyGroupMemberIssue": "Il membro PropertyGroups «{memberCode}» è possibile tramite il valore «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  koKR: Object.freeze({
+    "items.statParameterIntegerNumeric": '"{column}" 열 입력값 "{value}" 일반 정수가 아님: 게임은 이를 {effective}(으)로 읽습니다. 일반 정수만 입력하세요.',
+    "items.statParameterNumericPrefixNumeric": '"{column}" 열 입력값 "{value}" 일반 정수가 아님: 게임 앞부분 정수 {effective} 읽음. 일반 정수만 입력하세요.',
+    "items.propertyGroupMemberIssue": 'PropertyGroups 멤버 "{memberCode}" 가능 경로: {groupField} 값 "{groupValue}". {detail}'
+  }),
+  plPL: Object.freeze({
+    "items.statParameterIntegerNumeric": "Wartość {column} „{value}” nie jest zwykłą liczbą całkowitą; gra odczytuje ją jako {effective}. Użyj zwykłej liczby całkowitej.",
+    "items.statParameterNumericPrefixNumeric": "Wartość {column} „{value}” nie jest zwykłą liczbą całkowitą; gra odczytuje początkową liczbę całkowitą jako {effective}. Użyj zwykłej liczby całkowitej.",
+    "items.propertyGroupMemberIssue": "Element PropertyGroups „{memberCode}” jest możliwy przez wartość „{groupValue}” pola {groupField}; {detail}"
+  }),
+  esMX: Object.freeze({
+    "items.statParameterIntegerNumeric": "El valor {column} «{value}» no es un entero normal; el juego lo interpreta como {effective}. Usa un entero simple.",
+    "items.statParameterNumericPrefixNumeric": "El valor {column} «{value}» no es un entero normal; el juego lee el entero inicial como {effective}. Usa un entero simple.",
+    "items.propertyGroupMemberIssue": "El miembro de PropertyGroups «{memberCode}» es posible mediante el valor «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  jaJP: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} の値「{value}」は通常の整数ではありません。ゲームはこれを {effective} として読み取ります。通常の整数を入力してください。",
+    "items.statParameterNumericPrefixNumeric": "{column} の値「{value}」は通常の整数ではありません。ゲームは先頭の整数を {effective} として読み取ります。通常の整数を入力してください。",
+    "items.propertyGroupMemberIssue": "PropertyGroups のメンバー「{memberCode}」は {groupField} の値「{groupValue}」で選択される可能性があります。{detail}"
+  }),
+  ptBR: Object.freeze({
+    "items.statParameterIntegerNumeric": "O valor {column} \"{value}\" não é um número inteiro normal; o jogo o lê como {effective}. Use um número inteiro simples.",
+    "items.statParameterNumericPrefixNumeric": "O valor {column} \"{value}\" não é um número inteiro normal; o jogo lê o número inteiro inicial como {effective}. Use um número inteiro simples.",
+    "items.propertyGroupMemberIssue": "O membro PropertyGroups \"{memberCode}\" é possível pelo valor \"{groupValue}\" do campo {groupField}; {detail}"
+  }),
+  ruRU: Object.freeze({
+    "items.statParameterIntegerNumeric": "Значение {column} «{value}» не является обычным целым числом; игра считывает его как {effective}. Введите простое целое число.",
+    "items.statParameterNumericPrefixNumeric": "Значение {column} «{value}» не является обычным целым числом; игра считывает начальное целое число как {effective}. Введите простое целое число.",
+    "items.propertyGroupMemberIssue": "Член PropertyGroups «{memberCode}» возможен через значение «{groupValue}» поля {groupField}; {detail}"
+  }),
+  zhCN: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} 的值“{value}”不是普通整数；游戏将其读取为 {effective}。请输入普通整数。",
+    "items.statParameterNumericPrefixNumeric": "{column} 的值“{value}”不是普通整数；游戏将开头整数读取为 {effective}。请输入普通整数。",
+    "items.propertyGroupMemberIssue": "PropertyGroups 成员“{memberCode}”可能通过 {groupField} 值“{groupValue}”被选中；{detail}"
+  })
+});
+
 export const legacyLintCatalogs = Object.freeze({
   enUS: Object.freeze(EN_MESSAGES),
   ...Object.fromEntries(LEGACY_LINT_LOCALES.filter((locale) => locale !== "enUS").map((locale) => [
     locale,
-    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale] })
+    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale], ...LEGACY_LINT_ADDITIONAL_TRANSLATIONS[locale] })
   ]))
 });
 
@@ -601,6 +667,7 @@ function escapeHtml(value) {
 }
 
 function resolveLegacyParameter(value, locale) {
+  if (value?.legacyKey) return resolveLegacyMessage(value, locale);
   if (value?.legacyTermKey) {
     const normalized = normalizeLegacyLintLocale(locale);
     return LEGACY_LINT_TERMS[normalized]?.[value.legacyTermKey]

@@ -174,7 +174,7 @@ test("item serialization range uses (2^SaveBits - 1) - SaveAdd as its upper boun
   assert.ok(diagnostics.filter((diagnostic) => diagnostic.rowIndex === 2).every((diagnostic) => diagnostic.message.includes("maximum 5")));
 });
 
-test("monprop skips item serialization ranges but retains policy spelling, func22 skill, and max4 checks", () => {
+test("monprop skips item serialization ranges but uses numeric func22 parameters and max4 checks", () => {
   const documents = [
     TableDocument.fromText(
       "properties.txt",
@@ -195,7 +195,7 @@ test("monprop skips item serialization ranges but retains policy spelling, func2
 
   assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.columnName).sort(), ["max4", "par2"]);
   assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "max4" && diagnostic.severity === "warning" && diagnostic.message.includes("not a normal integer")));
-  assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "par2" && diagnostic.message.includes('"MissingSkill" is not a known skill')));
+  assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "par2" && diagnostic.message.includes("skill id")));
   assert.equal(diagnostics.some((diagnostic) => diagnostic.columnName === "min1" || diagnostic.columnName === "max1"), false);
   assert.match(
     ITEM_LINT_RULES.find((rule) => rule.id === "Items/ValidStatParameters").note,
