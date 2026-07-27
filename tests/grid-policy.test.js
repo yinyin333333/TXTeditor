@@ -514,6 +514,24 @@ test("grid explicit scroll shortcuts clamp to table bounds", () => {
   assert.equal(grid.host.scrollTop, 644);
 });
 
+test("wheel zoom reports a user action without changing another document", () => {
+  const active = { zoom: 1 };
+  const other = { zoom: 1.7 };
+  const remembered = [];
+  let layouts = 0;
+
+  CanvasGrid.prototype.setZoom.call({
+    doc: active,
+    layout: () => { layouts += 1; },
+    onZoomChanged: (zoom) => remembered.push(zoom)
+  }, 1.3, { userAction: true });
+
+  assert.equal(active.zoom, 1.3);
+  assert.equal(other.zoom, 1.7);
+  assert.equal(layouts, 1);
+  assert.deepEqual(remembered, [1.3]);
+});
+
 test("grid wheel scrolling supports pixel, line, and shifted horizontal input", () => {
   const grid = {
     host: {

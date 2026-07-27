@@ -29,7 +29,7 @@ export const VECTOR_LSP_HOVER_DELAY_MS = 0;
 export { gridColor } from "./grid-render-policy.js";
 
 export class CanvasGrid {
-  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged, highlightColorForCell = null }) {
+  constructor({ host, canvas, frozenCanvas, scrollSurface, editor, doc, selection, onEdit, onStatus, onContextMenu, onResizeCommand, onAutoFitColumn, onHoverRequest, onHoverInvalidated, onViewportChanged, onSelectionChanged, onZoomChanged = null, highlightColorForCell = null }) {
     this.host = host;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -48,6 +48,7 @@ export class CanvasGrid {
     this.onHoverInvalidated = onHoverInvalidated;
     this.onViewportChanged = onViewportChanged;
     this.onSelectionChanged = onSelectionChanged;
+    this.onZoomChanged = onZoomChanged;
     this.highlightColorForCell = highlightColorForCell;
     this.manualHighlightColors = new Map();
     this._lspHoverByCell = new Map();
@@ -224,7 +225,7 @@ export class CanvasGrid {
     this.host.addEventListener("wheel", (event) => {
       if (!event.ctrlKey) return;
       event.preventDefault();
-      this.setZoom(this.doc.zoom + (event.deltaY < 0 ? 0.1 : -0.1));
+      this.setZoom(this.doc.zoom + (event.deltaY < 0 ? 0.1 : -0.1), { userAction: true });
     }, { passive: false });
     window.addEventListener("mouseup", () => this.onMouseUp());
     this.editor.addEventListener("keydown", (event) => this.onEditorKeyDown(event));
@@ -673,9 +674,10 @@ export class CanvasGrid {
     return next;
   }
 
-  setZoom(value) {
+  setZoom(value, { userAction = false } = {}) {
     this.doc.zoom = clamp(Math.round(value * 10) / 10, 0.1, 8);
     this.layout();
+    if (userAction) this.onZoomChanged?.(this.doc.zoom);
   }
 
   onEditorKeyDown(event) {

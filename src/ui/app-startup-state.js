@@ -16,7 +16,7 @@ import {
   panelStateFromStorage
 } from "./panel-state-policy.js";
 import { initialSearchState } from "./search-policy.js";
-import { normaliseGridFont } from "./app-settings-policy.js";
+import { normaliseGridFont, normaliseZoomLevel } from "./app-settings-policy.js";
 import { readJsonStorage } from "./app-runtime-utils.js";
 import { loadShortcutBindings } from "./shortcut-policy.js";
 import { freezeStateFromStorage } from "./freeze-state-policy.js";
@@ -28,6 +28,8 @@ export function createInitialAppState({ storage = localStorage } = {}) {
   const savedColorize = storage.getItem("txteditor.colorize") === "on";
   const savedMouseResizeLocked = storage.getItem("txteditor.mouseResizeLocked") === "on";
   const savedAutoResizeToFitOnOpen = storage.getItem("txteditor.autoResizeToFitOnOpen") === "on";
+  const savedKeepZoomLevel = storage.getItem("txteditor.keepZoomLevel") === "on";
+  const savedZoomLevel = normaliseZoomLevel(storage.getItem("txteditor.zoomLevel"));
   const savedExcludeWorkspaceSubfolders = storage.getItem("txteditor.excludeWorkspaceSubfolders") === "on";
   const savedVectorLspHover = vectorLspHoverFromStorage(storage.getItem("txteditor.vectorLspHover"));
   const savedLintEnabled = readJsonStorage("txteditor.lint.settings", {}).enabled !== false;
@@ -62,6 +64,8 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     colorizeColumns: savedColorize,
     mouseResizeLocked: savedMouseResizeLocked,
     autoResizeToFitOnOpen: savedAutoResizeToFitOnOpen,
+    keepZoomLevel: savedKeepZoomLevel,
+    rememberedZoomLevel: savedZoomLevel,
     excludeWorkspaceSubfolders: savedExcludeWorkspaceSubfolders,
     vectorLspHover: savedVectorLspHover,
     shortcuts: savedShortcuts,

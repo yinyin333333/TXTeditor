@@ -25,6 +25,7 @@ export function createGridCommandController({
   applyFreezeToDoc,
   rowsForContextOperation,
   columnsFromSelection,
+  onZoomChanged = () => {},
   storage = globalThis.localStorage
 }) {
   function toggleFreeze(kind) {
@@ -62,12 +63,14 @@ export function createGridCommandController({
   function zoomBy(delta) {
     if (!hasOpenDocument()) return;
     grid.setZoom(activeDoc().zoom + delta);
+    onZoomChanged(activeDoc().zoom);
     renderChrome();
   }
 
   function zoomReset() {
     if (!hasOpenDocument()) return;
     grid.setZoom(1);
+    onZoomChanged(activeDoc().zoom);
     renderChrome();
   }
 

@@ -20,7 +20,8 @@ import {
 } from "../../core/lint-controller-policy.js";
 import {
   appSettingsVisualControls,
-  normaliseGridFont
+  normaliseGridFont,
+  normaliseZoomLevel
 } from "../app-settings-policy.js";
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
@@ -180,6 +181,18 @@ export function createSettingsController({
     state.autoResizeToFitOnOpen = Boolean(enabled);
     localStorage.setItem("txteditor.autoResizeToFitOnOpen", state.autoResizeToFitOnOpen ? "on" : "off");
     renderChrome();
+  }
+
+  function setKeepZoomLevel(enabled) {
+    state.keepZoomLevel = Boolean(enabled);
+    localStorage.setItem("txteditor.keepZoomLevel", state.keepZoomLevel ? "on" : "off");
+    renderChrome();
+  }
+
+  function recordZoomLevel(value) {
+    if (!state.keepZoomLevel) return;
+    state.rememberedZoomLevel = normaliseZoomLevel(value);
+    localStorage.setItem("txteditor.zoomLevel", String(state.rememberedZoomLevel));
   }
 
   async function setExcludeWorkspaceSubfolders(excluded) {
@@ -369,6 +382,7 @@ export function createSettingsController({
       colorizeColumns: state.colorizeColumns,
       mouseResizeLocked: state.mouseResizeLocked,
       autoResizeToFitOnOpen: state.autoResizeToFitOnOpen,
+      keepZoomLevel: state.keepZoomLevel,
       excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       vectorLspHover: state.vectorLspHover,
       legacyLintEngine: isLegacyLintEngine(),
@@ -411,6 +425,10 @@ export function createSettingsController({
             ${visualControls.autoResizeToFitOnOpen.label}
           </label>
           <label class="settings-checkbox-label">
+            <input type="checkbox" id="${visualControls.keepZoomLevel.id}"${visualControls.keepZoomLevel.checked ? " checked" : ""} />
+            ${visualControls.keepZoomLevel.label}
+          </label>
+          <label class="settings-checkbox-label">
             <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
             ${visualControls.workspaceSubfolders.label}
           </label>
@@ -446,6 +464,7 @@ export function createSettingsController({
     const colorizeInput = backdrop.querySelector("#settingsColorizeColumns");
     const mouseResizeInput = backdrop.querySelector("#settingsMouseResizeLocked");
     const autoResizeToFitOnOpenInput = backdrop.querySelector("#settingsAutoResizeToFitOnOpen");
+    const keepZoomLevelInput = backdrop.querySelector("#settingsKeepZoomLevel");
     const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
     const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
@@ -458,6 +477,7 @@ export function createSettingsController({
       colorizeInput.checked = state.colorizeColumns;
       mouseResizeInput.checked = state.mouseResizeLocked;
       autoResizeToFitOnOpenInput.checked = state.autoResizeToFitOnOpen;
+      keepZoomLevelInput.checked = state.keepZoomLevel;
       workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       hoverInput.checked = state.vectorLspHover;
       hoverInput.disabled = isLegacyLintEngine();
@@ -477,6 +497,10 @@ export function createSettingsController({
     mouseResizeInput.addEventListener("change", () => { setMouseResizeLocked(mouseResizeInput.checked); refresh(); });
     autoResizeToFitOnOpenInput.addEventListener("change", () => {
       setAutoResizeToFitOnOpen(autoResizeToFitOnOpenInput.checked);
+      refresh();
+    });
+    keepZoomLevelInput.addEventListener("change", () => {
+      setKeepZoomLevel(keepZoomLevelInput.checked);
       refresh();
     });
     workspaceSubfoldersInput.addEventListener("change", () => {
@@ -894,6 +918,8 @@ export function createSettingsController({
     setColorizeColumns,
     setMouseResizeLocked,
     setAutoResizeToFitOnOpen,
+    setKeepZoomLevel,
+    recordZoomLevel,
     setExcludeWorkspaceSubfolders,
     setLegacyGameVersion,
     setLegacyLintRuleEnabled,

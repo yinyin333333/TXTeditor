@@ -156,8 +156,7 @@ const {
 } = legacyLintController;
 syncDockLayout();
 
-let shellController = null;
-let gridCommandController = null;
+let shellController = null, gridCommandController = null, settingsController = null;
 const grid = new CanvasGrid({
   host: els.host,
   canvas: els.canvas,
@@ -174,11 +173,9 @@ const grid = new CanvasGrid({
   onHoverRequest: (row, column, meta) => lspController.requestHover(row, column, meta).catch((error) => lspController.reportHoverDispatchFailure(row, column, error, "grid-hover-request")),
   onHoverInvalidated: () => lspController.clearVisibleHover("grid-hover-cleared"),
   onViewportChanged: (reason) => lspController.scheduleHoverPrewarm(reason),
-  onSelectionChanged: () => {
-    saveSelectionState();
-    diagnosticsController.handleSelectionChanged();
-    cellInputController?.refresh();
-  }, highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
+  onSelectionChanged: () => { saveSelectionState(); diagnosticsController.handleSelectionChanged(); cellInputController?.refresh(); },
+  onZoomChanged: (zoom) => settingsController?.recordZoomLevel(zoom),
+  highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
 });
 manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage });
 
@@ -206,7 +203,8 @@ gridCommandController = createGridCommandController({
   promptNumber,
   applyFreezeToDoc,
   rowsForContextOperation,
-  columnsFromSelection
+  columnsFromSelection,
+  onZoomChanged: (zoom) => settingsController.recordZoomLevel(zoom)
 });
 const { toggleFreeze, unhideAll, zoomBy, zoomReset, resetRowHeights, goToRow, resizeFit, cloneRows, cloneColumns } = gridCommandController;
 lspController = createLspController({
@@ -254,7 +252,7 @@ exposeTxteditorPerf(window, {
   lintEngineEvents,
   ...lspController.perf
 });
-const settingsController = createSettingsController({
+settingsController = createSettingsController({
   state,
   els,
   grid,

@@ -637,6 +637,36 @@ test("new table documents use full Resize To Fit only when the open setting is e
   assert.deepEqual(disabledCalls.slice(0, 2), ["initial-fit", "layout"]);
 });
 
+test("Keep zoom level supplies only the initial zoom for newly opened tables", async () => {
+  const first = TableDocument.fromText("first.txt", "a\n1", { dirty: false });
+  const second = TableDocument.fromText("second.txt", "a\n2", { dirty: false });
+  const remembered = testDocumentController([], {}, {
+    keepZoomLevel: true,
+    rememberedZoomLevel: 1.6,
+    autoResizeToFitOnOpen: true
+  });
+
+  await remembered.controller.addDocument(first);
+  first.zoom = 1.3;
+  await remembered.controller.addDocument(second);
+
+  assert.equal(first.zoom, 1.3);
+  assert.equal(second.zoom, 1.6);
+
+  assert.equal(await remembered.controller.closeAll(), true);
+  const reopened = TableDocument.fromText("reopened.txt", "a\n4", { dirty: false });
+  await remembered.controller.addDocument(reopened);
+  assert.equal(reopened.zoom, 1.6);
+
+  const stale = TableDocument.fromText("stale.txt", "a\n3", { dirty: false });
+  const disabled = testDocumentController([], {}, {
+    keepZoomLevel: false,
+    rememberedZoomLevel: 1.6
+  });
+  await disabled.controller.addDocument(stale);
+  assert.equal(stale.zoom, 1);
+});
+
 test("opening a standalone native TXT starts a sibling-only Vector session at its parent", async () => {
   const originalWindow = globalThis.window;
   globalThis.window = { __TAURI__: { core: { invoke: async () => {} } } };
@@ -1910,6 +1940,8 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     active: 0,
     workspace: options.workspace ?? null,
     autoResizeToFitOnOpen: options.autoResizeToFitOnOpen ?? false,
+    keepZoomLevel: options.keepZoomLevel ?? false,
+    rememberedZoomLevel: options.rememberedZoomLevel ?? 1,
     excludeWorkspaceSubfolders: options.excludeWorkspaceSubfolders ?? false,
     lint: {
       engine: options.lintEngine ?? "legacy",

@@ -62,6 +62,8 @@ function makeSettingsController({
     colorizeColumns: true,
     mouseResizeLocked: false,
     autoResizeToFitOnOpen: false,
+    keepZoomLevel: false,
+    rememberedZoomLevel: 1,
     excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
@@ -302,6 +304,35 @@ test("automatic Resize To Fit on open defaults off and is restored from storage"
   assert.equal(localStorage.getItem("txteditor.autoResizeToFitOnOpen"), "on");
   assert.equal(calls.includes("render"), true);
   assert.equal(createInitialAppState({ storage: localStorage }).state.autoResizeToFitOnOpen, true);
+});
+
+test("Keep zoom level defaults off, persists independently, and records only while enabled", () => {
+  const { controller, document, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.keepZoomLevel, false);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.rememberedZoomLevel, 1);
+
+  controller.recordZoomLevel(1.5);
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), null);
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsKeepZoomLevel");
+  assert.equal(input.checked, false);
+  assert.equal(input.parentElement.textContent.trim(), "Keep zoom level");
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(state.keepZoomLevel, true);
+  assert.equal(localStorage.getItem("txteditor.keepZoomLevel"), "on");
+  controller.recordZoomLevel(1.5);
+  assert.equal(state.rememberedZoomLevel, 1.5);
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), "1.5");
+
+  input.checked = false;
+  input.dispatchEvent({ type: "change", bubbles: true });
+  controller.recordZoomLevel(1.8);
+  assert.equal(localStorage.getItem("txteditor.keepZoomLevel"), "off");
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), "1.5");
+  assert.equal(createInitialAppState({ storage: localStorage }).state.keepZoomLevel, false);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.rememberedZoomLevel, 1.5);
 });
 
 test("App Settings closes on Escape and removes its temporary key listener", () => {

@@ -160,7 +160,7 @@ export function createDocumentController({
     }
     if (isTableDocument(doc)) {
       resetUndoManagerForDocument(doc);
-      doc.zoom = 1;
+      doc.zoom = state.keepZoomLevel ? state.rememberedZoomLevel : 1;
       applyFreezeToDoc(doc);
       onTableDocumentOpened(doc);
     }

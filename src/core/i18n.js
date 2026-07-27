@@ -430,6 +430,22 @@ CATALOG_ROWS["settings.autoResizeToFitOnOpen"] = [
   "打开文件时自动调整为适合内容"
 ];
 
+CATALOG_ROWS["settings.keepZoomLevel"] = [
+  "Keep zoom level",
+  "保留縮放比例",
+  "Zoomstufe beibehalten",
+  "Mantener nivel de zoom",
+  "Conserver le niveau de zoom",
+  "Mantieni livello di zoom",
+  "확대/축소 수준 유지",
+  "Zachowaj poziom powiększenia",
+  "Mantener nivel de zoom",
+  "ズーム レベルを保持",
+  "Manter nível de zoom",
+  "Сохранять уровень масштаба",
+  "保持缩放级别"
+];
+
 for (const [key, values] of Object.entries(CATALOG_ROWS)) {
   if (values.length !== SUPPORTED_LOCALES.length) throw new Error(`Catalog locale count mismatch: ${key}`);
 }
