@@ -266,6 +266,19 @@ test("CubeMain's fifteen property tuples use signed sixteen-bit values", () => {
   assert.deepEqual(runLint(docs, createDefaultLintSettings()).filter((entry) => entry.ruleId === "Items/ValidStatParameters"), []);
 });
 
+test("1.13c CubeMain uses an unsigned word parameter and signed word values", () => {
+  const docs = [
+    document("properties.txt", "code\tfunc1\tstat1\nskill\t22\titem_singleskill\nbounded\t1\tbounded"),
+    document("itemstatcost.txt", "stat\tsave bits\tsave add\tsave param bits\nstuff\t8\t0\t8\nitem_singleskill\t8\t0\t8\nbounded\t1\t0\t0"),
+    document("skills.txt", "skill\nAttack"),
+    document("cubemain.txt", "mod 1\tmod 1 param\tmod 1 min\tmod 1 max\nskill\t65535\t0\t0\nbounded\t0\t65535\t65536\nskill\t-1\t0\t0")
+  ];
+  const index = buildWorkspaceIndex(docs, "1.13c", { referenceVersion: "1.13c" });
+  const diagnostics = runLintWithWorkspaceIndex(index, { ...createDefaultLintSettings(), profile: "1.13c" })
+    .filter((entry) => entry.ruleId === "Items/ValidStatParameters");
+  assert.deepEqual(diagnostics.map((entry) => [entry.rowIndex, entry.columnName]).sort(), [[1, "mod 1 param"], [2, "mod 1 min"], [3, "mod 1 param"]]);
+});
+
 test("QualityItems and MonProp parameters use numeric fields rather than skill names", () => {
   const references = [
     document("properties.txt", "code\tfunc1\tstat1\nskill\t22\tstat"),

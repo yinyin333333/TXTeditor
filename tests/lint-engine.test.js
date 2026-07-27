@@ -208,15 +208,30 @@ test("profile-specific rule groups exactly match RotW and 2.4 TXT rule lists", (
   ]);
 });
 
-test("profile-specific rule groups hide 2.4-only rules from RotW", () => {
+test("1.13c rule membership is 2.4 minus the two requested exclusions", () => {
   const rotwIds = lintRuleGroupsForProfile("RotW").flatMap((group) => group.rules.map((rule) => rule.id));
   const d2r24Ids = lintRuleGroupsForProfile("2.4").flatMap((group) => group.rules.map((rule) => rule.id));
+  const classicIds = lintRuleGroupsForProfile("1.13c").flatMap((group) => group.rules.map((rule) => rule.id));
   assert.equal(rotwIds.includes("Basic/MissileRangeFieldSemantics"), false);
   assert.equal(rotwIds.includes("Basic/MonstatsDesecratedTreasureClassSemantics"), false);
   assert.equal(rotwIds.includes("Basic/MonEquipLevelOrder"), false);
   assert.equal(d2r24Ids.includes("Basic/MissileRangeFieldSemantics"), true);
   assert.equal(d2r24Ids.includes("Basic/MonstatsDesecratedTreasureClassSemantics"), true);
   assert.equal(d2r24Ids.includes("Basic/MonEquipLevelOrder"), true);
+  assert.equal(classicIds.includes("Basic/MissileRangeFieldSemantics"), false);
+  assert.equal(classicIds.includes("Basic/MonstatsDesecratedTreasureClassSemantics"), false);
+  assert.deepEqual(
+    classicIds,
+    d2r24Ids.filter((id) => ![
+      "Basic/MissileRangeFieldSemantics",
+      "Basic/MonstatsDesecratedTreasureClassSemantics"
+    ].includes(id))
+  );
+  const persisted = normalizeLintSettings({ profile: "1.13c" });
+  assert.equal(persisted.profile, "1.13c");
+  assert.equal(persisted.profiles["1.13c"].rules["Basic/MissileRangeFieldSemantics"], undefined);
+  assert.equal(persisted.profiles["1.13c"].rules["Basic/MonstatsDesecratedTreasureClassSemantics"], undefined);
+  assert.equal(persisted.profiles["1.13c"].rules["Basic/MonEquipLevelOrder"].enabled, true);
 });
 
 test("lint rule registry helpers preserve profile settings semantics behind the engine facade", () => {
@@ -226,7 +241,7 @@ test("lint rule registry helpers preserve profile settings semantics behind the 
     { group: "B", rules: [lintRule("B/RotW", "RotW only", runA, true, ["RotW"]), lintRule("B/TwoFour", "2.4 only", runA, true, ["2.4"])] }
   ];
   const rules = flattenRuleGroups(groups);
-  assert.deepEqual(LINT_PROFILE_OPTIONS_DIRECT, ["RotW", "2.4"]);
+  assert.deepEqual(LINT_PROFILE_OPTIONS_DIRECT, ["RotW", "2.4", "1.13c"]);
   assert.equal(LINT_DEFAULT_PROFILE_DIRECT, "RotW");
   assert.deepEqual(LINT_PROFILE_OPTIONS, LINT_PROFILE_OPTIONS_DIRECT);
   assert.equal(LINT_DEFAULT_PROFILE, LINT_DEFAULT_PROFILE_DIRECT);
@@ -811,6 +826,90 @@ test("2.4-only TXT lint rules are implemented and hidden from RotW", () => {
   assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MissileRangeFieldSemantics" && item.columnName === "range"));
   assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MonstatsDesecratedTreasureClassSemantics" && item.columnName === "treasureclassdesecrated"));
   assert.ok(diagnostics.some((item) => item.ruleId === "Basic/MonEquipLevelOrder" && item.columnName === "level"));
+});
+
+test("1.13c MonEquip uses contiguous blocks and loaded unsigned word levels", () => {
+  const repeated = lintDocs([
+    TableDocument.fromText("monequip.txt", "monster\tlevel\na\t10\nb\t9\na\t8")
+  ], "1.13c").filter((item) => item.ruleId === "Basic/MonEquipLevelOrder");
+  assert.deepEqual(repeated.map((item) => [item.rowIndex, item.columnName, item.messageArgs.firstRow]), [[3, "monster", 2]]);
+
+  const invalidMiddle = lintDocs([
+    TableDocument.fromText("monequip.txt", "monster\tlevel\na\t10\nb\tnot-a-level\na\t8")
+  ], "1.13c").filter((item) => item.ruleId === "Basic/MonEquipLevelOrder");
+  assert.deepEqual(invalidMiddle.map((item) => [item.rowIndex, item.columnName, item.messageKey]), [
+    [2, "level", "basic.invalidLevel"],
+    [3, "monster", "basic.monEquipRepeatedBlock"]
+  ]);
+
+  const mixedCase = lintDocs([
+    TableDocument.fromText("monequip.txt", "monster\tlevel\nZombie\t10\nfallen\t9\nzOmBiE\t8")
+  ], "1.13c").filter((item) => item.ruleId === "Basic/MonEquipLevelOrder");
+  assert.deepEqual(mixedCase.map((item) => [item.rowIndex, item.columnName, item.messageArgs.monster]), [[3, "monster", "zOmBiE"]]);
+
+  const wrapped = lintDocs([
+    TableDocument.fromText("monequip.txt", "monster\tlevel\na\t65536\na\t65537\nb\t-1\nb\t0")
+  ], "1.13c").filter((item) => item.ruleId === "Basic/MonEquipLevelOrder");
+  assert.deepEqual(wrapped.map((item) => [item.rowIndex, item.columnName, item.messageArgs.level, item.messageArgs.previousLevel]), [[2, "level", 1, 0]]);
+
+  const d2r = lintDocs([
+    TableDocument.fromText("monequip.txt", "monster\tlevel\na\t65536\na\t65537")
+  ], "2.4").filter((item) => item.ruleId === "Basic/MonEquipLevelOrder");
+  assert.deepEqual(d2r.map((item) => item.messageArgs.level), [65537]);
+});
+
+test("1.13c Cube semantic rules use the loaded enabled and op bytes", () => {
+  const docs = [
+    TableDocument.fromText("armor.txt", "code\ncap"),
+    TableDocument.fromText("misc.txt", "code\nhpot"),
+    TableDocument.fromText("weapons.txt", "code\naxe"),
+    TableDocument.fromText("itemtypes.txt", "code\narmo"),
+    TableDocument.fromText("setitems.txt", "index\nNamed Set"),
+    TableDocument.fromText("uniqueitems.txt", "index\nNamed Unique"),
+    TableDocument.fromText("itemstatcost.txt", "stat\nKnownStat"),
+    TableDocument.fromText("cubemain.txt", [
+      "description\tenabled\tnuminputs\tinput 1\toutput\top\tparam\tvalue",
+      "zero\t0\t0\tmissing\tmissing\t3\tMissingStat\t",
+      "wrap plus\t256\t0\tmissing\tmissing\t3\tMissingStat\t",
+      "wrap minus\t-256\t0\tmissing\tmissing\t3\tMissingStat\t",
+      "enabled plain\t1\t1\tcap\tcap\t1\t-1\t1",
+      "enabled\t257\t1\tcap\tcap\t3\t-1\t1",
+      "prefix\t1\t1\tcap\tcap\t3\t999junk\t1",
+      "equal count\t1\t1\tcap\tcap\t3\t1\t1",
+      "greater count\t1\t1\tcap\tcap\t3\t2\t1",
+      "input greater\t1\t1\tcap\tcap\t15\t2\t1",
+      "missing top\t1\t1\tcap\tcap\t3\tMissingStat\t1",
+      "missing input\t1\t1\tcap\tcap\t15\tMissingStat\t1",
+      "unconditional\t-255\t1\tcap\tcap\t-1\t\t1"
+    ].join("\n"))
+  ];
+  const diagnostics = lintDocs(docs, "1.13c").filter((item) => item.ruleId.startsWith("Cube/"));
+  assert.deepEqual(diagnostics.map((item) => [item.rowIndex, item.ruleId, item.columnName, item.messageKey]), [
+    [5, "Cube/ValidOp", "param", "cube.opParamUnconditional"],
+    [6, "Cube/ValidOp", "param", "cube.opParamUnconditional"],
+    [7, "Cube/ValidOp", "param", "cube.opParamUnmatchable"],
+    [8, "Cube/ValidOp", "param", "cube.opParamUnconditional"],
+    [9, "Cube/ValidOp", "param", "cube.opParamUnmatchable"],
+    [10, "Cube/ValidOp", "param", "cube.opParamNameFallback"],
+    [11, "Cube/ValidOp", "param", "cube.opParamNameFallback"],
+    [12, "Cube/ValidOp", "op", "cube.opUnconditional"]
+  ]);
+  assert.ok(lintDocs(docs, "2.4").some((item) => item.ruleId === "Cube/ValidInputs" && item.rowIndex === 2));
+  assert.ok(lintDocs(docs, "2.4").some((item) => item.ruleId === "Cube/ValidOp" && item.rowIndex === 1));
+  const unavailableReference = lintDocs([
+    TableDocument.fromText("cubemain.txt", [
+      "description\tenabled\top\tparam\tvalue",
+      "unknown name\t1\t3\tMissingStat\t1",
+      "zero\t1\t3\t0\t1",
+      "positive\t1\t3\t2\t1",
+      "negative top\t1\t3\t-1\t1",
+      "negative input\t1\t15\t-1\t1"
+    ].join("\n"))
+  ], "1.13c").filter((item) => item.ruleId === "Cube/ValidOp");
+  assert.deepEqual(unavailableReference.map((item) => [item.rowIndex, item.messageKey]), [
+    [4, "cube.opParamUnconditional"],
+    [5, "cube.opParamUnmatchable"]
+  ]);
 });
 
 test("RotW 3.2 schema accepts new Excel columns without Basic/ExcelColumns warnings", () => {

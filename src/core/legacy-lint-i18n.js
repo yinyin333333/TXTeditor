@@ -14,6 +14,7 @@ const EN_MESSAGES = {
   "basic.desecratedTreasure": '{filled} is populated but {base} is blank; {label} desecrated drops require the base desecrated treasure class in 2.4.',
   "basic.invalidLevel": 'Invalid level "{value}" for "{monster}".',
   "basic.levelOrder": 'Level {level} for "{monster}" appears after lower level {previousLevel} on row {row}; rows for the same monster should be ordered highest to lowest.',
+  "basic.monEquipRepeatedBlock": '"{monster}" reappears on row {row}; its first monequip.txt block begins on row {firstRow}, so this later block is unreachable. Keep each monster in one contiguous block.',
   "basic.stringReuse": 'Potential string-ID reuse: "{key}" shares "{id}" with "{previousKey}" in {fileName}. Check whether both keys should use the same text; the game\'s behavior is not confirmed.',
   "basic.integerStorageBound": '"{column}" must be from {min} through {max}. Enter a value in that range.',
   "basic.numericRecommended": '"{column}" is outside the recommended range {min} through {max} for this profile.',
@@ -40,6 +41,10 @@ const EN_MESSAGES = {
   "cube.numInputsMismatch": 'numinputs is {declared}, but the recipe contains {actual} input item(s).',
   "cube.unknownOutputProperty": 'Unknown cube output property "{property}".',
   "cube.invalidOp": "Cube op must be an integer from 0 through 28.",
+  "cube.opUnconditional": 'Cube op "{value}" becomes {effective}, so it does not restrict this recipe. Choose an op from 0 through 28.',
+  "cube.opParamUnconditional": 'Cube op {op} uses param "{param}" as {effective}, so it does not restrict this recipe. Choose an ItemStatCost ID or name.',
+  "cube.opParamUnmatchable": 'Cube op {op} uses param "{param}" as {effective}, so no input can satisfy this recipe. Choose an ItemStatCost ID or name.',
+  "cube.opParamNameFallback": 'Cube op {op} cannot find stat name "{param}", so it uses ItemStatCost ID 0. Choose an existing ItemStatCost ID or name.',
   "cube.opRequiresParam": "Cube op requires a param value.",
   "cube.invalidOpParam": 'Cube op param "{param}" is not a valid item stat index or stat name.',
   "cube.opRequiresValue": "Cube op requires a value.",
@@ -103,7 +108,7 @@ export const legacyLintEnglishRuleMetadata = Object.freeze({
   "Basic/LinkedExcel": ["Linked Excel references", "Checks linked TXT values with the matching rules used by each field. Four-character item-type codes are case-sensitive; letter case does not matter for verified name fields."],
   "Basic/MissileRangeFieldSemantics": ["Missile range field semantics", "Checks that missiles.txt range values use the plain integer format expected by D2R 2.4."],
   "Basic/MonstatsDesecratedTreasureClassSemantics": ["Desecrated treasure class semantics", "Checks that desecrated champion or unique treasure classes also have the matching base desecrated treasure class in D2R 2.4."],
-  "Basic/MonEquipLevelOrder": ["Monster equipment level order", "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level in D2R 2.4."],
+  "Basic/MonEquipLevelOrder": ["Monster equipment level order", "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level."],
   "Basic/StringCheck": ["String references", "Warns when different keys reuse one string ID. This is an editor consistency check when the game's behavior is not confirmed."],
   "Basic/NumericBounds": ["Numeric bounds", "Checks plain integer spelling and the allowed range for the selected profile."],
   "Basic/BooleanFields": ["Boolean fields", "Checks signed decimal integer notation for verified Boolean fields. Enter 0 for off or 1 for on when correcting invalid text; other signed decimal integers remain valid."],
@@ -426,7 +431,7 @@ const LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES = Object.freeze({
     "Basic/LinkedExcel": ["연결된 Excel 참조", "각 필드의 일치 규칙으로 연결된 TXT 값을 확인합니다. 4자 아이템 유형 코드는 대소문자를 구분하며, 확인된 이름 필드에서는 대소문자를 구분하지 않습니다."],
     "Basic/MissileRangeFieldSemantics": ["missiles.range 필드 규칙", "missiles.txt의 range 값이 D2R 2.4에서 요구하는 일반 정수 형식인지 확인합니다."],
     "Basic/MonstatsDesecratedTreasureClassSemantics": ["Desecrated 보물 등급 규칙", "D2R 2.4에서 Desecrated 챔피언 또는 유니크 보물 등급에 대응하는 기본 Desecrated 보물 등급도 있는지 확인합니다."],
-    "Basic/MonEquipLevelOrder": ["몬스터 장비 레벨 순서", "D2R 2.4에서 같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
+    "Basic/MonEquipLevelOrder": ["몬스터 장비 레벨 순서", "같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
     "Basic/StringCheck": ["문자열 참조", "서로 다른 키가 하나의 문자열 ID를 재사용하면 경고합니다. 게임 동작이 확인되지 않은 경우의 편집기 일관성 검사입니다."],
     "Basic/NumericBounds": ["숫자 범위", "일반 정수 표기와 선택한 프로필에서 허용되는 범위를 확인합니다."],
     "Basic/BooleanFields": ["불리언 필드", "검증된 불리언 필드가 부호 있는 10진 정수 표기인지 확인합니다. 잘못된 텍스트를 고칠 때는 끄려면 0, 켜려면 1을 입력하세요. 다른 부호 있는 10진 정수도 유효합니다."],
@@ -478,6 +483,21 @@ const LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES = Object.freeze({
   zhCN: Object.freeze({
     "Basic/BooleanFields": ["布尔字段", "检查已验证的布尔字段是否使用有符号十进制整数写法。修正无效文本时，可输入 0 来关闭或输入 1 来开启；其他有符号十进制整数也有效。"]
   })
+});
+
+const LEGACY_LINT_VERSION_NEUTRAL_RULE_METADATA = Object.freeze({
+  zhTW: ["怪物裝備等級順序", "檢查同一怪物的 monequip.txt 行是否依照從較高等級到較低等級的順序排列。"],
+  deDE: ["Reihenfolge der Monster-Ausrüstungsstufen", "Überprüft, ob monequip.txt-Zeilen für dasselbe Monster von einer höheren zur niedrigeren Ebene geordnet sind."],
+  esES: ["Orden de nivel de equipamiento de monstruos", "Comprueba que las filas de monequip.txt para el mismo monstruo estén ordenadas de nivel superior a nivel inferior."],
+  frFR: ["Ordre des niveaux d’équipement de monstre", "Vérifie que les lignes de monequip.txt pour le même monstre sont classées du niveau le plus élevé au plus bas."],
+  itIT: ["Ordine livelli equipaggiamento mostro", "Controlla che le righe di monequip.txt per lo stesso mostro siano ordinate dal livello più alto al più basso."],
+  koKR: ["몬스터 장비 레벨 순서", "같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
+  plPL: ["Kolejność poziomów wyposażenia potwora", "Sprawdza, czy wiersze monequip.txt dla tego samego potwora są uporządkowane od wyższego poziomu do niższego."],
+  esMX: ["Orden de nivel de equipamiento de monstruos", "Comprueba que las filas de monequip.txt para el mismo monstruo estén ordenadas de nivel superior a nivel inferior."],
+  jaJP: ["モンスター装備レベル順", "同じモンスターの monequip.txt 行が高いレベルから低いレベルの順に並んでいることを確認します。"],
+  ptBR: ["Ordem de nível de equipamento monstro", "Verifica se as linhas de monequip.txt para o mesmo monstro estão ordenadas do nível mais alto para o mais baixo."],
+  ruRU: ["Порядок уровней экипировки монстров", "Проверяет, что строки monequip.txt для одного и того же монстра упорядочены от более высокого уровня к более низкому."],
+  zhCN: ["怪物装备等级顺序", "检查同一怪物的 monequip.txt 行是否按从较高级别到较低级别的顺序排列。"]
 });
 
 const LEGACY_LINT_TERMS = Object.freeze({
@@ -575,11 +595,98 @@ const LEGACY_LINT_ADDITIONAL_TRANSLATIONS = Object.freeze({
   })
 });
 
+const LEGACY_LINT_CLASSIC113_TRANSLATIONS = Object.freeze({
+  zhTW: Object.freeze({
+    "basic.monEquipRepeatedBlock": '「{monster}」在第 {row} 行再次出現；第一個 monequip.txt 區塊從第 {firstRow} 行開始，因此後面的區塊無法到達。每個怪物應保留在一個連續區塊中。',
+    "cube.opUnconditional": 'Cube op「{value}」會變成 {effective}，因此不會限制此配方。請選擇 0 到 28 的 op。',
+    "cube.opParamUnconditional": 'Cube op {op} 將參數「{param}」視為 {effective}，因此不會限制此配方。請選擇 ItemStatCost ID 或名稱。',
+    "cube.opParamUnmatchable": 'Cube op {op} 將參數「{param}」視為 {effective}，因此沒有輸入可符合此配方。請選擇 ItemStatCost ID 或名稱。',
+    "cube.opParamNameFallback": 'Cube op {op} 找不到統計名稱「{param}」，因此使用 ItemStatCost ID 0。請選擇現有的 ItemStatCost ID 或名稱。'
+  }),
+  deDE: Object.freeze({
+    "basic.monEquipRepeatedBlock": '„{monster}“ erscheint erneut in Zeile {row}; sein erster monequip.txt-Block beginnt in Zeile {firstRow}, daher ist dieser spätere Block nicht erreichbar. Halten Sie jeden Monster-Eintrag in einem zusammenhängenden Block.',
+    "cube.opUnconditional": 'Cube-Op „{value}“ wird zu {effective}; dadurch wird dieses Rezept nicht eingeschränkt. Wählen Sie einen Op-Wert von 0 bis 28.',
+    "cube.opParamUnconditional": 'Cube-Op {op} verwendet den Parameter „{param}“ als {effective}; dadurch wird dieses Rezept nicht eingeschränkt. Wählen Sie eine ItemStatCost-ID oder einen Namen.',
+    "cube.opParamUnmatchable": 'Cube-Op {op} verwendet den Parameter „{param}“ als {effective}; dadurch kann keine Eingabe dieses Rezept erfüllen. Wählen Sie eine ItemStatCost-ID oder einen Namen.',
+    "cube.opParamNameFallback": 'Cube-Op {op} findet den Stat-Namen „{param}“ nicht und verwendet daher ItemStatCost-ID 0. Wählen Sie eine vorhandene ItemStatCost-ID oder einen Namen.'
+  }),
+  esES: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» reaparece en la fila {row}; su primer bloque de monequip.txt comienza en la fila {firstRow}, por lo que este bloque posterior es inalcanzable. Mantén cada monstruo en un bloque contiguo.',
+    "cube.opUnconditional": 'El op de cubo «{value}» se convierte en {effective}, por lo que no limita esta receta. Elige un op de 0 a 28.',
+    "cube.opParamUnconditional": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, por lo que no limita esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamUnmatchable": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, por lo que ninguna entrada puede cumplir esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamNameFallback": 'El op de cubo {op} no encuentra el nombre de estadística «{param}», por lo que usa el ID 0 de ItemStatCost. Elige un ID o nombre de ItemStatCost existente.'
+  }),
+  frFR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '« {monster} » réapparaît à la ligne {row} ; son premier bloc monequip.txt commence à la ligne {firstRow}, donc ce bloc ultérieur est inaccessible. Conservez chaque monstre dans un seul bloc contigu.',
+    "cube.opUnconditional": 'L’opération de cube « {value} » devient {effective} et ne limite donc pas cette recette. Choisissez une opération de 0 à 28.',
+    "cube.opParamUnconditional": 'L’opération de cube {op} utilise le paramètre « {param} » comme {effective} et ne limite donc pas cette recette. Choisissez un ID ou un nom ItemStatCost.',
+    "cube.opParamUnmatchable": 'L’opération de cube {op} utilise le paramètre « {param} » comme {effective}; aucune entrée ne peut donc satisfaire cette recette. Choisissez un ID ou un nom ItemStatCost.',
+    "cube.opParamNameFallback": 'L’opération de cube {op} ne trouve pas le nom de statistique « {param} » et utilise donc l’ID ItemStatCost 0. Choisissez un ID ou un nom ItemStatCost existant.'
+  }),
+  itIT: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» ricompare alla riga {row}; il suo primo blocco monequip.txt inizia alla riga {firstRow}, quindi questo blocco successivo è irraggiungibile. Mantieni ogni mostro in un unico blocco contiguo.',
+    "cube.opUnconditional": 'L’op del cubo «{value}» diventa {effective}, quindi non limita questa ricetta. Scegli un op da 0 a 28.',
+    "cube.opParamUnconditional": 'L’op del cubo {op} usa il parametro «{param}» come {effective}, quindi non limita questa ricetta. Scegli un ID o nome ItemStatCost.',
+    "cube.opParamUnmatchable": 'L’op del cubo {op} usa il parametro «{param}» come {effective}, quindi nessun input può soddisfare questa ricetta. Scegli un ID o nome ItemStatCost.',
+    "cube.opParamNameFallback": 'L’op del cubo {op} non trova il nome statistica «{param}» e usa quindi l’ID ItemStatCost 0. Scegli un ID o nome ItemStatCost esistente.'
+  }),
+  koKR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '몬스터 {monster} 항목이 {row}행에 다시 나타납니다. 첫 monequip.txt 블록은 {firstRow}행에서 시작하므로 뒤의 블록에는 도달할 수 없습니다. 각 몬스터는 하나의 연속된 블록에 두세요.',
+    "cube.opUnconditional": 'Cube op 값: {value}. 적용 결과: {effective}. 이 조합법을 제한하지 않습니다. 0부터 28 사이의 op를 선택하세요.',
+    "cube.opParamUnconditional": 'Cube op 값: {op}. param 값: {param}. 적용 결과: {effective}. 이 조합법을 제한하지 않습니다. ItemStatCost ID 또는 이름을 선택하세요.',
+    "cube.opParamUnmatchable": 'Cube op 값: {op}. param 값: {param}. 적용 결과: {effective}. 어떤 입력도 이 조합법을 만족할 수 없습니다. ItemStatCost ID 또는 이름을 선택하세요.',
+    "cube.opParamNameFallback": 'Cube op 값: {op}. stat 이름: {param}. 이 이름을 찾을 수 없어 ItemStatCost ID 0을 사용합니다. 존재하는 ItemStatCost ID 또는 이름을 선택하세요.'
+  }),
+  plPL: Object.freeze({
+    "basic.monEquipRepeatedBlock": '„{monster}” pojawia się ponownie w wierszu {row}; pierwszy blok monequip.txt zaczyna się w wierszu {firstRow}, więc ten późniejszy blok jest nieosiągalny. Każdego potwora zachowaj w jednym ciągłym bloku.',
+    "cube.opUnconditional": 'Operacja kostki „{value}” staje się wartością {effective}, więc nie ogranicza tego przepisu. Wybierz operację od 0 do 28.',
+    "cube.opParamUnconditional": 'Operacja kostki {op} używa parametru „{param}” jako {effective}, więc nie ogranicza tego przepisu. Wybierz ID lub nazwę ItemStatCost.',
+    "cube.opParamUnmatchable": 'Operacja kostki {op} używa parametru „{param}” jako {effective}, więc żadne wejście nie spełni tego przepisu. Wybierz ID lub nazwę ItemStatCost.',
+    "cube.opParamNameFallback": 'Operacja kostki {op} nie znajduje nazwy statystyki „{param}”, więc używa ID ItemStatCost 0. Wybierz istniejący ID lub nazwę ItemStatCost.'
+  }),
+  esMX: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» vuelve a aparecer en la fila {row}; su primer bloque de monequip.txt empieza en la fila {firstRow}, así que este bloque posterior es inalcanzable. Mantén cada monstruo en un bloque contiguo.',
+    "cube.opUnconditional": 'El op de cubo «{value}» se convierte en {effective}, así que no limita esta receta. Elige un op de 0 a 28.',
+    "cube.opParamUnconditional": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, así que no limita esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamUnmatchable": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, así que ninguna entrada puede cumplir esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamNameFallback": 'El op de cubo {op} no encuentra el nombre de estadística «{param}», así que usa el ID 0 de ItemStatCost. Elige un ID o nombre de ItemStatCost existente.'
+  }),
+  jaJP: Object.freeze({
+    "basic.monEquipRepeatedBlock": '「{monster}」が行 {row} で再び現れます。最初の monequip.txt ブロックは行 {firstRow} から始まるため、この後のブロックには到達できません。各モンスターは連続した一つのブロックにしてください。',
+    "cube.opUnconditional": 'Cube op「{value}」は {effective} になり、このレシピを制限しません。0 から 28 の op を選んでください。',
+    "cube.opParamUnconditional": 'Cube op {op} は param「{param}」を {effective} として扱うため、このレシピを制限しません。ItemStatCost ID または名前を選んでください。',
+    "cube.opParamUnmatchable": 'Cube op {op} は param「{param}」を {effective} として扱うため、このレシピを満たす入力はありません。ItemStatCost ID または名前を選んでください。',
+    "cube.opParamNameFallback": 'Cube op {op} は stat 名「{param}」を見つけられないため、ItemStatCost ID 0 を使用します。存在する ItemStatCost ID または名前を選んでください。'
+  }),
+  ptBR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '“{monster}” reaparece na linha {row}; seu primeiro bloco de monequip.txt começa na linha {firstRow}, portanto este bloco posterior é inacessível. Mantenha cada monstro em um único bloco contínuo.',
+    "cube.opUnconditional": 'A operação de cubo “{value}” torna-se {effective}, portanto não limita esta receita. Escolha uma operação de 0 a 28.',
+    "cube.opParamUnconditional": 'A operação de cubo {op} usa o parâmetro “{param}” como {effective}, portanto não limita esta receita. Escolha um ID ou nome de ItemStatCost.',
+    "cube.opParamUnmatchable": 'A operação de cubo {op} usa o parâmetro “{param}” como {effective}, portanto nenhuma entrada pode satisfazer esta receita. Escolha um ID ou nome de ItemStatCost.',
+    "cube.opParamNameFallback": 'A operação de cubo {op} não encontra o nome de estatística “{param}” e usa o ID ItemStatCost 0. Escolha um ID ou nome ItemStatCost existente.'
+  }),
+  ruRU: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» снова появляется в строке {row}; его первый блок monequip.txt начинается в строке {firstRow}, поэтому этот поздний блок недостижим. Оставляйте каждого монстра в одном непрерывном блоке.',
+    "cube.opUnconditional": 'Операция куба «{value}» становится {effective}, поэтому не ограничивает этот рецепт. Выберите операцию от 0 до 28.',
+    "cube.opParamUnconditional": 'Операция куба {op} использует параметр «{param}» как {effective}, поэтому не ограничивает этот рецепт. Выберите ID или имя ItemStatCost.',
+    "cube.opParamUnmatchable": 'Операция куба {op} использует параметр «{param}» как {effective}, поэтому ни один вход не может удовлетворить этот рецепт. Выберите ID или имя ItemStatCost.',
+    "cube.opParamNameFallback": 'Операция куба {op} не находит имя характеристики «{param}» и использует ID ItemStatCost 0. Выберите существующий ID или имя ItemStatCost.'
+  }),
+  zhCN: Object.freeze({
+    "basic.monEquipRepeatedBlock": '“{monster}”在第 {row} 行再次出现；其第一个 monequip.txt 区块从第 {firstRow} 行开始，因此后面的区块无法访问。请将每个怪物保持在一个连续区块中。',
+    "cube.opUnconditional": '魔盒 op“{value}”会变为 {effective}，因此不会限制此配方。请选择 0 到 28 的 op。',
+    "cube.opParamUnconditional": '魔盒 op {op} 将参数“{param}”视为 {effective}，因此不会限制此配方。请选择 ItemStatCost ID 或名称。',
+    "cube.opParamUnmatchable": '魔盒 op {op} 将参数“{param}”视为 {effective}，因此没有输入能满足此配方。请选择 ItemStatCost ID 或名称。',
+    "cube.opParamNameFallback": '魔盒 op {op} 找不到属性名称“{param}”，因此使用 ItemStatCost ID 0。请选择现有的 ItemStatCost ID 或名称。'
+  })
+});
+
 export const legacyLintCatalogs = Object.freeze({
   enUS: Object.freeze(EN_MESSAGES),
   ...Object.fromEntries(LEGACY_LINT_LOCALES.filter((locale) => locale !== "enUS").map((locale) => [
     locale,
-    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale], ...LEGACY_LINT_ADDITIONAL_TRANSLATIONS[locale] })
+    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale], ...LEGACY_LINT_ADDITIONAL_TRANSLATIONS[locale], ...LEGACY_LINT_CLASSIC113_TRANSLATIONS[locale] })
   ]))
 });
 
@@ -625,7 +732,10 @@ export function legacyRuleMetadata(id, locale = LEGACY_LINT_DEFAULT_LOCALE) {
   const normalized = normalizeLegacyLintLocale(locale);
   const english = legacyLintEnglishRuleMetadata[id] ?? [id, ""];
   if (normalized === "enUS") return { label: english[0], note: english[1] };
-  const translated = LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES[normalized]?.[id]
+  const translated = (id === "Basic/MonEquipLevelOrder"
+    ? LEGACY_LINT_VERSION_NEUTRAL_RULE_METADATA[normalized]
+    : undefined)
+    ?? LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES[normalized]?.[id]
     ?? LEGACY_LINT_RULE_METADATA_TRANSLATIONS[normalized]?.[id];
   return { label: translated?.[0] ?? english[0], note: translated?.[1] ?? english[1] };
 }

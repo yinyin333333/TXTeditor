@@ -10,7 +10,8 @@ const REFERENCE_VERSION_ALIASES = new Map([
 
 const PROFILE_REFERENCE_VERSIONS = new Map([
   ["rotw", "3.2"],
-  ["2.4", "2.4"]
+  ["2.4", "2.4"],
+  ["1.13c", "1.13c"]
 ]);
 
 export function normalizeLintReferenceVersion(value) {

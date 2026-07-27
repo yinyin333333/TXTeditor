@@ -132,7 +132,7 @@ export function lintValidStatParameters(index, ctx) {
       for (const tuple of columns) {
         const propertyCode = clean(row.get(tuple.property));
         if (!propertyCode) continue;
-        const values = tupleValues(row, tuple, tupleLayout(table));
+        const values = tupleValues(row, tuple, tupleLayout(table, index));
         const property = properties.get(normalizeToken(propertyCode));
         if (property) {
           analyzeProperty(ctx, table, row, property, values, itemStatCost, skillContext, usesItemSerialization);
@@ -370,17 +370,17 @@ function isReachablePropertyFunction(func) {
   return Number.isInteger(value) && ((value >= 1 && value <= 25) || value === 36);
 }
 
-function tupleLayout(table) {
-  if (table.fileName === "cubemain.txt") return "cubemain-i16";
+function tupleLayout(table, index) {
+  if (table.fileName === "cubemain.txt") return index.profile === "1.13c" ? "cubemain-1.13" : "cubemain-i16";
   if (table.fileName === "qualityitems.txt" || table.fileName === "monprop.txt") return "numeric-param-i32";
   return "callback-param-i32";
 }
 
 function tupleValues(row, tuple, layout) {
   return {
-    param: tupleInteger(row, tuple.param, layout === "callback-param-i32" ? "callback" : layout),
-    min: tupleInteger(row, tuple.min, layout === "cubemain-i16" ? layout : "numeric-param-i32"),
-    max: tupleInteger(row, tuple.max, layout === "cubemain-i16" ? layout : "numeric-param-i32")
+    param: tupleInteger(row, tuple.param, layout === "callback-param-i32" ? "callback" : layout === "cubemain-1.13" ? "cubemain-u16" : layout),
+    min: tupleInteger(row, tuple.min, layout === "cubemain-i16" || layout === "cubemain-1.13" ? "cubemain-i16" : "numeric-param-i32"),
+    max: tupleInteger(row, tuple.max, layout === "cubemain-i16" || layout === "cubemain-1.13" ? "cubemain-i16" : "numeric-param-i32")
   };
 }
 
@@ -402,6 +402,7 @@ function parsedTupleInteger(raw, columnName, layout) {
   const match = callback ? /^-?\d+/.exec(raw) : null;
   let value = callback ? callbackInt32(match?.[0] ?? "") : numericInt32(raw);
   if (layout === "cubemain-i16") value = signed16(value);
+  if (layout === "cubemain-u16") value = unsigned16(value);
   return {
     columnName,
     raw,
@@ -433,6 +434,10 @@ function numericInt32(raw) {
 
 function signed16(value) {
   return Number(BigInt.asIntN(16, BigInt.asUintN(16, BigInt(value))));
+}
+
+function unsigned16(value) {
+  return Number(BigInt.asUintN(16, BigInt(value)));
 }
 
 function warnNoncanonicalNumeric(ctx, table, row, parsed, { namedToken = false } = {}) {

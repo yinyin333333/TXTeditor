@@ -42,6 +42,39 @@ test("Legacy lint catalogs have complete locale and named-argument parity", () =
   }
 });
 
+test("MonEquipLevelOrder metadata is version-neutral in every rendered locale", () => {
+  for (const locale of LEGACY_LINT_LOCALES) {
+    const metadata = legacyRuleMetadata("Basic/MonEquipLevelOrder", locale);
+    assert.ok(metadata.note, locale);
+    assert.doesNotMatch(metadata.note, /2\.4|D2R/i, locale);
+  }
+  assert.match(legacyRuleMetadata("Basic/MissileRangeFieldSemantics", "enUS").note, /D2R 2\.4/);
+  assert.match(legacyRuleMetadata("Basic/MonstatsDesecratedTreasureClassSemantics", "enUS").note, /D2R 2\.4/);
+});
+
+test("1.13c MonEquip and Cube effective-result messages render in every supported locale", () => {
+  for (const locale of LEGACY_LINT_LOCALES) {
+    const repeated = resolveLegacyMessage(legacyMessage("basic.monEquipRepeatedBlock", { monster: "a", firstRow: 2, row: 4 }), locale);
+    const byteOp = resolveLegacyMessage(legacyMessage("cube.opUnconditional", { value: "-1", effective: 255 }), locale);
+    const fallback = resolveLegacyMessage(legacyMessage("cube.opParamNameFallback", { op: 3, param: "MissingStat" }), locale);
+    assert.match(repeated, /a/);
+    assert.match(repeated, /2/);
+    assert.match(repeated, /4/);
+    assert.match(byteOp, /-1/);
+    assert.match(byteOp, /255/);
+    assert.match(fallback, /3/);
+    assert.match(fallback, /MissingStat/);
+    assert.doesNotMatch(byteOp, /byte|stored|storage|default branch|바이트|저장|기본 분기/i, locale);
+    assert.doesNotMatch(fallback, /byte|stored|storage|default branch|바이트|저장|기본 분기/i, locale);
+  }
+  const english = resolveLegacyMessage(legacyMessage("cube.opUnconditional", { value: "-1", effective: 255 }), "enUS");
+  const korean = resolveLegacyMessage(legacyMessage("cube.opUnconditional", { value: "-1", effective: 255 }), "koKR");
+  assert.match(english, /does not restrict/);
+  assert.match(korean, /제한하지 않습니다/);
+  assert.match(resolveLegacyMessage(legacyMessage("cube.opParamNameFallback", { op: 3, param: "MissingStat" }), "enUS"), /cannot find stat name.*ID 0/);
+  assert.match(resolveLegacyMessage(legacyMessage("cube.opParamNameFallback", { op: 3, param: "MissingStat" }), "koKR"), /찾을 수 없어.*ID 0/);
+});
+
 test("Legacy lint message rendering preserves values, escapes only on request, and keeps identities locale-invariant", () => {
   const descriptor = legacyMessage("basic.duplicate", { column: "id", value: "<mod>&", previousRow: 2 });
   assert.match(resolveLegacyMessage(descriptor, "koKR"), /<mod>&/);
@@ -58,7 +91,7 @@ test("Legacy lint message rendering preserves values, escapes only on request, a
 
 test("Korean Legacy Lint catalog has complete native copy without mechanical particles", () => {
   const korean = legacyLintCatalogs.koKR;
-  assert.equal(Object.keys(korean).length, 90);
+  assert.equal(Object.keys(korean).length, Object.keys(legacyLintCatalogs.enUS).length);
   for (const [key, template] of Object.entries(korean)) {
     assert.equal(template.includes("(은)"), false, key);
     assert.equal(template.includes("(는)"), false, key);

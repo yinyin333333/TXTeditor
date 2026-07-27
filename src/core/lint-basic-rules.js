@@ -16,7 +16,7 @@ export function basicLintRules(options = {}) {
     rule("Basic/LinkedExcel", linkedExcelRunner, true, PROFILE_OPTIONS),
     rule("Basic/MissileRangeFieldSemantics", lintMissileRangeFieldSemantics, true, ["2.4"]),
     rule("Basic/MonstatsDesecratedTreasureClassSemantics", lintMonstatsDesecratedTreasureClassSemantics, true, ["2.4"]),
-    rule("Basic/MonEquipLevelOrder", lintMonEquipLevelOrder, true, ["2.4"]),
+    rule("Basic/MonEquipLevelOrder", lintMonEquipLevelOrder, true, ["2.4", "1.13c"]),
     rule("Basic/StringCheck", lintStringCheck, true, PROFILE_OPTIONS),
     rule("Basic/NumericBounds", lintNumericBounds, true, PROFILE_OPTIONS),
     rule("Basic/BooleanFields", lintBooleanFields, true, PROFILE_OPTIONS)
@@ -214,27 +214,41 @@ export function lintMonstatsDesecratedTreasureClassSemantics(index, ctx) {
 export function lintMonEquipLevelOrder(index, ctx) {
   const table = index.tablesByName.get("monequip.txt");
   if (!table?.hasColumn("monster") || !table.hasColumn("level")) return;
+  const classic113 = index.profile === "1.13c";
   let currentMonster = "";
   let previousLevel = null;
   let previousRow = -1;
+  const firstBlocks = new Map();
+  const completedBlocks = new Set();
   table.eachRow((row) => {
     const monster = clean(row.get("monster"));
+    const monsterKey = asciiLower(monster);
     if (!monster || monster === "*end*  do not remove") {
+      if (currentMonster) completedBlocks.add(currentMonster);
       currentMonster = "";
       previousLevel = null;
       previousRow = -1;
       return;
     }
+    if (monsterKey !== currentMonster) {
+      if (currentMonster) completedBlocks.add(currentMonster);
+      if (classic113 && completedBlocks.has(monsterKey)) {
+        ctx.add(table, row.rowIndex, "monster", legacyMessage("basic.monEquipRepeatedBlock", {
+          monster,
+          firstRow: firstBlocks.get(monsterKey) + 1,
+          row: row.rowIndex + 1
+        }));
+      }
+      if (!firstBlocks.has(monsterKey)) firstBlocks.set(monsterKey, row.rowIndex);
+      currentMonster = monsterKey;
+      previousLevel = null;
+      previousRow = -1;
+    }
     const rawLevel = clean(row.get("level"));
-    const level = rawLevel ? integerValue(rawLevel) : 0;
+    const parsedLevel = rawLevel ? integerValue(rawLevel) : 0;
+    const level = parsedLevel === null || !classic113 ? parsedLevel : unsigned16(parsedLevel);
     if (level === null) {
       ctx.add(table, row.rowIndex, "level", legacyMessage("basic.invalidLevel", { value: rawLevel, monster }));
-      return;
-    }
-    if (monster !== currentMonster) {
-      currentMonster = monster;
-      previousLevel = level;
-      previousRow = row.rowIndex;
       return;
     }
     if (previousLevel !== null && level > previousLevel) {
@@ -673,6 +687,10 @@ function isStringLikeTable(table) {
 function integerValue(value) {
   const text = clean(value);
   return text && isIntegerText(text) ? Number(text) : null;
+}
+
+function unsigned16(value) {
+  return Number(BigInt.asUintN(16, BigInt(value)));
 }
 
 function isIntegerText(value) {
