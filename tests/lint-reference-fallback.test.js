@@ -947,12 +947,12 @@ test("closing a Legacy shadow refreshes a deleted workspace path before choosing
   }
 });
 
-test("a stale bundled-reference load cannot replace the latest Legacy lint session", async () => {
+test("a stale bundled-reference load cannot replace the latest unified Legacy game version", async () => {
   const pending = [];
   const state = {
     docs: [],
     workspace: null,
-    config: { referenceVersion: "3.2" },
+    config: { gameVersion: "3.2", referenceVersion: "3.2" },
     lint: {
       legacy: {
         settings: createDefaultLintSettings(),
@@ -987,7 +987,7 @@ test("a stale bundled-reference load cannot replace the latest Legacy lint sessi
     await waitFor(() => pending.length === 1);
     assert.equal(pending[0].version, "3.2");
 
-    state.config.referenceVersion = "3.1";
+    state.config = { gameVersion: "3.1", schemaVersion: "3.1", referenceVersion: "3.1" };
     controller.scheduleFull("latest-version", 0);
     await waitFor(() => pending.length === 2);
     assert.equal(pending[1].version, "3.1");

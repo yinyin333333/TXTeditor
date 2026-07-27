@@ -1786,9 +1786,7 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
   const legacyControls = lintControlsModel({
     engine: LINT_ENGINE_LEGACY,
     lintEnabled: false,
-    profiles: ["RotW", "2.4"],
-    activeProfile: "2.4",
-    activeReferenceVersion: "3.1",
+    activeGameVersion: "3.1",
     rulesOpen: true
   });
   assert.match(html, /id="lintControls" class="lint-controls"/);
@@ -1801,14 +1799,10 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
   assert.deepEqual(vectorControls.settingsButton, { id: "open-settings", label: "Lint Options", title: "Lint options" });
   assert.equal(vectorControls.hideRulesPanel, true);
   assert.equal(legacyControls.mode, "legacy");
-  assert.equal(legacyControls.profileSelect.id, "lintProfileSelect");
-  assert.deepEqual(legacyControls.profileSelect.options, [
-    { value: "RotW", label: "RotW", selected: false },
-    { value: "2.4", label: "2.4", selected: true }
-  ]);
-  assert.equal(legacyControls.referenceSelect.id, "lintReferenceVersionSelect");
-  assert.deepEqual(legacyControls.referenceSelect.options, [
-    { value: "", label: "Profile", selected: false },
+  assert.equal(legacyControls.profileSelect, undefined);
+  assert.equal(legacyControls.referenceSelect, undefined);
+  assert.equal(legacyControls.versionSelect.id, "lintGameVersionSelect");
+  assert.deepEqual(legacyControls.versionSelect.options, [
     { value: "3.2", label: "3.2", selected: false },
     { value: "3.1", label: "3.1", selected: true },
     { value: "2.4", label: "2.4", selected: false },

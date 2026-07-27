@@ -7,7 +7,6 @@ import {
   saveConfig
 } from "../../core/io.js";
 import {
-  lintProfileOptions,
   lintRuleGroupsForProfile
 } from "../../core/lint-engine.js";
 import {
@@ -26,6 +25,12 @@ import {
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
 import { LOCALE_OPTIONS, tText } from "../../core/i18n.js";
+import {
+  canonicalGameVersionConfig,
+  legacyGameVersion,
+  legacyRuleFamilyForGameVersion,
+  vectorGameVersion
+} from "../../core/game-version.js";
 
 export function shouldCloseSettingsKey(key) {
   return key === "Escape";
@@ -117,9 +122,25 @@ export function createSettingsController({
 
   async function loadConfig() {
     const config = await getConfig();
-    state.config = config ?? {};
+    const loaded = config ?? {};
+    const gameVersion = isLegacyLintEngine()
+      ? legacyGameVersion(loaded, state.lint.legacy.settings.profile)
+      : vectorGameVersion(loaded);
+    state.config = canonicalGameVersionConfig(loaded, gameVersion);
+    state.lint.legacy.settings.profile = legacyRuleFamilyForGameVersion(gameVersion);
     configSnapshot = { ...state.config };
     configLoaded = true;
+    if (
+      loaded.gameVersion !== state.config.gameVersion
+      || loaded.schemaVersion !== state.config.schemaVersion
+      || loaded.referenceVersion !== state.config.referenceVersion
+    ) {
+      try {
+        await saveConfig(state.config);
+      } catch (error) {
+        reportBackgroundFailure("Game version migration", error, "settings");
+      }
+    }
     renderLintControls();
   }
 
@@ -219,6 +240,13 @@ export function createSettingsController({
     grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
     recordLintEngineEvent("engine-switch", { previous, next });
     if (isLegacyLintEngine()) {
+      const gameVersion = legacyGameVersion(state.config, state.lint.legacy.settings.profile);
+      state.config = canonicalGameVersionConfig(state.config, gameVersion);
+      const family = legacyRuleFamilyForGameVersion(gameVersion);
+      if (state.lint.legacy.settings.profile !== family) {
+        state.lint.legacy.settings.profile = family;
+        saveLegacyLintSettings();
+      }
       stopVectorSession("lint-engine-legacy").catch(showError);
       const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
@@ -266,50 +294,31 @@ export function createSettingsController({
     renderChrome();
   }
 
-  function setLegacyLintProfile(profile) {
-    state.lint.legacy.settings.profile = lintProfileOptions().includes(profile) ? profile : "RotW";
-    setLintDiagnostics([]);
-    updateGridDiagnostics();
-    saveLegacyLintSettings();
-    if (legacyLintDisplayActive()) {
-      const schedule = legacyLintImmediateSchedule("profile-changed");
-      scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    }
-    renderChrome();
-  }
-
-  async function setLegacyLintReferenceVersion(value) {
-    const supported = new Set(["", "3.2", "3.1", "2.4", "1.13c"]);
-    const referenceVersion = supported.has(String(value ?? "")) ? String(value ?? "") : "";
+  async function setLegacyGameVersion(value) {
+    const gameVersion = legacyGameVersion({ gameVersion: value }, state.lint.legacy.settings.profile);
     const request = ++legacyReferenceSelectionRequest;
-    const save = legacyReferenceSaveQueue
-      .catch(() => {})
-      .then(async () => {
-        if (!configLoaded) {
-          configSnapshot = { ...((await getConfig()) ?? {}) };
-          configLoaded = true;
-        }
-        const updated = {
-          ...configSnapshot,
-          referenceVersion: referenceVersion || undefined
-        };
-        await saveConfig(updated);
-        configSnapshot = updated;
-        return updated;
-      });
+    const save = legacyReferenceSaveQueue.catch(() => {}).then(async () => {
+      if (!configLoaded) {
+        configSnapshot = { ...((await getConfig()) ?? {}) };
+        configLoaded = true;
+      }
+      const updated = canonicalGameVersionConfig(configSnapshot, gameVersion);
+      await saveConfig(updated);
+      configSnapshot = updated;
+      return updated;
+    });
     legacyReferenceSaveQueue = save;
     try {
       const updated = await save;
       if (request !== legacyReferenceSelectionRequest) return false;
       state.config = updated;
+      state.lint.legacy.settings.profile = legacyRuleFamilyForGameVersion(gameVersion);
     } catch (error) {
-      if (request === legacyReferenceSelectionRequest) {
-        showError(tText("error.referenceSave", { error }, state.locale));
-        renderChrome();
-      }
+      if (request === legacyReferenceSelectionRequest) showError(tText("error.referenceSave", { error }, state.locale));
       return false;
     }
-    invalidateLegacyReferenceData("reference-version-changed");
+    saveLegacyLintSettings();
+    invalidateLegacyReferenceData("game-version-changed");
     renderChrome();
     return true;
   }
@@ -533,20 +542,10 @@ export function createSettingsController({
     });
     const translate = (key, params = {}) => t(key, params, state.locale);
     const mode = config.lintMode ?? "basic";
-    const schemaVersion = config.schemaVersion ?? "3.2";
-    const VERSIONS = ["3.2", "3.1", "2.4", "1.13"];
+    const gameVersion = vectorGameVersion(config);
+    const VERSIONS = ["3.2", "3.1", "2.4", "1.13c"];
     const versionOptions = VERSIONS.map((v) =>
-      `<option value="${escapeHtml(v)}"${schemaVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
-    ).join("");
-    const referenceVersion = config.referenceVersion ?? "";
-    const referenceVersionOptions = [
-      ["", translate("settings.useSchemaProfileVersion")],
-      ["3.2", "3.2"],
-      ["3.1", "3.1"],
-      ["2.4", "2.4"],
-      ["1.13c", "1.13c"]
-    ].map(([value, label]) =>
-      `<option value="${escapeHtml(value)}"${referenceVersion === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+      `<option value="${escapeHtml(v)}"${gameVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
     ).join("");
     const jsonRules = normalizeJsonDiagnosticRules(config.jsonDiagnosticRules);
 
@@ -559,9 +558,9 @@ export function createSettingsController({
           <button class="settings-tab${mode === "basic" ? " active" : ""}" data-settings-tab="basic">${translate("settings.basic")}</button>
           <button class="settings-tab${mode === "advanced" ? " active" : ""}" data-settings-tab="advanced">${translate("settings.advanced")}</button>
         </div>
+        <label class="settings-label" for="settingsGameVersion">${translate("settings.schemaVersion")}</label>
+        <select class="modal-input settings-version-select" id="settingsGameVersion">${versionOptions}</select>
         <div id="settingsBasicSection" class="settings-tab-panel${mode !== "basic" ? " hidden" : ""}">
-          <label class="settings-label">${translate("settings.schemaVersion")}</label>
-          <select class="modal-input settings-version-select" id="settingsSchemaVersion">${versionOptions}</select>
         </div>
         <div id="settingsAdvancedSection" class="settings-tab-panel${mode !== "advanced" ? " hidden" : ""}">
           <label class="settings-label">${translate("settings.pluginFolder")}</label>
@@ -586,9 +585,6 @@ export function createSettingsController({
             ${isTauriRuntime() ? `<button class="settings-browse-btn" id="settingsBrowseLspBtn">${translate("common.browse")}&hellip;</button>` : ""}
           </div>
         </div>
-        <label class="settings-label">${translate("settings.bundledReferenceData")}</label>
-        <select class="modal-input settings-version-select" id="settingsReferenceVersion">${referenceVersionOptions}</select>
-        <div class="settings-hint">${translate("settings.referenceVersionHint")}</div>
         <div class="settings-debug-row">
           <label class="settings-checkbox-label">
             <input type="checkbox" id="settingsJsonDiagnostics" aria-controls="settingsJsonDiagnosticRules"${config.jsonDiagnostics ? " checked" : ""} />
@@ -647,8 +643,7 @@ export function createSettingsController({
     const lspInput = backdrop.querySelector("#settingsLspPath");
     const schemaInput = backdrop.querySelector("#settingsSchemaPath");
     const pluginInput = backdrop.querySelector("#settingsPluginPath");
-    const versionSelect = backdrop.querySelector("#settingsSchemaVersion");
-    const referenceVersionSelect = backdrop.querySelector("#settingsReferenceVersion");
+    const versionSelect = backdrop.querySelector("#settingsGameVersion");
     const jsonDiagnosticsEl = backdrop.querySelector("#settingsJsonDiagnostics");
     const jsonDuplicateIdsActionEl = backdrop.querySelector("#settingsJsonDuplicateIdsAction");
     const jsonStringFormatActionEl = backdrop.querySelector("#settingsJsonStringFormatAction");
@@ -727,8 +722,7 @@ export function createSettingsController({
         const draft = {
           ...config,
           lintMode: backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? mode,
-          schemaVersion: versionSelect?.value || schemaVersion,
-          referenceVersion: referenceVersionSelect?.value || undefined,
+          ...canonicalGameVersionConfig(config, versionSelect?.value || gameVersion),
           pluginPath: pluginInput?.value ?? config.pluginPath,
           schemaPath: schemaInput?.value ?? config.schemaPath,
           vectorLspPath: lspInput?.value ?? config.vectorLspPath,
@@ -769,11 +763,9 @@ export function createSettingsController({
             return;
           }
           const jsonKeyUsageIdStart = parsedJsonKeyUsageIdStart ?? jsonRules.keyUsage.idStart;
-          const updated = {
+          let updated = {
             ...config,
             lintMode: selectedMode,
-            schemaVersion: versionSelect?.value || "3.2",
-            referenceVersion: referenceVersionSelect?.value || undefined,
             pluginPath: pluginInput?.value.trim() || undefined,
             schemaPath: schemaInput?.value.trim() || undefined,
             vectorLspPath: lspInput?.value.trim() || undefined,
@@ -788,6 +780,7 @@ export function createSettingsController({
               }
             }
           };
+          updated = canonicalGameVersionConfig(updated, versionSelect?.value || gameVersion);
           try {
             await saveConfig(updated);
           } catch (err) {
@@ -830,30 +823,22 @@ export function createSettingsController({
     const controls = lintControlsModel({
       engine: state.lint.engine,
       lintEnabled: state.lint.enabled,
-      profiles: lintProfileOptions(),
-      activeProfile: state.lint.legacy.settings.profile,
-      activeReferenceVersion: state.config?.referenceVersion ?? "",
+      activeGameVersion: legacyGameVersion(state.config, state.lint.legacy.settings.profile),
       rulesOpen: state.lint.legacy.rulesOpen
     });
     const lintButton = `<button class="toggle-button${controls.lintButton.active ? " active" : ""}" data-command="${controls.lintButton.id}">${controls.lintButton.label}</button>`;
     if (controls.mode === "legacy") {
-      const options = controls.profileSelect.options.map((option) =>
-        `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
-      ).join("");
-      const referenceOptions = controls.referenceSelect.options.map((option) =>
+      const options = controls.versionSelect.options.map((option) =>
         `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
       ).join("");
       els.lintControls.innerHTML = `
         ${lintButton}
-        <select id="${controls.profileSelect.id}" class="${controls.profileSelect.className}" title="${controls.profileSelect.title}">${options}</select>
-        <select id="${controls.referenceSelect.id}" class="${controls.referenceSelect.className}" title="${controls.referenceSelect.title}">${referenceOptions}</select>
+        <select id="${controls.versionSelect.id}" class="${controls.versionSelect.className}" title="${controls.versionSelect.title}">${options}</select>
         <button data-command="${controls.rulesButton.id}" class="${controls.rulesButton.active ? "active" : ""}">${controls.rulesButton.label}</button>
       `;
-      const select = els.lintControls.querySelector("#lintProfileSelect");
-      select?.addEventListener("change", () => setLegacyLintProfile(select.value));
-      const referenceSelect = els.lintControls.querySelector("#lintReferenceVersionSelect");
-      referenceSelect?.addEventListener("change", () => {
-        setLegacyLintReferenceVersion(referenceSelect.value).catch((error) => showError(error));
+      const select = els.lintControls.querySelector("#lintGameVersionSelect");
+      select?.addEventListener("change", () => {
+        setLegacyGameVersion(select.value).catch((error) => showError(error));
       });
       renderLegacyLintRulesPanel();
       return;
@@ -876,7 +861,8 @@ export function createSettingsController({
       return;
     }
     els.lintRulesPanel.classList.remove("hidden");
-    els.lintRulesPanel.innerHTML = lintRuleGroupsForProfile(state.lint.legacy.settings.profile, state.locale).map((group) => `
+    els.lintRulesPanel.innerHTML = `<div class="lint-rule-version">${escapeHtml(legacyGameVersion(state.config, state.lint.legacy.settings.profile))}</div>`
+      + lintRuleGroupsForProfile(state.lint.legacy.settings.profile, state.locale).map((group) => `
       <section class="lint-rule-group">
         <h3>${escapeHtml(group.group)}</h3>
         ${group.rules.map((entry) => {
@@ -909,8 +895,7 @@ export function createSettingsController({
     setMouseResizeLocked,
     setAutoResizeToFitOnOpen,
     setExcludeWorkspaceSubfolders,
-    setLegacyLintProfile,
-    setLegacyLintReferenceVersion,
+    setLegacyGameVersion,
     setLegacyLintRuleEnabled,
     setLintEngine,
     setLocale,

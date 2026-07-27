@@ -14,6 +14,7 @@ import {
   LINT_ENGINE_LEGACY,
   LINT_ENGINE_VECTOR
 } from "../../core/lint-controller-policy.js";
+import { legacyGameVersion } from "../../core/game-version.js";
 import { finishDiagnosticNavigation } from "../diagnostic-navigation.js";
 import {
   activeDiagnosticIdsForCell,
@@ -347,7 +348,7 @@ export function createDiagnosticsController({
       lintStatus: state.lint.status,
       legacyStatus: state.lint.legacy.status,
       legacyWorkspaceLoadStatus: state.lint.legacy.workspaceLoad.status,
-      legacyProfile: state.lint.legacy.settings.profile,
+      legacyProfile: legacyGameVersion(state.config, state.lint.legacy.settings.profile),
       diagnostics: state.lint.diagnostics,
       counts: currentDiagnosticIndex().counts,
       openFileCount: state.lsp.openFileCount ?? 0
@@ -410,7 +411,7 @@ export function createDiagnosticsController({
       lintStatus: state.lint.status,
       legacyStatus: state.lint.legacy.status,
       legacyRulesOpen: state.lint.legacy.rulesOpen,
-      legacyProfile: state.lint.legacy.settings.profile,
+      legacyProfile: legacyGameVersion(state.config, state.lint.legacy.settings.profile),
       lintVersion: state.lint.version,
       collapsedFiles: collapsedProblemFiles
     });

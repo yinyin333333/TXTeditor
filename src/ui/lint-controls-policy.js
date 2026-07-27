@@ -11,9 +11,7 @@ export function lintToggleControl(lintEnabled = false) {
 export function lintControlsModel({
   engine = "vector-lsp",
   lintEnabled = false,
-  profiles = [],
-  activeProfile = "RotW",
-  activeReferenceVersion = "",
+  activeGameVersion = "3.2",
   rulesOpen = false
 } = {}) {
   const lintButton = lintToggleControl(lintEnabled);
@@ -21,24 +19,14 @@ export function lintControlsModel({
     return {
       mode: "legacy",
       lintButton,
-      profileSelect: {
-        id: "lintProfileSelect",
+      versionSelect: {
+        id: "lintGameVersionSelect",
         className: "profile-select",
         title: tText("lint.profileTitle"),
-        options: profiles.map((profile) => ({
-          value: profile,
-          label: profile,
-          selected: profile === activeProfile
-        }))
-      },
-      referenceSelect: {
-        id: "lintReferenceVersionSelect",
-        className: "profile-select",
-        title: tText("lint.referenceTitle"),
-        options: ["", "3.2", "3.1", "2.4", "1.13c"].map((version) => ({
+        options: ["3.2", "3.1", "2.4", "1.13c"].map((version) => ({
           value: version,
-          label: version || tText("lint.profile"),
-          selected: version === activeReferenceVersion
+          label: version,
+          selected: version === activeGameVersion
         }))
       },
       rulesButton: {

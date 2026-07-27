@@ -12,6 +12,7 @@ import {
   referenceDocumentsFromPayload,
   resolveLegacyLintReferenceVersion
 } from "../../core/lint-reference-data.js";
+import { legacyGameVersion } from "../../core/game-version.js";
 import { isTextLikePath } from "../../core/text-file-policy.js";
 import {
   legacyWorkspaceFileSignature,
@@ -87,7 +88,7 @@ export function createLegacyLintController({
       version,
       delayMs: delay,
       scheduledAt,
-      profile: state.lint.legacy.settings.profile
+      profile: displayGameVersion()
     });
     state.lint.legacy.timer = setTimeout(() => runNow(reason, version), delay);
   }
@@ -103,7 +104,7 @@ export function createLegacyLintController({
     const timings = {
       reason,
       version,
-      profile: state.lint.legacy.settings.profile,
+      profile: displayGameVersion(),
       scheduledAt: pendingRun.scheduledAt,
       startedAt,
       queueDelayMs: elapsedMs(pendingRun.scheduledAt),
@@ -130,7 +131,7 @@ export function createLegacyLintController({
     };
     let published = false;
     state.lint.legacy.running = true;
-    state.lint.legacy.status = state.workspace?.files?.length ? tText("lint.indexing") : tText("lint.lintingProfile", { profile: state.lint.legacy.settings.profile });
+    state.lint.legacy.status = state.workspace?.files?.length ? tText("lint.indexing") : tText("lint.lintingProfile", { profile: displayGameVersion() });
     recordLintEngineEvent("legacy-lint-start", timings);
     timings.renderMs += measureRenderChrome();
     try {
@@ -145,7 +146,7 @@ export function createLegacyLintController({
       const referenceStats = await ensureReferenceDataset(version, state.lint.legacy.settings.profile);
       Object.assign(timings, referenceStats);
       if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) return;
-      state.lint.legacy.status = tText("lint.lintingProfile", { profile: state.lint.legacy.settings.profile });
+      state.lint.legacy.status = tText("lint.lintingProfile", { profile: displayGameVersion() });
       timings.renderMs += measureRenderChrome();
       await yieldToUi();
       const docs = activeDocuments();
@@ -156,6 +157,7 @@ export function createLegacyLintController({
       const diagnostics = indexResult.indexes
         .flatMap((index) => runLintWithWorkspaceIndex(index, state.lint.legacy.settings, { locale: state.locale }))
         .sort(compareDiagnostics);
+      for (const diagnostic of diagnostics) diagnostic.profile = displayGameVersion();
       disambiguateDiagnosticIds(diagnostics);
       timings.runLintMs = elapsedMs(runStarted);
       if (!legacyLintDisplayActive() || version !== state.lint.legacy.version) {
@@ -306,6 +308,10 @@ export function createLegacyLintController({
 
   function currentProfileRules() {
     return state.lint.legacy.settings.profiles?.[state.lint.legacy.settings.profile]?.rules ?? {};
+  }
+
+  function displayGameVersion() {
+    return legacyGameVersion(state.config ?? {}, state.lint.legacy.settings.profile);
   }
 
   function cancelJobs({ clearDiagnostics = false } = {}) {
