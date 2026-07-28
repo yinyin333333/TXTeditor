@@ -446,6 +446,30 @@ CATALOG_ROWS["settings.keepZoomLevel"] = [
   "保持缩放级别"
 ];
 
+CATALOG_ROWS["lint.hoverOn"] = [
+  "Hover: On", "懸停：開啟", "Hover: Ein", "Información emergente: activada", "Infobulle : activée", "Hover: attivo", "호버: 켜짐", "Podpowiedź: włączona", "Información emergente: activada", "ホバー: オン", "Dica: ligada", "Подсказка: вкл.", "悬停：开启"
+];
+
+CATALOG_ROWS["lint.hoverOff"] = [
+  "Hover: Off", "懸停：關閉", "Hover: Aus", "Información emergente: desactivada", "Infobulle : désactivée", "Hover: disattivo", "호버: 꺼짐", "Podpowiedź: wyłączona", "Información emergente: desactivada", "ホバー: オフ", "Dica: desligada", "Подсказка: выкл.", "悬停：关闭"
+];
+
+CATALOG_ROWS["error.gameVersionSave"] = [
+  "Failed to save game version: {error}",
+  "無法儲存遊戲版本：{error}",
+  "Spielversion konnte nicht gespeichert werden: {error}",
+  "No se pudo guardar la versión del juego: {error}",
+  "Impossible d’enregistrer la version du jeu : {error}",
+  "Impossibile salvare la versione del gioco: {error}",
+  "게임 버전을 저장하지 못했습니다: {error}",
+  "Nie udało się zapisać wersji gry: {error}",
+  "No se pudo guardar la versión del juego: {error}",
+  "ゲームバージョンを保存できませんでした: {error}",
+  "Não foi possível salvar a versão do jogo: {error}",
+  "Не удалось сохранить версию игры: {error}",
+  "无法保存游戏版本：{error}"
+];
+
 for (const [key, values] of Object.entries(CATALOG_ROWS)) {
   if (values.length !== SUPPORTED_LOCALES.length) throw new Error(`Catalog locale count mismatch: ${key}`);
 }

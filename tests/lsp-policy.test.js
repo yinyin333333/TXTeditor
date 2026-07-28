@@ -1781,7 +1781,7 @@ test("lint engine selector defaults to Vector-LSP and persists separately from l
 
 test("Settings and Problems controls switch between Vector-LSP and Legacy Lint", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const settingsControls = appSettingsVisualControls({ vectorLspHover: true, legacyLintEngine: true });
+  const settingsControls = appSettingsVisualControls();
   const vectorControls = lintControlsModel({ engine: LINT_ENGINE_VECTOR, lintEnabled: true });
   const legacyControls = lintControlsModel({
     engine: LINT_ENGINE_LEGACY,
@@ -1791,11 +1791,17 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
   });
   assert.match(html, /id="lintControls" class="lint-controls"/);
   assert.match(html, /id="lintRulesPanel" class="lint-rules-panel hidden"/);
-  assert.equal(settingsControls.vectorHover.checked, true);
-  assert.equal(settingsControls.vectorHover.disabled, true);
-  assert.equal(settingsControls.vectorHover.hintHidden, false);
+  assert.equal(settingsControls.vectorHover, undefined);
   assert.deepEqual(lintToggleControl(true), { id: "toggle-lint", label: "Lint: On", active: true });
   assert.equal(vectorControls.mode, "vector-lsp");
+  assert.equal(vectorControls.engineSelect.id, "lintEngineSelect");
+  assert.equal(vectorControls.versionSelect.id, "lintGameVersionSelect");
+  assert.deepEqual(vectorControls.hoverButton, {
+    id: "toggle-vector-lsp-hover",
+    label: "Hover: On",
+    active: true,
+    title: "Vector-LSP Hover"
+  });
   assert.deepEqual(vectorControls.settingsButton, { id: "open-settings", label: "Lint Options", title: "Lint options" });
   assert.equal(vectorControls.hideRulesPanel, true);
   assert.equal(legacyControls.mode, "legacy");

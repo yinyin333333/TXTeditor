@@ -1528,8 +1528,6 @@ test("Settings modal exposes immediate visual settings without save cancel apply
   const controls = appSettingsVisualControls({
     colorizeColumns: true,
     autoResizeToFitOnOpen: true,
-    vectorLspHover: true,
-    legacyLintEngine: true,
     theme: "light",
     gridFont: "custom"
   });
@@ -1544,10 +1542,7 @@ test("Settings modal exposes immediate visual settings without save cancel apply
     label: "Automatically apply Resize To Fit when opening a file",
     checked: true
   });
-  assert.equal(controls.vectorHover.id, "settingsVectorLspHover");
-  assert.equal(controls.vectorHover.label, "Vector-LSP Hover");
-  assert.equal(controls.vectorHover.disabled, true);
-  assert.equal(controls.vectorHover.hintHidden, false);
+  assert.equal(controls.vectorHover, undefined);
   assert.equal(controls.font.id, "settingsGridFont");
   assert.equal(controls.font.label, "Font");
   assert.equal(controls.font.value, DEFAULT_GRID_FONT);

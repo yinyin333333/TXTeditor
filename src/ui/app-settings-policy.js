@@ -69,8 +69,6 @@ export function appSettingsVisualControls({
   autoResizeToFitOnOpen = false,
   keepZoomLevel = false,
   excludeWorkspaceSubfolders = false,
-  vectorLspHover = true,
-  legacyLintEngine = false,
   theme = "dark",
   gridFont = DEFAULT_GRID_FONT
 } = {}) {
@@ -95,15 +93,6 @@ export function appSettingsVisualControls({
       id: "settingsExcludeWorkspaceSubfolders",
       label: tText("settings.excludeSubfolders"),
       checked: Boolean(excludeWorkspaceSubfolders)
-    },
-    vectorHover: {
-      id: "settingsVectorLspHover",
-      label: tText("settings.vectorHover"),
-      checked: Boolean(vectorLspHover),
-      disabled: Boolean(legacyLintEngine),
-      hintId: "settingsVectorLspHoverHint",
-      hintHidden: !legacyLintEngine,
-      hintText: tText("settings.vectorHoverHint")
     },
     font: {
       id: "settingsGridFont",

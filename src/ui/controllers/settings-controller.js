@@ -115,9 +115,10 @@ export function createSettingsController({
   setLocale = async (locale) => locale,
   escapeHtml
 }) {
-  let legacyReferenceSelectionRequest = 0;
+  let gameVersionSelectionRequest = 0;
+  let gameVersionSavePending = 0;
   let workspaceScopeRequest = 0;
-  let legacyReferenceSaveQueue = Promise.resolve();
+  let gameVersionSaveQueue = Promise.resolve();
   let configLoaded = Object.keys(state.config ?? {}).length > 0;
   let configSnapshot = { ...(state.config ?? {}) };
 
@@ -261,9 +262,11 @@ export function createSettingsController({
         saveLegacyLintSettings();
       }
       stopVectorSession("lint-engine-legacy").catch(showError);
-      const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
-      scheduleLegacyLintFull(schedule.reason, schedule.delay);
-    } else if (state.lint.enabled) {
+      if (gameVersionSavePending === 0) {
+        const schedule = legacyLintImmediateSchedule("engine-switched-legacy");
+        scheduleLegacyLintFull(schedule.reason, schedule.delay);
+      }
+    } else if (state.lint.enabled && gameVersionSavePending === 0) {
       ensureDocumentSession({ forceRestart: true }).catch(showError);
     }
     renderChrome();
@@ -307,10 +310,11 @@ export function createSettingsController({
     renderChrome();
   }
 
-  async function setLegacyGameVersion(value) {
-    const gameVersion = legacyGameVersion({ gameVersion: value }, state.lint.legacy.settings.profile);
-    const request = ++legacyReferenceSelectionRequest;
-    const save = legacyReferenceSaveQueue.catch(() => {}).then(async () => {
+  async function setGameVersion(value) {
+    const gameVersion = vectorGameVersion({ gameVersion: value });
+    const request = ++gameVersionSelectionRequest;
+    gameVersionSavePending += 1;
+    const save = gameVersionSaveQueue.catch(() => {}).then(async () => {
       if (!configLoaded) {
         configSnapshot = { ...((await getConfig()) ?? {}) };
         configLoaded = true;
@@ -320,20 +324,44 @@ export function createSettingsController({
       configSnapshot = updated;
       return updated;
     });
-    legacyReferenceSaveQueue = save;
+    gameVersionSaveQueue = save;
     try {
       const updated = await save;
-      if (request !== legacyReferenceSelectionRequest) return false;
+      gameVersionSavePending -= 1;
+      if (request !== gameVersionSelectionRequest) return false;
       state.config = updated;
       state.lint.legacy.settings.profile = legacyRuleFamilyForGameVersion(gameVersion);
     } catch (error) {
-      if (request === legacyReferenceSelectionRequest) showError(tText("error.referenceSave", { error }, state.locale));
+      gameVersionSavePending -= 1;
+      if (request === gameVersionSelectionRequest) {
+        showError(tText("error.gameVersionSave", { error }, state.locale));
+        if (isLegacyLintEngine()) {
+          const schedule = legacyLintImmediateSchedule("game-version-save-failed");
+          scheduleLegacyLintFull(schedule.reason, schedule.delay);
+        } else if (state.lint.enabled) {
+          ensureDocumentSession({ forceRestart: true }).catch(showError);
+        }
+      }
       return false;
     }
     saveLegacyLintSettings();
-    invalidateLegacyReferenceData("game-version-changed");
+    if (isLegacyLintEngine()) {
+      invalidateLegacyReferenceData("game-version-changed");
+    } else {
+      setLintDiagnostics([]);
+      updateGridDiagnostics();
+      if (state.lint.enabled) ensureDocumentSession({ forceRestart: true }).catch(showError);
+    }
     renderChrome();
     return true;
+  }
+
+  function setLegacyGameVersion(value) {
+    return setGameVersion(value);
+  }
+
+  function setVectorGameVersion(value) {
+    return setGameVersion(value);
   }
 
   function invalidateLegacyReferenceData(reason) {
@@ -384,8 +412,6 @@ export function createSettingsController({
       autoResizeToFitOnOpen: state.autoResizeToFitOnOpen,
       keepZoomLevel: state.keepZoomLevel,
       excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
-      vectorLspHover: state.vectorLspHover,
-      legacyLintEngine: isLegacyLintEngine(),
       theme: state.theme,
       gridFont: state.gridFont
     });
@@ -432,16 +458,6 @@ export function createSettingsController({
             <input type="checkbox" id="${visualControls.workspaceSubfolders.id}"${visualControls.workspaceSubfolders.checked ? " checked" : ""} />
             ${visualControls.workspaceSubfolders.label}
           </label>
-          <div class="settings-label" data-settings-i18n="settings.lintEngine">${translate("settings.lintEngine")}</div>
-          <div class="settings-segmented" role="group" aria-label="${translate("settings.lintEngine")}">
-            <button class="${isVectorLintEngine() ? "active" : ""}" data-settings-lint-engine="vector-lsp">${translate("settings.vectorEngine")}</button>
-            <button class="${isLegacyLintEngine() ? "active" : ""}" data-settings-lint-engine="legacy">${translate("settings.legacyEngine")}</button>
-          </div>
-          <label class="settings-checkbox-label">
-            <input type="checkbox" id="${visualControls.vectorHover.id}"${visualControls.vectorHover.checked ? " checked" : ""}${visualControls.vectorHover.disabled ? " disabled" : ""} />
-            ${visualControls.vectorHover.label}
-          </label>
-          <div class="settings-hint${visualControls.vectorHover.hintHidden ? " hidden" : ""}" id="${visualControls.vectorHover.hintId}">${visualControls.vectorHover.hintText}</div>
           <label class="settings-label" for="${visualControls.font.id}">${visualControls.font.label}</label>
           <select class="modal-input settings-font-select" id="${visualControls.font.id}">${fontOptions}</select>
           <div class="settings-label" data-settings-i18n="settings.theme">${translate("settings.theme")}</div>
@@ -466,11 +482,8 @@ export function createSettingsController({
     const autoResizeToFitOnOpenInput = backdrop.querySelector("#settingsAutoResizeToFitOnOpen");
     const keepZoomLevelInput = backdrop.querySelector("#settingsKeepZoomLevel");
     const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
-    const hoverInput = backdrop.querySelector("#settingsVectorLspHover");
-    const hoverHint = backdrop.querySelector("#settingsVectorLspHoverHint");
     const fontInput = backdrop.querySelector("#settingsGridFont");
     const localeInput = backdrop.querySelector("#settingsLocale");
-    const lintEngineButtons = [...backdrop.querySelectorAll("[data-settings-lint-engine]")];
     const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
     const refresh = () => {
@@ -479,12 +492,8 @@ export function createSettingsController({
       autoResizeToFitOnOpenInput.checked = state.autoResizeToFitOnOpen;
       keepZoomLevelInput.checked = state.keepZoomLevel;
       workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
-      hoverInput.checked = state.vectorLspHover;
-      hoverInput.disabled = isLegacyLintEngine();
-      hoverHint?.classList.toggle("hidden", !isLegacyLintEngine());
       fontInput.value = state.gridFont;
       localeInput.value = state.locale;
-      for (const button of lintEngineButtons) button.classList.toggle("active", button.dataset.settingsLintEngine === state.lint.engine);
       for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
     };
@@ -513,7 +522,6 @@ export function createSettingsController({
           showError(error);
         });
     });
-    hoverInput.addEventListener("change", () => { setVectorLspHover(hoverInput.checked); refresh(); });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
     localeInput.addEventListener("change", () => {
       setLocale(localeInput.value).then(() => {
@@ -521,9 +529,6 @@ export function createSettingsController({
         refreshLocaleLabels();
       }).catch(showError);
     });
-    for (const button of lintEngineButtons) {
-      button.addEventListener("click", () => { setLintEngine(button.dataset.settingsLintEngine); refresh(); });
-    }
     for (const button of themeButtons) {
       button.addEventListener("click", () => { setTheme(button.dataset.settingsTheme); refresh(); });
     }
@@ -560,17 +565,13 @@ export function createSettingsController({
       renderChrome();
       return;
     }
-    const config = draftConfig ?? await getConfig().catch((error) => {
+    const loadedConfig = draftConfig ?? await getConfig().catch((error) => {
       reportBackgroundFailure("Configuration load", error, "settings");
       return {};
     });
+    const config = canonicalGameVersionConfig(loadedConfig, vectorGameVersion(loadedConfig));
     const translate = (key, params = {}) => t(key, params, state.locale);
     const mode = config.lintMode ?? "basic";
-    const gameVersion = vectorGameVersion(config);
-    const VERSIONS = ["3.2", "3.1", "2.4", "1.13c"];
-    const versionOptions = VERSIONS.map((v) =>
-      `<option value="${escapeHtml(v)}"${gameVersion === v ? " selected" : ""}>${escapeHtml(v)}</option>`
-    ).join("");
     const jsonRules = normalizeJsonDiagnosticRules(config.jsonDiagnosticRules);
 
     const backdrop = document.createElement("div");
@@ -582,8 +583,6 @@ export function createSettingsController({
           <button class="settings-tab${mode === "basic" ? " active" : ""}" data-settings-tab="basic">${translate("settings.basic")}</button>
           <button class="settings-tab${mode === "advanced" ? " active" : ""}" data-settings-tab="advanced">${translate("settings.advanced")}</button>
         </div>
-        <label class="settings-label" for="settingsGameVersion">${translate("settings.schemaVersion")}</label>
-        <select class="modal-input settings-version-select" id="settingsGameVersion">${versionOptions}</select>
         <div id="settingsBasicSection" class="settings-tab-panel${mode !== "basic" ? " hidden" : ""}">
         </div>
         <div id="settingsAdvancedSection" class="settings-tab-panel${mode !== "advanced" ? " hidden" : ""}">
@@ -667,7 +666,6 @@ export function createSettingsController({
     const lspInput = backdrop.querySelector("#settingsLspPath");
     const schemaInput = backdrop.querySelector("#settingsSchemaPath");
     const pluginInput = backdrop.querySelector("#settingsPluginPath");
-    const versionSelect = backdrop.querySelector("#settingsGameVersion");
     const jsonDiagnosticsEl = backdrop.querySelector("#settingsJsonDiagnostics");
     const jsonDuplicateIdsActionEl = backdrop.querySelector("#settingsJsonDuplicateIdsAction");
     const jsonStringFormatActionEl = backdrop.querySelector("#settingsJsonStringFormatAction");
@@ -746,7 +744,6 @@ export function createSettingsController({
         const draft = {
           ...config,
           lintMode: backdrop.querySelector(".settings-tab.active")?.dataset.settingsTab ?? mode,
-          ...canonicalGameVersionConfig(config, versionSelect?.value || gameVersion),
           pluginPath: pluginInput?.value ?? config.pluginPath,
           schemaPath: schemaInput?.value ?? config.schemaPath,
           vectorLspPath: lspInput?.value ?? config.vectorLspPath,
@@ -804,7 +801,6 @@ export function createSettingsController({
               }
             }
           };
-          updated = canonicalGameVersionConfig(updated, versionSelect?.value || gameVersion);
           try {
             await saveConfig(updated);
           } catch (err) {
@@ -847,30 +843,50 @@ export function createSettingsController({
     const controls = lintControlsModel({
       engine: state.lint.engine,
       lintEnabled: state.lint.enabled,
-      activeGameVersion: legacyGameVersion(state.config, state.lint.legacy.settings.profile),
+      vectorLspHover: state.vectorLspHover,
+      activeGameVersion: isLegacyLintEngine()
+        ? legacyGameVersion(state.config, state.lint.legacy.settings.profile)
+        : vectorGameVersion(state.config),
       rulesOpen: state.lint.legacy.rulesOpen
     });
     const lintButton = `<button class="toggle-button${controls.lintButton.active ? " active" : ""}" data-command="${controls.lintButton.id}">${controls.lintButton.label}</button>`;
+    const engineOptions = controls.engineSelect.options.map((option) =>
+      `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    ).join("");
+    const versionOptions = controls.versionSelect.options.map((option) =>
+      `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    ).join("");
+    const engineSelect = `<select id="${controls.engineSelect.id}" class="${controls.engineSelect.className}" title="${controls.engineSelect.title}" aria-label="${controls.engineSelect.title}">${engineOptions}</select>`;
+    const versionSelect = `<select id="${controls.versionSelect.id}" class="${controls.versionSelect.className}" title="${controls.versionSelect.title}" aria-label="${controls.versionSelect.title}">${versionOptions}</select>`;
     if (controls.mode === "legacy") {
-      const options = controls.versionSelect.options.map((option) =>
-        `<option value="${escapeHtml(option.value)}"${option.selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`
-      ).join("");
       els.lintControls.innerHTML = `
         ${lintButton}
-        <select id="${controls.versionSelect.id}" class="${controls.versionSelect.className}" title="${controls.versionSelect.title}">${options}</select>
+        ${engineSelect}
+        ${versionSelect}
         <button data-command="${controls.rulesButton.id}" class="${controls.rulesButton.active ? "active" : ""}">${controls.rulesButton.label}</button>
       `;
-      const select = els.lintControls.querySelector("#lintGameVersionSelect");
-      select?.addEventListener("change", () => {
-        setLegacyGameVersion(select.value).catch((error) => showError(error));
+      els.lintControls.querySelector("#lintEngineSelect")?.addEventListener("change", (event) => {
+        setLintEngine(event.target.value);
+      });
+      els.lintControls.querySelector("#lintGameVersionSelect")?.addEventListener("change", (event) => {
+        setLegacyGameVersion(event.target.value).catch((error) => showError(error));
       });
       renderLegacyLintRulesPanel();
       return;
     }
     els.lintControls.innerHTML = `
       ${lintButton}
+      ${engineSelect}
+      ${versionSelect}
+      <button data-command="${controls.hoverButton.id}" class="${controls.hoverButton.active ? "active" : ""}" title="${controls.hoverButton.title}" aria-pressed="${controls.hoverButton.active}">${controls.hoverButton.label}</button>
       <button data-command="${controls.settingsButton.id}" title="${controls.settingsButton.title}">${controls.settingsButton.label}</button>
     `;
+    els.lintControls.querySelector("#lintEngineSelect")?.addEventListener("change", (event) => {
+      setLintEngine(event.target.value);
+    });
+    els.lintControls.querySelector("#lintGameVersionSelect")?.addEventListener("change", (event) => {
+      setVectorGameVersion(event.target.value).catch((error) => showError(error));
+    });
     if (controls.hideRulesPanel && els.lintRulesPanel) {
       els.lintRulesPanel.classList.add("hidden");
       els.lintRulesPanel.innerHTML = "";
@@ -922,6 +938,7 @@ export function createSettingsController({
     recordZoomLevel,
     setExcludeWorkspaceSubfolders,
     setLegacyGameVersion,
+    setVectorGameVersion,
     setLegacyLintRuleEnabled,
     setLintEngine,
     setLocale,
