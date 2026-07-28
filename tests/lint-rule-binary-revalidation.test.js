@@ -154,14 +154,14 @@ test("monster chain traversal allows 255 hops and diagnoses the 256th hop as nod
   assert.match(formatD2rlintCompatibleExport({ diagnostics }), /reaches hop 256 \(node 257\)/);
 });
 
-test("item serialization range uses (2^SaveBits - 1) - SaveAdd as its upper bound", () => {
+test("ValidStatParameters preserves d2rlint's 2^SaveBits - SaveAdd upper bound", () => {
   const documents = [
     TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nbounded\t1\tbounded_stat"),
     TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\tsave add\tsigned\tencode\nbounded_stat\t3\t2\t0\t0"),
     TableDocument.fromText("skills.txt", "skill\nAttack"),
     TableDocument.fromText(
       "automagic.txt",
-      "name\tmod1code\tmod1param\tmod1min\tmod1max\nAt Limit\tbounded\t\t5\t5\nAbove Limit\tbounded\t\t6\t6"
+      "name\tmod1code\tmod1param\tmod1min\tmod1max\nAt Limit\tbounded\t\t6\t6\nAbove Limit\tbounded\t\t7\t7"
     )
   ];
   const diagnostics = ruleDiagnostics(documents, "Items/ValidStatParameters");
@@ -171,10 +171,10 @@ test("item serialization range uses (2^SaveBits - 1) - SaveAdd as its upper boun
     diagnostics.filter((diagnostic) => diagnostic.rowIndex === 2).map((diagnostic) => diagnostic.columnName).sort(),
     ["mod1max", "mod1min"]
   );
-  assert.ok(diagnostics.filter((diagnostic) => diagnostic.rowIndex === 2).every((diagnostic) => diagnostic.message.includes("maximum 5")));
+  assert.ok(diagnostics.filter((diagnostic) => diagnostic.rowIndex === 2).every((diagnostic) => diagnostic.message.includes("maximum 6")));
 });
 
-test("monprop skips item serialization ranges but uses numeric func22 parameters and max4 checks", () => {
+test("ValidStatParameters leaves MonProp persistence ranges unchecked while retaining skill validation", () => {
   const documents = [
     TableDocument.fromText(
       "properties.txt",
@@ -193,10 +193,8 @@ test("monprop skips item serialization ranges but uses numeric func22 parameters
   ];
   const diagnostics = ruleDiagnostics(documents, "Items/ValidStatParameters");
 
-  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.columnName).sort(), ["max4", "par2"]);
-  assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "max4" && diagnostic.severity === "warning" && diagnostic.message.includes("not a normal integer")));
-  assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "par2" && diagnostic.message.includes("skill id")));
-  assert.equal(diagnostics.some((diagnostic) => diagnostic.columnName === "min1" || diagnostic.columnName === "max1"), false);
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.columnName), ["par2"]);
+  assert.ok(diagnostics.some((diagnostic) => diagnostic.columnName === "par2" && diagnostic.message.includes("not a known skill")));
   assert.match(
     ITEM_LINT_RULES.find((rule) => rule.id === "Items/ValidStatParameters").note,
     /saved item stat ranges/

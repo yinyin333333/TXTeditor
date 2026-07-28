@@ -88,12 +88,6 @@ export const STAT_PARAMETER_TUPLES = new Map([
     numberedFields("mod", "min", 2),
     numberedFields("mod", "max", 2)
   )],
-  ["cubemain.txt", buildStatTuples(
-    CUBE_OUTPUT_MOD_COLUMNS,
-    CUBE_OUTPUT_MOD_COLUMNS.map((column) => `${column} param`),
-    CUBE_OUTPUT_MOD_COLUMNS.map((column) => `${column} min`),
-    CUBE_OUTPUT_MOD_COLUMNS.map((column) => `${column} max`)
-  )],
   ["runes.txt", buildStatTuples(
     numberedFields("t1code", "", 7),
     numberedFields("t1param", "", 7),

@@ -800,7 +800,7 @@ test("cube output lint resolves quoted items and property group output mods", ()
   assert.equal(diagnostics.length, 0);
 });
 
-test("valid stat parameter lint covers CubeMain output modifier tuples", () => {
+test("valid stat parameter lint follows d2rlint file scope and ignores CubeMain output modifiers", () => {
   const docs = [
     TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nbadprop\t1\titem_strength"),
     TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\tsave add\tsigned\tencode\nitem_strength\t2\t0\t0\t0"),
@@ -808,7 +808,7 @@ test("valid stat parameter lint covers CubeMain output modifier tuples", () => {
     TableDocument.fromText("cubemain.txt", "description\tenabled\tmod 1\tmod 1 min\tmod 1 max\ncube\t1\tbadprop\t0\t5")
   ];
   const diagnostics = lintDocs(docs).filter((item) => item.ruleId === "Items/ValidStatParameters");
-  assert.deepEqual(diagnostics.map((item) => item.columnName), ["mod 1 max"]);
+  assert.deepEqual(diagnostics, []);
 });
 
 test("2.4-only TXT lint rules are implemented and hidden from RotW", () => {

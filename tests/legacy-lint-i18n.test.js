@@ -237,21 +237,17 @@ test("Dynamic Legacy Lint terms resolve in the selected locale instead of inject
   assert.doesNotMatch(resolveLegacyMessage(fixed4, "koKR"), /space/);
 });
 
-test("Numeric-only dynamic behavior renders in every locale without English fragments", () => {
+test("Legacy ValidStatParameters leaves binary-only numeric normalization silent in every locale", () => {
   const documents = [
     TableDocument.fromText("properties.txt", "code\tfunc1\tstat1\nrandom\t12\tstat"),
     TableDocument.fromText("itemstatcost.txt", "stat\tsave bits\nstat\t2"),
     TableDocument.fromText("skills.txt", "skill\nAttack"),
     TableDocument.fromText("qualityitems.txt", "mod1code\tmod1param\tmod1min\tmod1max\nrandom\t0\tAttack\t0")
   ];
-  const fragments = /the game reads|the game tries|use a plain whole number/i;
   for (const locale of LEGACY_LINT_LOCALES) {
     const diagnostic = runLint(documents, createDefaultLintSettings(), { locale })
       .find((entry) => entry.ruleId === "Items/ValidStatParameters" && entry.columnName === "mod1min");
-    assert.ok(diagnostic, locale);
-    assert.match(diagnostic.message, /Attack/);
-    assert.match(diagnostic.message, /2453469/);
-    if (locale !== "enUS") assert.doesNotMatch(diagnostic.message, fragments, locale);
+    assert.equal(diagnostic, undefined, locale);
   }
 });
 

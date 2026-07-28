@@ -165,7 +165,7 @@ test("ValidStatParameters resolves hidden bundled properties, stats, and skills 
   const diagnostics = runLintWithWorkspaceIndex(index, createDefaultLintSettings())
     .filter((entry) => entry.ruleId === "Items/ValidStatParameters");
 
-  assert.deepEqual(diagnostics.map((entry) => entry.columnName).sort(), ["max1", "par1"]);
+  assert.deepEqual(diagnostics.map((entry) => entry.columnName).sort(), ["par1"]);
   assert.ok(diagnostics.every((entry) => entry.fileName.toLowerCase() === "uniqueitems.txt"));
   assert.equal(index.tables.some((table) => table.doc.lintReferenceBundled), false);
 });
