@@ -1780,8 +1780,25 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
   const previousWindow = globalThis.window;
   const previousElement = globalThis.Element;
   const listeners = new Map();
+  const keydownRegistrations = [];
+  let captureKeydown = null;
+  let bubbleKeydown = null;
   globalThis.document = {
-    addEventListener: (type, listener) => listeners.set(type, listener)
+    addEventListener: (type, listener, options) => {
+      if (type !== "keydown") return listeners.set(type, listener);
+      keydownRegistrations.push(options === true ? "capture" : "bubble");
+      if (options === true) captureKeydown = listener;
+      else bubbleKeydown = listener;
+      listeners.set("keydown", (event) => {
+        const preventDefault = event.preventDefault;
+        event.preventDefault = () => {
+          event.defaultPrevented = true;
+          preventDefault?.();
+        };
+        captureKeydown?.(event);
+        bubbleKeydown?.(event);
+      });
+    }
   };
   globalThis.window = { addEventListener: () => {} };
   class FakeElement {
@@ -1808,8 +1825,10 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       remove: () => {}
     };
     const addEventListener = () => {};
+    let findToggles = 0;
+    const appState = { active: 0 };
     const controller = createAppEventController({
-      state: { active: 0 },
+      state: appState,
       els: {
         closeDialog: { addEventListener },
         tabs: { addEventListener },
@@ -1834,7 +1853,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       commands: {},
       documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
       hasOpenDocument: () => true,
-      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {}, toggleSearch: () => { findToggles += 1; } },
       syncDockLayout: () => {},
       wirePaneResizers: () => {},
       positionContextMenu: () => {},
@@ -1859,6 +1878,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       pasteSelection: () => {}
     });
     controller.wireEvents();
+    assert.deepEqual(keydownRegistrations, ["capture", "bubble"]);
 
     let prevented = 0;
     listeners.get("keydown")({
@@ -1879,6 +1899,64 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
     });
     assert.deepEqual(calls, ["top", "right", "page-down"]);
     assert.equal(prevented, 3);
+
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: new FakeElement("input"),
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      repeat: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "f",
+      metaKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 1);
+    assert.equal(prevented, 6);
+
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      shiftKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 1);
+    assert.equal(prevented, 6);
+
+    appState.shortcuts = { search: ["Ctrl+K"] };
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "k",
+      ctrlKey: true,
+      target: new FakeElement("input"),
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 2);
+    assert.equal(prevented, 8);
+
+    appState.shortcuts = { search: [] };
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 2);
+    assert.equal(prevented, 9);
 
     listeners.get("keydown")({
       key: "PageUp",
@@ -1924,7 +2002,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       commands: {},
       documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
       hasOpenDocument: () => false,
-      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {}, toggleSearch: () => {} },
       syncDockLayout: () => {},
       wirePaneResizers: () => {},
       positionContextMenu: () => {},

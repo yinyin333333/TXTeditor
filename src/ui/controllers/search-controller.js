@@ -53,6 +53,7 @@ export function createSearchController({
   let findAllState = null;
   let findAllPendingSnapshot = null;
   let activeResultIndex = -1;
+  let searchWasOpened = false;
 
   function viewportSize() {
     return {
@@ -121,11 +122,18 @@ export function createSearchController({
     const doc = activeDoc();
     setReplaceMode(false);
     setJsonSearchMode(isJsonDocument(doc));
-    Object.assign(state.search, searchStateAfterInput());
+    if (!searchWasOpened) Object.assign(state.search, searchStateAfterInput());
+    searchWasOpened = true;
     els.searchPanel.classList.remove("hidden");
     clampSearchModalToViewport();
     els.searchInput.focus();
     els.searchInput.select();
+    if (findAllState?.stale) return findAll({ preserveScrollPosition: true });
+  }
+
+  function toggleSearch() {
+    if (!els.searchPanel.classList.contains("hidden")) return closeSearch();
+    return showSearch();
   }
 
   function showReplace() {
@@ -237,7 +245,7 @@ export function createSearchController({
     return find(SEARCH_DIRECTION_BACKWARD);
   }
 
-  async function findAll() {
+  async function findAll({ preserveScrollPosition = false } = {}) {
     const doc = activeDoc();
     const query = String(els.searchInput.value ?? "");
     if (!query) {
@@ -246,6 +254,7 @@ export function createSearchController({
       return 0;
     }
 
+    const resultScrollTop = preserveScrollPosition ? els.searchResults?.scrollTop : undefined;
     const generation = ++findAllGeneration;
     const kind = isJsonDocument(doc) ? "json" : "table";
     const scope = kind === "json" ? SEARCH_SCOPE_ALL : selectedSearchScope();
@@ -312,6 +321,9 @@ export function createSearchController({
       stale: false
     };
     renderFindAllResults();
+    if (preserveScrollPosition && els.searchResults && Number.isFinite(resultScrollTop)) {
+      els.searchResults.scrollTop = resultScrollTop;
+    }
     return collected.totalMatches;
   }
 
@@ -594,6 +606,7 @@ export function createSearchController({
     replaceNext,
     showReplace,
     showSearch,
+    toggleSearch,
     wireEvents
   };
 }

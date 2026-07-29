@@ -65,7 +65,14 @@ function searchHarness({ doc, query, scope = "all", jsonSnapshot = null }) {
       return selector === "input[name='searchScope']" ? [scopeInput] : [];
     }
   });
-  const results = element({ classList: classList(["hidden"]) });
+  const resultItems = [0, 1].map((index) => element({
+    id: `searchResult-${index}`,
+    dataset: { searchResultIndex: String(index) }
+  }));
+  const results = element({
+    classList: classList(["hidden"]),
+    querySelectorAll: () => resultItems
+  });
   const summary = element({ classList: classList(["hidden"]) });
   const searchScope = element();
   const searchInput = element({ value: query, placeholder: "" });
@@ -75,8 +82,9 @@ function searchHarness({ doc, query, scope = "all", jsonSnapshot = null }) {
   selection.set(0, 0);
   const calls = [];
   const jsonSelections = [];
+  const state = { search: initialSearchState(), selection };
   const controller = createSearchController({
-    state: { search: initialSearchState(), selection },
+    state,
     els: {
       host: element(),
       searchPanel: panel,
@@ -113,12 +121,14 @@ function searchHarness({ doc, query, scope = "all", jsonSnapshot = null }) {
     jsonSelections,
     panel,
     results,
+    resultItems,
     scopeInput,
     searchInput,
     searchMatchCase,
     searchScope,
     searchStatus,
     selection,
+    state,
     summary
   };
 }
@@ -209,6 +219,46 @@ test("Find All results become inert after document edits or condition changes", 
   assert.equal(await harness.controller.findAll(), 1);
   harness.controller.notifyDocumentChanged(doc);
   assert.equal(harness.controller.navigateToResult(0), false);
+});
+
+test("reopening Find preserves current results and refreshes stale results before continuing", async () => {
+  const doc = TableDocument.fromText("skills.txt", "Name\nneedle\nneedle");
+  const harness = searchHarness({ doc, query: "needle", scope: "row-titles" });
+  harness.searchMatchCase.checked = true;
+
+  harness.controller.showSearch();
+  harness.controller.findNext();
+  assert.deepEqual(harness.selection.focus, { row: 1, column: 0 });
+  assert.equal(await harness.controller.findAll(), 2);
+  assert.equal(harness.controller.navigateToResult(1), true);
+  assert.equal(harness.results.attributes.get("aria-activedescendant"), "searchResult-1");
+  assert.equal(harness.resultItems[1].attributes.get("aria-selected"), "true");
+  harness.results.scrollTop = 47;
+  const markup = harness.results.innerHTML;
+  const stateBeforeClose = { ...harness.state.search };
+
+  harness.controller.closeSearch();
+  assert.equal(harness.panel.classList.contains("hidden"), true);
+  harness.controller.showSearch();
+  assert.equal(harness.panel.classList.contains("hidden"), false);
+  assert.equal(harness.results.innerHTML, markup);
+  assert.equal(harness.results.scrollTop, 47);
+  assert.deepEqual(harness.state.search, stateBeforeClose);
+  assert.equal(harness.searchMatchCase.checked, true);
+  assert.equal(harness.scopeInput.value, "row-titles");
+  assert.equal(harness.results.attributes.get("aria-activedescendant"), "searchResult-1");
+  assert.equal(harness.resultItems[1].attributes.get("aria-selected"), "true");
+
+  harness.controller.closeSearch();
+  doc.setCell(1, 0, "Zeal");
+  harness.controller.notifyDocumentChanged(doc);
+  await harness.controller.showSearch();
+  assert.equal(harness.summary.classList.contains("stale"), false);
+  assert.equal(harness.summary.textContent, "1 results");
+  assert.match(harness.results.innerHTML, /needle/);
+  assert.doesNotMatch(harness.results.innerHTML, /Display row 2/);
+  harness.controller.findNext();
+  assert.deepEqual(harness.selection.focus, { row: 2, column: 0 });
 });
 
 test("JSON Find uses the shared modal and Find All navigates exact editor offsets", async () => {
