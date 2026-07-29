@@ -15,15 +15,16 @@ function scheduleUiFlush(callback) {
   queueMicrotask(callback);
 }
 
+const PROBLEM_PRESENTATION_FIELDS = [
+  "id", "fileKey", "fileName", "rowIndex", "columnIndex",
+  "severity", "message", "ruleId", "profile", "navigationDisabled",
+  "columnName", "rowLabel", "recordKey", "offendingValue", "filePath",
+  "startCharacter", "endCharacter", "endRowIndex"
+];
+
 export function sameProblemsPresentation(left = [], right = []) {
   if (left.length !== right.length) return false;
-  const fields = [
-    "id", "fileKey", "fileName", "rowIndex", "columnIndex",
-    "severity", "message", "ruleId", "profile", "navigationDisabled",
-    "columnName", "rowLabel", "recordKey", "offendingValue", "filePath",
-    "startCharacter", "endCharacter", "endRowIndex"
-  ];
-  return left.every((diagnostic, index) => fields.every(
+  return left.every((diagnostic, index) => PROBLEM_PRESENTATION_FIELDS.every(
     (field) => (diagnostic?.[field] ?? null) === (right[index]?.[field] ?? null)
   ));
 }
