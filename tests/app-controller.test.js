@@ -50,7 +50,11 @@ import {
   DEFAULT_GRID_FONT,
   appSettingsVisualControls,
   fontLabelFromFamily,
-  normaliseGridFont
+  jsonRuleActionOptions,
+  normaliseGridFont,
+  normalizeJsonDiagnosticRules,
+  normalizeJsonRuleAction,
+  parseJsonKeyUsageIdStart
 } from "../src/ui/app-settings-policy.js";
 import {
   DEFAULT_DOCK_LAYOUT,
@@ -1555,6 +1559,37 @@ test("Settings modal exposes immediate visual settings without save cancel apply
   assert.equal(fontLabelFromFamily("'Cascadia Mono', Consolas"), "Cascadia Mono");
   assert.equal(Object.hasOwn(controls, "choices"), false);
   assert.match(css, /\.settings-segmented/);
+});
+
+test("JSON diagnostic settings policy preserves actions, compatibility, and defaults", () => {
+  assert.equal(normalizeJsonRuleAction("ignore"), "ignore");
+  assert.equal(normalizeJsonRuleAction("warn"), "warn");
+  assert.equal(normalizeJsonRuleAction("error"), "warn");
+  assert.equal(normalizeJsonRuleAction("unknown", "ignore"), "ignore");
+  assert.deepEqual(normalizeJsonDiagnosticRules(), {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "warn" },
+    keyUsage: { action: "ignore", idStart: 40000 }
+  });
+  assert.deepEqual(normalizeJsonDiagnosticRules({
+    duplicateIds: { action: "error" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  }), {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  });
+});
+
+test("JSON diagnostic settings policy renders options and parses finite thresholds", () => {
+  assert.equal(jsonRuleActionOptions("warn", (key) => `[${key}]`),
+    '<option value="ignore">[settings.jsonActionOff]</option>'
+    + '<option value="warn" selected>[settings.jsonActionWarning]</option>');
+  assert.equal(parseJsonKeyUsageIdStart(" 56000.5 "), 56000.5);
+  assert.equal(parseJsonKeyUsageIdStart("0"), 0);
+  assert.equal(parseJsonKeyUsageIdStart(""), null);
+  assert.equal(parseJsonKeyUsageIdStart("Infinity"), null);
 });
 
 test("Problems panel rendering is skipped while hidden and cached while unchanged", () => {
