@@ -2,7 +2,6 @@ import { TableDocument } from "../../core/table-model.js";
 import { JsonDocument } from "../../core/json-document.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import {
-  documentRevision,
   documentTextSnapshot,
   isJsonDocument,
   isTableDocument,

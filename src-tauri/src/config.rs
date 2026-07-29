@@ -86,8 +86,7 @@ where
         // Older TXTEditor builds exposed Error even though it ran the same
         // JSON check as Warning. Preserve the enabled rule while migrating
         // that persisted value to the two-state Off/Warning contract.
-        Some("error") => JsonDiagnosticAction::Warn,
-        Some("warn") => JsonDiagnosticAction::Warn,
+        Some("error") | Some("warn") => JsonDiagnosticAction::Warn,
         // Persisted editor config is migrated field-by-field. An unknown
         // future value must not disable a rule or reset unrelated settings.
         _ => JsonDiagnosticAction::Warn,

@@ -44,7 +44,6 @@ import {
   lspHoverReady,
   lspOpenDocumentPolicy,
   lspUpdateDocumentPolicy,
-  lspWorkspaceKey,
   lspWorkspaceSessionPolicy
 } from "../../core/lsp-session-policy.js";
 import { createLspReadinessState, createLspTrafficState, recordLspReadinessSample, recordLspTrafficSample } from "../../core/perf-instrumentation.js";
