@@ -6,25 +6,52 @@ TXTeditor is a personal project. I am not an experienced programmer, and most of
 
 TXTeditor is not affiliated with, endorsed by, or connected to Blizzard Entertainment.
 
+## Download
+
+Windows builds are available from the [GitHub Releases page](https://github.com/yinyin333333/TXTeditor/releases). Download the archive or installer for the version you want to use, extract it when necessary, and run TXTeditor.
+
 ## Features
 
-- Open individual `.txt` files and supported D2R JSON string files.
-- Open a D2R `data/global/excel` style folder or workspace, including subfolders when desired.
+### Table Editing
+
+- Edit Diablo II-style tab-separated data in a canvas-rendered, virtualized grid designed for large tables.
+- Select cells, rectangular ranges, complete rows, or complete columns with the mouse and keyboard.
+- Copy, cut, and paste tabular data, including repeating copied data across compatible multi-cell selections.
+- Fill a selection with one value, create incrementing fills, and apply addition, subtraction, multiplication, or division to selected cells.
+- Add, insert, clone, clear, hide, unhide, or delete rows and columns.
+- Resize rows and columns manually, fit all columns or only the selected columns to their contents, or automatically apply Resize To Fit when a file opens.
+- Freeze the first row and first column independently; the selected freeze state is remembered between runs.
+- Undo and redo supported editing operations within the current document session.
+- Add temporary color highlights to cells and remove them without modifying the underlying file data.
+
+### Files, Workspaces, and Navigation
+
+- Open individual `.txt` files, supported D2R JSON string files, or an entire `data/global/excel` style folder.
+- Include subfolders in a workspace or exclude them through Settings.
 - Open file paths passed to TXTeditor when the desktop app starts.
-- Edit tab-separated data in a grid interface.
-- Edit `data/local/lng/strings/*.json` localization files in a dedicated JSON code editor.
-- Canvas virtualization for large files.
-- Independently freeze the first row and first column; the selected state is remembered between runs.
-- Grid zoom, forward and backward search, undo, and redo.
-- Copy, cut, paste, fill, and simple arithmetic operations on selections, including filling a multi-cell selection by pasting one value.
-- Hide and unhide rows or columns.
-- Optionally lock mouse-based row-height and column-width resizing.
-- D2R-aware linting in the live Problems panel.
-- Select either Vector-LSP or Legacy Lint as the active lint engine.
-- Run cross-file lint rules against the active workspace or the sibling files of an individually opened table.
-- Optionally lint supported D2R JSON string files with Vector-LSP.
-- Click a diagnostic to jump to the matching table cell or JSON range.
-- Configure versioned schema and bundled reference data, or use RotW and 2.4 profiles with Legacy Lint.
+- Work with multiple open documents in tabs and filter files in the Explorer panel.
+- Search forward or backward, find all matches, replace one or all matches, limit searches to row or column titles, and jump directly to a displayed row number.
+- Use the active-cell input bar for long values while keeping cell diagnostics visible.
+- Detect external changes to open JSON documents and choose whether to reload the disk version or keep the editor version.
+
+### Linting and Diagnostics
+
+- Select either Vector-LSP or Legacy Lint directly from the Problems toolbar.
+- Choose one game version for the complete lint session: `3.2`, `3.1`, `2.4`, or `1.13c`.
+- Run cross-file rules against the active workspace or the sibling files of an individually opened table, with bundled reference data filling in files that are absent from the mod.
+- View live errors, warnings, cell markers, precise expression ranges, and overview-ruler markers.
+- Click a diagnostic to open its table cell or JSON range, or copy diagnostic details for bug reports.
+- Enable Vector-LSP hover information and go-to-definition navigation for supported references.
+- Configure Legacy Lint rules and severities, or configure Vector-LSP and optional localization JSON diagnostics.
+
+### Customization
+
+- Switch between dark and light themes, choose a grid font, and optionally colorize columns.
+- Zoom from 10% to 800%, optionally remember the last zoom level, or reset to 100%.
+- Lock mouse-based row-height and column-width resizing when accidental resizing is undesirable.
+- Place the Explorer and Problems panels on the left, right, top, or bottom and reset the layout when needed.
+- Customize command and grid-scrolling shortcuts from the Shortcuts window.
+- Use the localized interface available in 13 supported locales.
 
 ## JSON Editing
 
@@ -48,7 +75,16 @@ TXTeditor uses a [modified fork of vector-lsp](https://github.com/yinyin333333/v
 
 ### Lint Profiles
 
-Legacy Lint includes RotW and 2.4 profiles. These rules are based on the behavior of [d2rlint](https://github.com/eezstreet/d2rlint), the original D2R linting tool made by eezstreet.
+TXTeditor exposes one game-version selector for both lint engines. Selecting a version keeps the active rules, schema, and bundled reference data aligned.
+
+| Game version | Vector-LSP | Legacy Lint | Bundled reference data |
+| --- | --- | --- | --- |
+| 3.2 | Supported | RotW rules | 3.2 |
+| 3.1 | Supported | RotW rules | 3.1 |
+| 2.4 | Supported | 2.4 rules | 2.4 |
+| 1.13c | Supported | 1.13c rules | 1.13c |
+
+The Legacy Lint rules are based on the behavior of [d2rlint](https://github.com/eezstreet/d2rlint), the original D2R linting tool made by eezstreet. Version-specific behavior has since been extended inside TXTeditor.
 
 The RotW-oriented lint behavior has been checked against the project's current d2rlint-compatible fixture/oracle workflow. Other data sets, mod variants, or future rule changes may still expose bugs or differences.
 
@@ -93,6 +129,38 @@ npm run dev
 npm run tauri -- dev
 npm test
 ```
+
+## Contributing
+
+Development work is integrated through the `next` branch. `main` represents released versions and receives changes from `next` when a release is prepared.
+
+1. Fork the repository and clone your fork.
+2. Add this repository as `upstream` if needed.
+3. Fetch the latest `next` branch and create a focused work branch from it.
+4. Make and test your changes on that work branch.
+5. Push the work branch to your fork and open a pull request targeting `yinyin333333/TXTeditor:next`.
+
+Example:
+
+```bash
+git clone https://github.com/YOUR-NAME/TXTeditor.git
+cd TXTeditor
+git remote add upstream https://github.com/yinyin333333/TXTeditor.git
+git fetch upstream
+git switch -c fix/short-description upstream/next
+
+# Make and test your changes.
+git push -u origin fix/short-description
+```
+
+Keep each pull request focused on one change and describe both the user-visible result and the validation performed. For most changes, run:
+
+```bash
+npm test
+npm run build:web
+```
+
+Changes involving the Tauri/Rust backend should also be checked with the relevant Cargo commands from `src-tauri`. Build outputs, dependencies, temporary files, and local reference material should not be committed.
 
 ## Shortcuts
 
