@@ -1205,6 +1205,16 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
     String(diagnostic?.message ?? "").includes("Unknown code")
     && String(diagnostic?.message ?? "").includes("four-character code and letter case")
   ));
+  const assertNoReferenceSourceProvenance = (content, label) => {
+    const legacyProvenance = [
+      "Source:",
+      "TXT file in the same folder (game version 3.2)",
+      "TXT file in the current workspace (game version 3.2)",
+      "Built-in reference data (game version 3.2)"
+    ];
+    const found = legacyProvenance.find((text) => content.includes(text));
+    if (found) throw new Error(`${label} unexpectedly exposed source provenance: ${content}`);
+  };
   const waitForDiagnostics = (uri, startIndex, predicate, label) => withTimeout(
     client.waitForNext((message) => (
       message.method === "textDocument/publishDiagnostics"
@@ -1283,15 +1293,11 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       throw new Error(`sibling mod 4CC was diagnosed: ${JSON.stringify(initialMagic.params)}`);
     }
     const siblingHover = await hoverCell(magicUri, 1, "Smoke Prefix", "sibling source hover");
-    if (!siblingHover.includes("`modx` → `modx`")
-      || !siblingHover.includes("TXT file in the same folder (game version 3.2)")) {
-      throw new Error(`sibling source/version hover changed: ${siblingHover}`);
-    }
+    if (!siblingHover.includes("`modx` → `modx`")) throw new Error(`sibling source hover changed: ${siblingHover}`);
+    assertNoReferenceSourceProvenance(siblingHover, "sibling source hover");
     const staffHover = await hoverCell(magicUri, 2, "Smoke Staff", "staff fixed4 hover");
-    if (!staffHover.includes("`staff` → `staf`")
-      || !staffHover.includes("TXT file in the same folder (game version 3.2)")) {
-      throw new Error(`MagicPrefix staff fixed4 hover changed: ${staffHover}`);
-    }
+    if (!staffHover.includes("`staff` → `staf`")) throw new Error(`MagicPrefix staff fixed4 hover changed: ${staffHover}`);
+    assertNoReferenceSourceProvenance(staffHover, "MagicPrefix staff fixed4 hover");
 
     const suffixOpenStart = client.messages.length;
     client.notify("textDocument/didOpen", {
@@ -1307,10 +1313,8 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       throw new Error(`MagicSuffix ring fixed4 value was diagnosed: ${JSON.stringify(initialSuffix.params)}`);
     }
     const ringHover = await hoverCell(suffixUri, 1, "Smoke Ring", "ring fixed4 hover");
-    if (!ringHover.includes("`ring␠␠` → `ring`")
-      || !ringHover.includes("TXT file in the same folder (game version 3.2)")) {
-      throw new Error(`MagicSuffix ring fixed4 hover changed: ${ringHover}`);
-    }
+    if (!ringHover.includes("`ring␠␠` → `ring`")) throw new Error(`MagicSuffix ring fixed4 hover changed: ${ringHover}`);
+    assertNoReferenceSourceProvenance(ringHover, "MagicSuffix ring fixed4 hover");
 
     const shadowStart = client.messages.length;
     client.notify("textDocument/didOpen", {
@@ -1379,9 +1383,8 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       "sibling didClose latest disk restore"
     );
     const restoredSiblingHover = await hoverCell(magicUri, 1, "Smoke Prefix", "restored sibling hover");
-    if (!restoredSiblingHover.includes("TXT file in the same folder (game version 3.2)")) {
-      throw new Error(`didClose did not restore sibling source: ${restoredSiblingHover}`);
-    }
+    if (!restoredSiblingHover.includes("`modx` → `modx`")) throw new Error(`didClose did not restore sibling value: ${restoredSiblingHover}`);
+    assertNoReferenceSourceProvenance(restoredSiblingHover, "restored sibling hover");
 
     const siblingDeleteOpenStart = client.messages.length;
     client.notify("textDocument/didOpen", {
@@ -1420,9 +1423,8 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       "reference-root value diagnostics"
     );
     const referenceRootHover = await hoverCell(magicUri, 1, "Smoke Prefix", "reference-root source hover");
-    if (!referenceRootHover.includes("TXT file in the current workspace (game version 3.2)")) {
-      throw new Error(`explicit reference-root source hover changed: ${referenceRootHover}`);
-    }
+    if (!referenceRootHover.includes("`root` → `root`")) throw new Error(`explicit reference-root value hover changed: ${referenceRootHover}`);
+    assertNoReferenceSourceProvenance(referenceRootHover, "reference-root source hover");
 
     const referenceDeleteOpenStart = client.messages.length;
     client.notify("textDocument/didOpen", {
@@ -1461,10 +1463,8 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       "bundled fixed4 diagnostics"
     );
     const bundledHover = await hoverCell(magicUri, 1, "Smoke Prefix", "bundled source hover");
-    if (!bundledHover.includes("`staff` → `staf`")
-      || !bundledHover.includes("Built-in reference data (game version 3.2)")) {
-      throw new Error(`bundled fixed4/source hover changed: ${bundledHover}`);
-    }
+    if (!bundledHover.includes("`staff` → `staf`")) throw new Error(`bundled fixed4 hover changed: ${bundledHover}`);
+    assertNoReferenceSourceProvenance(bundledHover, "bundled source hover");
 
     return {
       initialize: "pass",
@@ -1474,7 +1474,7 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       siblingMod4ccDiagnostics: referenceDiagnostics(initialMagic).length,
       staffFixed4Diagnostics: referenceDiagnostics(initialMagic).length,
       ringFixed4Diagnostics: referenceDiagnostics(initialSuffix).length,
-      siblingHover: siblingHover.match(/Source: ([^\n]+)/)?.[1] ?? siblingHover,
+      siblingHover: siblingHover.match(/`modx` → `modx`/)?.[0] ?? siblingHover,
       staffFixed4Hover: staffHover.match(/`staff` → `staf`/)?.[0] ?? staffHover,
       ringFixed4Hover: ringHover.match(/`ring␠␠` → `ring`/)?.[0] ?? ringHover,
       openShadowDiagnostics: referenceDiagnostics(shadowedMagic).length,
@@ -1484,10 +1484,10 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
       didCloseRestoreDiagnostics: referenceDiagnostics(closeRestore).length,
       referenceFallbackDiagnostics: referenceDiagnostics(referenceFallbackError).length,
       referenceRootValueDiagnostics: referenceDiagnostics(rootValueClear).length,
-      referenceRootHover: referenceRootHover.match(/Source: ([^\n]+)/)?.[1] ?? referenceRootHover,
+      referenceRootHover: referenceRootHover.match(/`root` → `root`/)?.[0] ?? referenceRootHover,
       bundledFallbackDiagnostics: referenceDiagnostics(bundledFallbackError).length,
       bundledValueDiagnostics: referenceDiagnostics(bundledValueClear).length,
-      bundledHover: bundledHover.match(/Source: ([^\n]+)/)?.[1] ?? bundledHover,
+      bundledHover: bundledHover.match(/`staff` → `staf`/)?.[0] ?? bundledHover,
       stderr: client.stderr.trim()
     };
   } finally {
