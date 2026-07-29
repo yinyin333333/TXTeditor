@@ -47,6 +47,43 @@ export const FONT_OPTIONS = [
   ["MS Mincho", "'MS Mincho', serif"]
 ];
 
+const JSON_RULE_ACTIONS = [
+  ["ignore", "settings.jsonActionOff"],
+  ["warn", "settings.jsonActionWarning"]
+];
+const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
+
+export function normalizeJsonRuleAction(value, fallback = "warn") {
+  if (value === "error") return "warn";
+  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
+}
+
+export function normalizeJsonDiagnosticRules(value) {
+  return {
+    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
+    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
+    keyUsage: {
+      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
+      idStart: Number.isFinite(value?.keyUsage?.idStart)
+        ? value.keyUsage.idStart
+        : DEFAULT_JSON_KEY_USAGE_ID_START
+    }
+  };
+}
+
+export function jsonRuleActionOptions(selected, translate = tText) {
+  return JSON_RULE_ACTIONS.map(([value, labelKey]) =>
+    `<option value="${value}"${selected === value ? " selected" : ""}>${translate(labelKey)}</option>`
+  ).join("");
+}
+
+export function parseJsonKeyUsageIdStart(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function normaliseGridFont(value) {
   if (!value || value === "custom") return DEFAULT_GRID_FONT;
   return String(value).trim() || DEFAULT_GRID_FONT;

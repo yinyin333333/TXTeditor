@@ -20,8 +20,12 @@ import {
 } from "../../core/lint-controller-policy.js";
 import {
   appSettingsVisualControls,
+  jsonRuleActionOptions,
   normaliseGridFont,
-  normaliseZoomLevel
+  normaliseZoomLevel,
+  normalizeJsonDiagnosticRules,
+  normalizeJsonRuleAction,
+  parseJsonKeyUsageIdStart
 } from "../app-settings-policy.js";
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
@@ -35,43 +39,6 @@ import {
 
 export function shouldCloseSettingsKey(key) {
   return key === "Escape";
-}
-
-const JSON_RULE_ACTIONS = [
-  ["ignore", "settings.jsonActionOff"],
-  ["warn", "settings.jsonActionWarning"]
-];
-const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
-
-function normalizeJsonRuleAction(value, fallback = "warn") {
-  if (value === "error") return "warn";
-  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
-}
-
-function normalizeJsonDiagnosticRules(value) {
-  return {
-    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
-    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
-    keyUsage: {
-      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
-      idStart: Number.isFinite(value?.keyUsage?.idStart)
-        ? value.keyUsage.idStart
-        : DEFAULT_JSON_KEY_USAGE_ID_START
-    }
-  };
-}
-
-function jsonRuleActionOptions(selected, translate = tText) {
-  return JSON_RULE_ACTIONS.map(([value, labelKey]) =>
-    `<option value="${value}"${selected === value ? " selected" : ""}>${translate(labelKey)}</option>`
-  ).join("");
-}
-
-function parseJsonKeyUsageIdStart(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const parsed = Number(text);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function bindEscapeToClose(close) {
