@@ -1,6 +1,16 @@
 import { isTauriRuntime, lspStop } from "../../core/io.js";
 import { resetLspDocumentState } from "../../core/lsp-document-state.js";
 
+export async function claimLspSession(state, reserveGeneration) {
+  if (!isTauriRuntime()) return 0;
+  const generation = Number(await reserveGeneration());
+  if (!Number.isSafeInteger(generation) || generation <= 0) {
+    throw new Error("Native LSP generation reservation returned an invalid generation");
+  }
+  Object.assign(state.lsp, { started: false, generation, readiness: "stopped", openFileCount: 0 });
+  return generation;
+}
+
 export function stopLspSession({
   state,
   reason,

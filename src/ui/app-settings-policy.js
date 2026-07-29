@@ -52,6 +52,13 @@ export function normaliseGridFont(value) {
   return String(value).trim() || DEFAULT_GRID_FONT;
 }
 
+export function normaliseZoomLevel(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return 1;
+  const zoom = Number(value);
+  if (!Number.isFinite(zoom)) return 1;
+  return Math.min(8, Math.max(0.1, Math.round(zoom * 10) / 10));
+}
+
 export function fontLabelFromFamily(fontFamily) {
   return String(fontFamily).split(",")[0].replaceAll("'", "").replaceAll("\"", "").trim() || "Selected Font";
 }
@@ -59,9 +66,9 @@ export function fontLabelFromFamily(fontFamily) {
 export function appSettingsVisualControls({
   colorizeColumns = false,
   mouseResizeLocked = false,
+  autoResizeToFitOnOpen = false,
+  keepZoomLevel = false,
   excludeWorkspaceSubfolders = false,
-  vectorLspHover = true,
-  legacyLintEngine = false,
   theme = "dark",
   gridFont = DEFAULT_GRID_FONT
 } = {}) {
@@ -72,19 +79,20 @@ export function appSettingsVisualControls({
       label: tText("settings.lockResize"),
       checked: Boolean(mouseResizeLocked)
     },
+    autoResizeToFitOnOpen: {
+      id: "settingsAutoResizeToFitOnOpen",
+      label: tText("settings.autoResizeToFitOnOpen"),
+      checked: Boolean(autoResizeToFitOnOpen)
+    },
+    keepZoomLevel: {
+      id: "settingsKeepZoomLevel",
+      label: tText("settings.keepZoomLevel"),
+      checked: Boolean(keepZoomLevel)
+    },
     workspaceSubfolders: {
       id: "settingsExcludeWorkspaceSubfolders",
       label: tText("settings.excludeSubfolders"),
       checked: Boolean(excludeWorkspaceSubfolders)
-    },
-    vectorHover: {
-      id: "settingsVectorLspHover",
-      label: tText("settings.vectorHover"),
-      checked: Boolean(vectorLspHover),
-      disabled: Boolean(legacyLintEngine),
-      hintId: "settingsVectorLspHoverHint",
-      hintHidden: !legacyLintEngine,
-      hintText: tText("settings.vectorHoverHint")
     },
     font: {
       id: "settingsGridFont",

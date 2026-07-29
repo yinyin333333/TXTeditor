@@ -3,11 +3,13 @@ import {
   isTauriRuntime,
   lspCloseFile,
   lspDefinition,
+  lspFieldMetadata,
   lspHover,
   lspListen,
   lspLogListen,
   lspOpenFile,
   lspReadyListen,
+  lspReserveGeneration,
   lspStart,
   lspStoppedListen,
   lspUpdateFile,
@@ -52,7 +54,7 @@ import { reportBackgroundTaskFailure } from "../../core/background-task-status.j
 import { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
 import { createLspHoverController } from "./lsp-hover-controller.js";
 import { createLspDiagnosticsEventController } from "./lsp-diagnostics-event-controller.js";
-import { stopLspSession } from "./lsp-session-stop.js";
+import { claimLspSession, stopLspSession } from "./lsp-session-stop.js";
 import { tText } from "../../core/i18n.js";
 import { jsonDocumentCanOpen, resyncSavedJsonDocument, syncReadyJsonDocuments, updateJsonLspDocument } from "./json-lsp-document-controller.js";
 export { mapLspDiagnosticToDisplay } from "../lsp-diagnostic-display-policy.js";
@@ -81,6 +83,7 @@ export function createLspController({
   lintPathKey,
   canNavigateJsonDiagnostic = () => false,
   handleWatchedFilesChanged = () => {},
+  reserveLspGeneration = lspReserveGeneration,
   lspHoverRequest = lspHover
 }) {
   state.lsp.generation = Number(state.lsp.generation) || 0;
@@ -88,7 +91,7 @@ export function createLspController({
   state.lsp.openFileCount ??= 0;
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
-  let nextSessionGeneration = Number(state.lsp.generation) || 0;
+  let startReservationSequence = 0;
   const readyGenerations = new Set();
   const stoppedGenerations = new Set();
   // Prevent didOpen for a URI from overtaking its in-flight didClose.
@@ -240,8 +243,11 @@ export function createLspController({
     if (sessionPolicy.action === "sync") {
       return syncOpenDocs();
     }
-    const generation = Math.max(nextSessionGeneration, Number(state.lsp.generation) || 0) + 1;
-    nextSessionGeneration = generation;
+    const reservationSequence = ++startReservationSequence;
+    const reservedGeneration = isTauriRuntime() ? await reserveLspGeneration() : null;
+    if (reservationSequence !== startReservationSequence || !isVectorLintEngine() || state.lint.enabled === false) return;
+    const generation = reservedGeneration == null ? (Number(state.lsp.generation) || 0) + 1 : Number(reservedGeneration);
+    if (!Number.isSafeInteger(generation) || generation <= 0) throw new Error("Native LSP generation reservation returned an invalid generation");
     readyGenerations.clear();
     stoppedGenerations.delete(generation);
     hoverController.invalidateHover(true, "workspace-start");
@@ -621,6 +627,7 @@ export function createLspController({
     return trackedPromise;
   }
   function stopSession(reason = "lint-disabled") {
+    startReservationSequence += 1;
     return stopLspSession({ state, reason, readyGenerations, stoppedGenerations,
       diagnosticsEventController, hoverController, pendingCloses });
   }
@@ -808,6 +815,16 @@ export function createLspController({
     els.host.focus();
   }
 
+  async function fieldMetadata(doc, columnName) {
+    if (!state.lsp.started || state.lsp.readiness !== "ready" || !isTableDocument(doc) || !columnName) return undefined;
+    const uri = docToUri(doc);
+    if (!uri) return undefined;
+    const generation = state.lsp.generation ?? 0;
+    const metadata = await lspFieldMetadata(uri, columnName, generation).catch(() => undefined);
+    if (!state.lsp.started || state.lsp.generation !== generation) return undefined;
+    return metadata;
+  }
+
   function cellHasReference(_row, _col) {
     if (!isVectorLintEngine() || !state.lsp.started || activeDoc()?.kind === "json") return false;
     return Boolean(docToUri(activeDoc()));
@@ -869,6 +886,7 @@ export function createLspController({
     handleDiagnosticsChanged,
     handleUpdateError,
     ensureStandaloneSession,
+    fieldMetadata,
     invalidateHover: hoverController.invalidateHover,
     openDoc,
     pathFromUri,
@@ -889,6 +907,7 @@ export function createLspController({
     rebindSavedDoc,
     requestHover: hoverController.requestHover,
     scheduleHoverPrewarm: hoverController.scheduleHoverPrewarm,
+    claimSession: () => claimLspSession(state, reserveLspGeneration),
     startListeners,
     startWorkspace,
     stopSession,

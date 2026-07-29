@@ -337,6 +337,7 @@ test("closing active standalone tab rebinds the revealed document to its differe
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -456,6 +457,7 @@ test("closing active standalone tab reuses the existing sibling session for the 
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (value) => String(value || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -670,6 +672,7 @@ test("workspace start full invalidation clears semantic Vector-LSP hover cache",
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase(),
       lspHoverRequest: async (...args) => {
         hoverCalls.push(args);
@@ -796,6 +799,7 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => gridCalls.push(["active-problem"]),
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
     });
 
@@ -1015,6 +1019,29 @@ test("Vector-LSP display diagnostics do not invent precise local ranges without 
   assert.equal(diagnostic.isInsertionPoint, false);
   assert.equal(diagnostic.hasPreciseRange, false);
   assert.equal(diagnostic.locationLabel, "Row 5, Col 3");
+});
+
+test("Vector-LSP display diagnostics use server location identities before the file is opened", () => {
+  const diagnostic = mapLspDiagnosticToDisplay({
+    row: 89,
+    col: 34,
+    severity: "error",
+    message: "Reference value not found",
+    data: {
+      displayRowId: "Bone Prison",
+      displayColumnName: "EDmgSymPerCalc"
+    }
+  }, {
+    uri: "file:///monstats.txt",
+    fileKey: "monstats.txt",
+    fileName: "monstats.txt",
+    index: 0,
+    doc: null
+  });
+
+  assert.equal(diagnostic.rowLabel, "Bone Prison");
+  assert.equal(diagnostic.recordKey, "Bone Prison");
+  assert.equal(diagnostic.columnName, "EDmgSymPerCalc");
 });
 
 test("unopened localization JSON diagnostics remain visible but are not editor navigation targets", () => {
@@ -1754,34 +1781,34 @@ test("lint engine selector defaults to Vector-LSP and persists separately from l
 
 test("Settings and Problems controls switch between Vector-LSP and Legacy Lint", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const settingsControls = appSettingsVisualControls({ vectorLspHover: true, legacyLintEngine: true });
+  const settingsControls = appSettingsVisualControls();
   const vectorControls = lintControlsModel({ engine: LINT_ENGINE_VECTOR, lintEnabled: true });
   const legacyControls = lintControlsModel({
     engine: LINT_ENGINE_LEGACY,
     lintEnabled: false,
-    profiles: ["RotW", "2.4"],
-    activeProfile: "2.4",
-    activeReferenceVersion: "3.1",
+    activeGameVersion: "3.1",
     rulesOpen: true
   });
   assert.match(html, /id="lintControls" class="lint-controls"/);
   assert.match(html, /id="lintRulesPanel" class="lint-rules-panel hidden"/);
-  assert.equal(settingsControls.vectorHover.checked, true);
-  assert.equal(settingsControls.vectorHover.disabled, true);
-  assert.equal(settingsControls.vectorHover.hintHidden, false);
+  assert.equal(settingsControls.vectorHover, undefined);
   assert.deepEqual(lintToggleControl(true), { id: "toggle-lint", label: "Lint: On", active: true });
   assert.equal(vectorControls.mode, "vector-lsp");
+  assert.equal(vectorControls.engineSelect.id, "lintEngineSelect");
+  assert.equal(vectorControls.versionSelect.id, "lintGameVersionSelect");
+  assert.deepEqual(vectorControls.hoverButton, {
+    id: "toggle-vector-lsp-hover",
+    label: "Hover: On",
+    active: true,
+    title: "Vector-LSP Hover"
+  });
   assert.deepEqual(vectorControls.settingsButton, { id: "open-settings", label: "Lint Options", title: "Lint options" });
   assert.equal(vectorControls.hideRulesPanel, true);
   assert.equal(legacyControls.mode, "legacy");
-  assert.equal(legacyControls.profileSelect.id, "lintProfileSelect");
-  assert.deepEqual(legacyControls.profileSelect.options, [
-    { value: "RotW", label: "RotW", selected: false },
-    { value: "2.4", label: "2.4", selected: true }
-  ]);
-  assert.equal(legacyControls.referenceSelect.id, "lintReferenceVersionSelect");
-  assert.deepEqual(legacyControls.referenceSelect.options, [
-    { value: "", label: "Profile", selected: false },
+  assert.equal(legacyControls.profileSelect, undefined);
+  assert.equal(legacyControls.referenceSelect, undefined);
+  assert.equal(legacyControls.versionSelect.id, "lintGameVersionSelect");
+  assert.deepEqual(legacyControls.versionSelect.options, [
     { value: "3.2", label: "3.2", selected: false },
     { value: "3.1", label: "3.1", selected: true },
     { value: "2.4", label: "2.4", selected: false },
@@ -2264,6 +2291,7 @@ test("Vector-LSP startup failure replaces the connecting status", async () => {
       addDocument: async () => {},
       applyFreezeToDoc: () => {},
       updateActiveProblemHighlight: () => {},
+      reserveLspGeneration: async () => (Number(state.lsp.generation) || 0) + 1,
       lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase()
     });
 

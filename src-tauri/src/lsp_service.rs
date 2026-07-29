@@ -442,6 +442,32 @@ fn stop_lsp_through_generation(core: &LspManagerCore, generation: u64) -> usize 
     stopped + stop_starting_sessions(&mut manager, |candidate| candidate <= generation)
 }
 
+fn reserve_lsp_generation(core: &LspManagerCore) -> Result<u64, String> {
+    if core.shutdown_requested.load(Ordering::SeqCst) {
+        return Err("LSP manager is stopped".to_string());
+    }
+    let generation = core
+        .latest_requested_generation
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            current.checked_add(1)
+        })
+        .map(|previous| previous + 1)
+        .map_err(|_| "LSP generation counter is exhausted".to_string())?;
+    let mut manager = core
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if manager
+        .active
+        .as_ref()
+        .is_some_and(|active| active.generation < generation)
+    {
+        stop_active_session(&mut manager, "LSP session replaced by a new frontend");
+    }
+    stop_starting_sessions(&mut manager, |candidate| candidate < generation);
+    Ok(generation)
+}
+
 fn is_latest_request(core: &LspManagerCore, generation: u64) -> bool {
     !core.shutdown_requested.load(Ordering::SeqCst)
         && core.latest_requested_generation.load(Ordering::SeqCst) == generation
@@ -1054,6 +1080,16 @@ fn normalize_lsp_locale(value: Option<&str>) -> &'static str {
 }
 
 #[tauri::command]
+pub(crate) async fn lsp_reserve_generation(
+    state: tauri::State<'_, LspManager>,
+) -> Result<u64, String> {
+    let core = Arc::clone(&state.core);
+    tauri::async_runtime::spawn_blocking(move || reserve_lsp_generation(&core))
+        .await
+        .map_err(|error| format!("LSP generation reservation task failed: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
     generation: u64,
@@ -1600,6 +1636,42 @@ pub(crate) async fn lsp_hover(
     Ok(text.map(|t| strip_markdown_for_tooltip(&t)))
 }
 
+#[tauri::command]
+pub(crate) async fn lsp_field_metadata(
+    uri: String,
+    column_name: String,
+    generation: u64,
+    state: tauri::State<'_, LspManager>,
+) -> Result<Option<Value>, String> {
+    let proc = get_lsp_proc(&state, generation)?;
+    let id = proc.next_id.fetch_add(1, Ordering::SeqCst);
+    let (tx, rx) = oneshot::channel();
+    proc.pending.lock().unwrap().insert(id, tx);
+    let send_result = queue_lsp_msg(
+        &proc,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": "vectorLsp.fieldMetadata",
+                "arguments": [{ "uri": uri, "columnName": column_name }]
+            }
+        }),
+    );
+    if let Err(error) = send_result {
+        proc.pending.lock().unwrap().remove(&id);
+        return Err(error);
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| {
+            proc.pending.lock().unwrap().remove(&id);
+            "field metadata timeout".to_string()
+        })?
+        .map_err(|_| "field metadata channel closed".to_string())?
+}
+
 #[derive(Serialize)]
 pub(crate) struct DefinitionLocation {
     uri: String,
@@ -2137,6 +2209,48 @@ mod tests {
         }
         assert_eq!(rx.try_recv().unwrap().unwrap_err(), "LSP manager stopped");
         assert_eq!(manager.shutdown(), 0);
+    }
+
+    fn assert_generation_reservation_reaps_previous_sessions(initial_generation: u64) {
+        let core = test_core(initial_generation);
+        let (process, child) = test_lsp_process(initial_generation);
+        let (tx, mut rx) = oneshot::channel();
+        process.pending.lock().unwrap().insert(7, tx);
+        {
+            let mut state = core.state.lock().unwrap();
+            state.active = Some(ActiveSession {
+                generation: initial_generation,
+                workspace_path: "previous frontend".to_string(),
+                process: Arc::clone(&process),
+                child,
+            });
+            state
+                .starting
+                .insert(initial_generation, spawn_long_running_child());
+        }
+
+        assert_eq!(
+            reserve_lsp_generation(&core).unwrap(),
+            initial_generation + 1
+        );
+        assert!(!process.watchers_active.load(Ordering::SeqCst));
+        assert_eq!(
+            rx.try_recv().unwrap().unwrap_err(),
+            "LSP session replaced by a new frontend"
+        );
+        let state = core.state.lock().unwrap();
+        assert!(state.active.is_none());
+        assert!(state.starting.is_empty());
+    }
+
+    #[test]
+    fn generation_reservation_reaps_generation_one_after_webview_reload() {
+        assert_generation_reservation_reaps_previous_sessions(1);
+    }
+
+    #[test]
+    fn generation_reservation_advances_and_reaps_later_sessions() {
+        assert_generation_reservation_reaps_previous_sessions(5);
     }
 
     #[test]

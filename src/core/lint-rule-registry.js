@@ -1,4 +1,4 @@
-export const PROFILE_OPTIONS = ["RotW", "2.4"];
+export const PROFILE_OPTIONS = ["RotW", "2.4", "1.13c"];
 export const DEFAULT_PROFILE = "RotW";
 import { tTextOr } from "./i18n.js";
 import { legacyRuleGroupLabel, legacyRuleMetadata, normalizeLegacyLintLocale } from "./legacy-lint-i18n.js";

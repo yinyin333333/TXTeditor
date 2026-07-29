@@ -2,7 +2,7 @@ import { STAT_PARAMETER_TUPLES } from "./lint-stat-data.js";
 import { PROFILE_OPTIONS, rule } from "./lint-rule-registry.js";
 import { exactOuterUnquote, fixed4Key, referenceTable } from "./lint-reference-semantics.js";
 import { clean, normalizeToken, rowLabelFor } from "./lint-table.js";
-import { legacyMessage, legacyTerm } from "./legacy-lint-i18n.js";
+import { legacyMessage } from "./legacy-lint-i18n.js";
 
 // D2R lint rule behavior is ported/adapted from d2rlint by eezstreet (GPLv3).
 export const ITEM_LINT_RULES = [
@@ -118,41 +118,35 @@ export function lintNoIllegalGambling(index, ctx) {
 
 export function lintValidStatParameters(index, ctx) {
   const properties = rowsByKey(referenceTable(index, "properties.txt"), "code");
-  const itemStatCostTable = referenceTable(index, "itemstatcost.txt");
-  const itemStatCost = rowsByKey(itemStatCostTable, "stat");
+  const itemStatCost = rowsByKey(referenceTable(index, "itemstatcost.txt"), "stat");
   const skillsTable = referenceTable(index, "skills.txt");
   if (!properties.size || !itemStatCost.size || !skillsTable) return;
-  const skillContext = buildSkillContext(skillsTable, itemStatCostTable);
+  const skillRows = skillsTable.rows?.length ?? 0;
   for (const table of index.tables) {
     const columns = propertyTupleColumns(table);
     if (!columns.length) continue;
-    const usesItemSerialization = table.fileName !== "monprop.txt";
     table.eachRow((row) => {
       for (const tuple of columns) {
         const propertyCode = clean(row.get(tuple.property));
         if (!propertyCode) continue;
         const property = properties.get(normalizeToken(propertyCode));
         if (!property) continue;
-        const values = tupleValues(row, tuple);
-        warnNoncanonicalNumeric(ctx, table, row, values.min);
-        warnNoncanonicalNumeric(ctx, table, row, values.max);
+        const min = tuple.min ? legacyInteger(rowValue(row, tuple.min)) : 0;
+        const max = tuple.max ? legacyInteger(rowValue(row, tuple.max)) : 0;
         for (const stat of propertyStats(property)) {
-          const statRows = stat.stats.map((name) => itemStatCost.get(normalizeToken(name))).filter(Boolean);
-          if (!statRows.length) continue;
-          if (stat.func === "17") warnNoncanonicalNumeric(ctx, table, row, values.param, { namedToken: true });
-          if (stat.func === "18") warnNoncanonicalNumeric(ctx, table, row, values.param);
-          if (stat.func === "11") validateEventSkill(ctx, table, row, values, statRows, skillContext);
-          if (stat.func === "12") validateRandomSkill(ctx, table, row, values, statRows, skillContext);
-          if (stat.func === "18") validateByTimePackedValue(ctx, table, row, values);
-          if (stat.func === "19") validateChargedSkill(ctx, table, row, values, statRows, skillContext);
-          if (stat.func === "22") validateDirectSkill(ctx, table, row, values.param, statRows, skillContext);
-          const completeImplicitLanes = !["5", "6", "7"].includes(stat.func) || statRows.length === stat.stats.length;
-          if (usesItemSerialization && completeImplicitLanes) validateSavedStatSources(ctx, table, row, values, statRows, stat.func);
+          const statRow = itemStatCost.get(normalizeToken(stat.stat));
+          if (!statRow) continue;
+          if (tuple.param && isEncodedSkillStat(statRow)) {
+            validateLegacySkillParameter(skillsTable, ctx, table, row, tuple, propertyCode, skillRows);
+            if (normalizeToken(propertyCode) === "skill-rand") continue;
+          }
+          if (table.fileName !== "monprop.txt") validateLegacySavedStatRange(ctx, table, row, tuple, statRow, min, max, stat.func);
         }
       }
     });
   }
 }
+
 
 function rowsByKey(table, columnName) {
   const rows = new Map();
@@ -230,203 +224,82 @@ function propertyTupleColumns(table) {
 
 function propertyStats(propertyRow) {
   const stats = [];
-  const implicitStatsByFunction = {
-    "5": ["mindamage", "secondary_mindamage", "item_throw_mindamage"],
-    "6": ["maxdamage", "secondary_maxdamage", "item_throw_maxdamage"],
-    "7": ["item_maxdamage_percent", "item_mindamage_percent"],
-    "19": ["item_charged_skill"]
+  const implicitStatByFunction = {
+    "5": "mindamage",
+    "6": "maxdamage",
+    "7": "item_mindamage_percent"
   };
   for (let index = 1; index <= 7; index += 1) {
     const func = clean(rowValue(propertyRow, `func${index}`));
-    const explicitStat = clean(rowValue(propertyRow, `stat${index}`));
-    const implicitStats = implicitStatsByFunction[func];
-    const slotStats = implicitStats ?? (explicitStat ? [explicitStat] : []);
-    if (slotStats.length) stats.push({ func, stats: slotStats });
+    let stat = clean(rowValue(propertyRow, `stat${index}`));
+    if (!stat && implicitStatByFunction[func]) stat = implicitStatByFunction[func];
+    if (stat && func !== "17") stats.push({ func, stat });
   }
   return stats;
 }
 
-function tupleValues(row, tuple) {
-  return {
-    param: parsedTupleInteger(row, tuple.param),
-    min: parsedTupleInteger(row, tuple.min),
-    max: parsedTupleInteger(row, tuple.max)
-  };
+function legacyInteger(value) {
+  const text = String(value ?? "");
+  return text === "" ? 0 : Number.parseInt(text, 10);
 }
 
-function parsedTupleInteger(row, columnName) {
-  const raw = columnName ? String(rowValue(row, columnName) ?? "") : "";
-  const blank = raw === "";
-  const match = /^-?\d+/.exec(raw);
-  let value = 0;
-  if (match) {
-    const parsed = BigInt(match[0]);
-    if (parsed > 2147483647n) value = 2147483647;
-    else if (parsed < -2147483648n) value = -2147483648;
-    else value = Number(parsed);
+function isEncodedSkillStat(itemStatRow) {
+  const encode = clean(rowValue(itemStatRow, "encode"));
+  return encode === "1" || encode === "2" || encode === "3";
+}
+
+function validateLegacySkillParameter(skillsTable, ctx, table, row, tuple, propertyCode, skillRows) {
+  if (normalizeToken(propertyCode) === "skill-rand") return;
+  const parameter = String(rowValue(row, tuple.param) ?? "");
+  if (!parameter) return;
+  let skillId = Number.parseInt(parameter, 10);
+  if (Number.isNaN(skillId)) {
+    let found = false;
+    skillsTable.eachRow((skill, id) => {
+      if (found) return;
+      const name = String(rowValue(skill, skillsTable.hasColumn("skill") ? "skill" : "id") ?? "");
+      if (name === parameter || name.toLocaleLowerCase() === parameter) {
+        skillId = id;
+        found = true;
+      }
+    });
+    if (!found) {
+      ctx.add(table, row.rowIndex, tuple.param, legacyMessage("items.unknownSkill", { column: tuple.param, value: parameter }));
+      return;
+    }
   }
-  return {
-    columnName,
-    raw,
-    blank,
-    value,
-    canonical: blank || /^-?\d+$/.test(raw),
-    numericPrefix: Boolean(match)
-  };
+  if (skillRows < skillId) {
+    ctx.add(table, row.rowIndex, tuple.param, legacyMessage("items.skillOutOfRange", { column: tuple.param, skillId, maximum: skillRows }));
+  }
 }
 
-function warnNoncanonicalNumeric(ctx, table, row, parsed, { namedToken = false } = {}) {
-  if (!parsed.columnName || parsed.blank || parsed.canonical) return;
-  const behavior = parsed.numericPrefix
-    ? `the game reads the initial integer as ${parsed.value}`
-    : namedToken
-      ? "the game tries it as a skill name and uses 0 if no name matches"
-      : "the game reads it as 0";
-  const message = parsed.numericPrefix
-    ? legacyMessage("items.statParameterNumericPrefix", { column: parsed.columnName, value: parsed.raw, effective: parsed.value })
-    : namedToken
-      ? legacyMessage("items.statParameterSkillFallback", { column: parsed.columnName, value: parsed.raw })
-      : legacyMessage("items.statParameterZeroFallback", { column: parsed.columnName, value: parsed.raw });
-  ctx.add(table, row.rowIndex, parsed.columnName, message, {
-    severity: "warning",
-    d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${parsed.columnName}' value '${parsed.raw}' is not a normal integer; ${behavior}. Use a plain whole number or valid skill name.`
-  });
-}
-
-function savedStatBounds(statRows) {
-  return statRows.map((statRow) => {
-    const saveBits = integerFromRow(statRow, "save bits");
-    const saveAdd = integerFromRow(statRow, "save add") ?? 0;
-    if (saveBits === null || saveBits <= 0) return null;
-    return { min: -saveAdd, max: (2 ** saveBits - 1) - saveAdd };
-  }).filter(Boolean);
-}
-
-function validateSavedStatSources(ctx, table, row, values, statRows, funcValue) {
-  if (["18", "19", "20", "23", "36"].includes(funcValue)) return;
-  let sources;
-  if (funcValue === "11") sources = [values.min.value === 0 ? { ...values.min, value: 5 } : values.min];
-  else if (funcValue === "15") sources = [values.min];
-  else if (funcValue === "12") sources = [values.param];
-  else if (funcValue === "16") sources = [values.max];
-  else if (funcValue === "17") sources = values.param.value !== 0 ? [values.param] : [values.min, values.max];
-  else sources = [values.min, values.max];
-  const bounds = savedStatBounds(statRows);
-  if (!bounds.length) return;
-  for (const source of sources) validateValueAgainstAnySavedRange(ctx, table, row, source, bounds);
-}
-
-function validateValueAgainstAnySavedRange(ctx, table, row, source, bounds) {
-  if (!source.columnName || bounds.some((bound) => source.value >= bound.min && source.value <= bound.max)) return;
-  const lower = Math.min(...bounds.map((bound) => bound.min));
-  const upper = Math.max(...bounds.map((bound) => bound.max));
+function validateLegacySavedStatRange(ctx, table, row, tuple, itemStatRow, min, max, funcValue) {
+  const saveBits = legacyInteger(rowValue(itemStatRow, "save bits"));
+  const saveAdd = legacyInteger(rowValue(itemStatRow, "save add"));
+  if (Number.isNaN(saveBits) || Number.isNaN(saveAdd) || saveBits <= 0) return;
+  const maximum = 2 ** saveBits - saveAdd;
   const label = rowLabelFor(table, row.rowIndex);
-  const direction = source.value < lower ? `below the minimum ${lower}` : `above the maximum ${upper}`;
-  const message = source.value < lower
-    ? legacyMessage("items.statParameterBelowRange", { column: source.columnName, value: source.value, lower, upper })
-    : legacyMessage("items.statParameterAboveRange", { column: source.columnName, value: source.value, lower, upper });
-  ctx.add(table, row.rowIndex, source.columnName, message, {
-    severity: "error",
-    d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${source.columnName}': value (${source.value}) ${direction} for '${label}'`
-  });
-}
-
-function buildSkillContext(skillsTable, itemStatCostTable) {
-  const idsByName = new Map();
-  let skillCount = 0;
-  skillsTable.eachRow((row) => {
-    const rawName = String(rowValue(row, skillsTable.hasColumn("skill") ? "skill" : "id") ?? "");
-    if (rawName && !idsByName.has(rawName.toLowerCase())) idsByName.set(rawName.toLowerCase(), skillCount);
-    skillCount += 1;
-  });
-  let levelBits = 6;
-  if (itemStatCostTable?.hasColumn("stuff") && itemStatCostTable.rows?.length > 1) {
-    const candidate = integerValue(itemStatCostTable.rows[1]?.[itemStatCostTable.columnIndex("stuff")]);
-    if (candidate !== null && candidate >= 1 && candidate <= 8) levelBits = candidate;
+  if (tuple.min && min > maximum && funcValue !== "16") {
+    ctx.add(table, row.rowIndex, tuple.min, legacyMessage("items.statParameterAboveRange", { column: tuple.min, value: min, lower: -saveAdd, upper: maximum }), {
+      d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${tuple.min}': value (${min}) above save bits maximum (${maximum}) for '${label}'`
+    });
   }
-  return { count: skillCount, idsByName, levelBits };
-}
-
-function saveParamBits(statRows) {
-  const bits = statRows.map((row) => integerFromRow(row, "save param bits")).find((value) => value !== null);
-  return bits === undefined ? null : bits;
-}
-
-function validateSkillReference(ctx, table, row, parsed, statRows, skillContext, { packedLevel = false, warnNumeric = true } = {}) {
-  if (!parsed.columnName) return;
-  const raw = parsed.raw;
-  let skillId;
-  if (!raw) skillId = 0;
-  else if (parsed.numericPrefix) {
-    if (warnNumeric) warnNoncanonicalNumeric(ctx, table, row, parsed);
-    skillId = parsed.value;
-  } else if (/^\s|\s$|^\+\d/.test(raw)) {
-    warnNoncanonicalNumeric(ctx, table, row, parsed, { namedToken: true });
-    skillId = 0;
-  } else if (skillContext.idsByName.has(raw.toLowerCase())) {
-    skillId = skillContext.idsByName.get(raw.toLowerCase());
-  } else {
-    ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.unknownSkill", { column: parsed.columnName, value: raw }), { severity: "error" });
-    return;
+  if (tuple.max && max > maximum && funcValue !== "15") {
+    ctx.add(table, row.rowIndex, tuple.max, legacyMessage("items.statParameterAboveRange", { column: tuple.max, value: max, lower: -saveAdd, upper: maximum }), {
+      d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${tuple.max}': value (${max}) above save bits maximum (${maximum}) for '${label}'`
+    });
   }
-  const bits = saveParamBits(statRows);
-  const layoutBits = packedLevel ? skillContext.levelBits : 0;
-  const storedMax = bits === null ? Number.POSITIVE_INFINITY : bits > layoutBits ? (2 ** (bits - layoutBits)) - 1 : 0;
-  const rowMax = Math.max(-1, skillContext.count - 1);
-  const maximum = Math.min(rowMax, storedMax);
-  if (skillId < 0 || skillId > maximum) {
-    ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.skillOutOfRange", { column: parsed.columnName, skillId, maximum }), { severity: "error" });
+  if (clean(rowValue(itemStatRow, "signed")) !== "1" || funcValue === "18" || funcValue === "19") return;
+  if (tuple.min && min < -saveAdd && funcValue !== "16") {
+    ctx.add(table, row.rowIndex, tuple.min, legacyMessage("items.statParameterBelowRange", { column: tuple.min, value: min, lower: -saveAdd, upper: maximum }), {
+      d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${tuple.min}': value (${min}) below save add minimum (${-saveAdd}) for '${label}'`
+    });
   }
-}
-
-function validateDirectSkill(ctx, table, row, param, statRows, skillContext) {
-  validateSkillReference(ctx, table, row, param, statRows, skillContext);
-}
-
-function validateEventSkill(ctx, table, row, values, statRows, skillContext) {
-  validateSkillReference(ctx, table, row, values.param, statRows, skillContext, { packedLevel: true });
-  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "eventSkillLevel");
-}
-
-function validateRandomSkill(ctx, table, row, values, statRows, skillContext) {
-  warnNoncanonicalNumeric(ctx, table, row, values.param);
-  validateSkillReference(ctx, table, row, values.min, statRows, skillContext, { warnNumeric: false });
-  validateSkillReference(ctx, table, row, values.max, statRows, skillContext, { warnNumeric: false });
-}
-
-function validateChargedSkill(ctx, table, row, values, statRows, skillContext) {
-  validateSkillReference(ctx, table, row, values.param, statRows, skillContext, { packedLevel: true });
-  validatePackedLevel(ctx, table, row, values.max, skillContext.levelBits, "chargedSkillLevel");
-  if (values.min.value > 255) {
-    ctx.add(table, row.rowIndex, values.min.columnName, legacyMessage("items.chargeCap", { column: values.min.columnName, value: values.min.value }), { severity: "error" });
+  if (tuple.max && max < -saveAdd && funcValue !== "15") {
+    ctx.add(table, row.rowIndex, tuple.max, legacyMessage("items.statParameterBelowRange", { column: tuple.max, value: max, lower: -saveAdd, upper: maximum }), {
+      d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: '${tuple.max}': value (${max}) below save add minimum (${-saveAdd}) for '${label}'`
+    });
   }
-}
-
-function validatePackedLevel(ctx, table, row, parsed, levelBits, labelTermKey) {
-  const maximum = (2 ** levelBits) - 1;
-  if (parsed.value > maximum) ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.valueMaximum", {
-    column: parsed.columnName,
-    label: legacyTerm(labelTermKey),
-    value: parsed.value,
-    maximum
-  }), { severity: "error" });
-}
-
-function validateByTimePackedValue(ctx, table, row, values) {
-  validateSemanticRange(ctx, table, row, values.param, 0, 3, "byTimeParameter");
-  validateSemanticRange(ctx, table, row, values.min, -256, 767, "byTimeMinimum");
-  validateSemanticRange(ctx, table, row, values.max, -256, 767, "byTimeMaximum");
-}
-
-function validateSemanticRange(ctx, table, row, parsed, minimum, maximum, labelTermKey) {
-  if (!parsed.columnName || parsed.value >= minimum && parsed.value <= maximum) return;
-  ctx.add(table, row.rowIndex, parsed.columnName, legacyMessage("items.valueRange", {
-    column: parsed.columnName,
-    label: legacyTerm(labelTermKey),
-    value: parsed.value,
-    minimum,
-    maximum
-  }), { severity: "error" });
 }
 
 function isIntegerText(value) {

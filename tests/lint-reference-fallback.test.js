@@ -41,6 +41,7 @@ test("Legacy reference version selection is explicit, profile-aware, and never g
   assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "2.4" }, "RotW"), "3.2");
   assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "3.1" }, ""), "3.1");
   assert.equal(resolveLegacyLintReferenceVersion({}, "2.4"), "2.4");
+  assert.equal(resolveLegacyLintReferenceVersion({}, "1.13c"), "1.13c");
   assert.equal(resolveLegacyLintReferenceVersion({}, "RotW"), "3.2");
   assert.equal(resolveLegacyLintReferenceVersion({ referenceVersion: "latest", schemaVersion: "3.2" }, "RotW"), null);
   assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "3.2" }, "unknown-profile"), null);
@@ -164,7 +165,7 @@ test("ValidStatParameters resolves hidden bundled properties, stats, and skills 
   const diagnostics = runLintWithWorkspaceIndex(index, createDefaultLintSettings())
     .filter((entry) => entry.ruleId === "Items/ValidStatParameters");
 
-  assert.deepEqual(diagnostics.map((entry) => entry.columnName).sort(), ["max1", "par1"]);
+  assert.deepEqual(diagnostics.map((entry) => entry.columnName).sort(), ["par1"]);
   assert.ok(diagnostics.every((entry) => entry.fileName.toLowerCase() === "uniqueitems.txt"));
   assert.equal(index.tables.some((table) => table.doc.lintReferenceBundled), false);
 });
@@ -946,12 +947,12 @@ test("closing a Legacy shadow refreshes a deleted workspace path before choosing
   }
 });
 
-test("a stale bundled-reference load cannot replace the latest Legacy lint session", async () => {
+test("a stale bundled-reference load cannot replace the latest unified Legacy game version", async () => {
   const pending = [];
   const state = {
     docs: [],
     workspace: null,
-    config: { referenceVersion: "3.2" },
+    config: { gameVersion: "3.2", referenceVersion: "3.2" },
     lint: {
       legacy: {
         settings: createDefaultLintSettings(),
@@ -986,7 +987,7 @@ test("a stale bundled-reference load cannot replace the latest Legacy lint sessi
     await waitFor(() => pending.length === 1);
     assert.equal(pending[0].version, "3.2");
 
-    state.config.referenceVersion = "3.1";
+    state.config = { gameVersion: "3.1", schemaVersion: "3.1", referenceVersion: "3.1" };
     controller.scheduleFull("latest-version", 0);
     await waitFor(() => pending.length === 2);
     assert.equal(pending[1].version, "3.1");

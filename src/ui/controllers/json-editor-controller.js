@@ -150,6 +150,8 @@ export function createJsonEditorController({
     refreshLocale,
     redo: () => run("redoJsonEditor"),
     reloadActiveDocument,
+    searchSnapshot: () => view && moduleApi?.jsonSearchSnapshot?.(view),
+    selectSearchRange: (range) => Boolean(view && moduleApi?.selectJsonSearchRange?.(view, range)),
     selectAll: () => run("selectAllJson"),
     showDocument,
     showTable,

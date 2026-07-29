@@ -1,6 +1,7 @@
 import { isTauriRuntime } from "../../core/io.js";
 import { globalShortcutAction, gridScrollShortcutAction } from "../global-shortcut-policy.js";
 import { isTextInputTarget } from "../search-policy.js";
+import { showButtonClickFeedback } from "../button-feedback-policy.js";
 
 export function createAppEventController({
   state,
@@ -40,6 +41,7 @@ export function createAppEventController({
 }) {
   function wireEvents() {
     document.addEventListener("click", (event) => {
+      showButtonClickFeedback(event.target);
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (command) Promise.resolve(commands[command]?.()).catch(showError);
       const bottomTab = event.target.closest("[data-bottom-tab]")?.dataset.bottomTab;

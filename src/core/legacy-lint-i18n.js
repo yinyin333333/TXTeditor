@@ -14,6 +14,7 @@ const EN_MESSAGES = {
   "basic.desecratedTreasure": '{filled} is populated but {base} is blank; {label} desecrated drops require the base desecrated treasure class in 2.4.',
   "basic.invalidLevel": 'Invalid level "{value}" for "{monster}".',
   "basic.levelOrder": 'Level {level} for "{monster}" appears after lower level {previousLevel} on row {row}; rows for the same monster should be ordered highest to lowest.',
+  "basic.monEquipRepeatedBlock": '"{monster}" reappears on row {row}; its first monequip.txt block begins on row {firstRow}, so this later block is unreachable. Keep each monster in one contiguous block.',
   "basic.stringReuse": 'Potential string-ID reuse: "{key}" shares "{id}" with "{previousKey}" in {fileName}. Check whether both keys should use the same text; the game\'s behavior is not confirmed.',
   "basic.integerStorageBound": '"{column}" must be from {min} through {max}. Enter a value in that range.',
   "basic.numericRecommended": '"{column}" is outside the recommended range {min} through {max} for this profile.',
@@ -22,8 +23,9 @@ const EN_MESSAGES = {
   "basic.hitSummonNu": "'NU' is not a numeric mode ID here. The game replaces it with 1 (NU). Use 1 for neutral mode.",
   "basic.hitSummonNonNumericFallback": "'{value}' is not a numeric mode ID here. The game replaces it with 1 (NU). Enter a value from 0 through 15.",
   "basic.hitSummonNonNumeric": "'{value}' is not a numeric mode ID here. The game reads it as {effective} ({mode}). Replace it with the mode number you actually want from 0 through 15.",
-  "basic.booleanType29": "'{value}' is not a number for '{column}'. Use 0 for false or any nonzero integer for true.",
-  "basic.booleanStandard": "'{value}' is not a standard boolean value for '{column}'. Use 0 for false or 1 for true.",
+  "basic.booleanType29": "'{value}' is not a number format accepted in this field. Enter 0 to turn it off or 1 to turn it on.",
+  "basic.booleanRawByte": "'{value}' is not a number format accepted in this field. Enter 0 to turn it off or 1 to turn it on.",
+  "basic.booleanStandard": "'{value}' does not use the recommended 0-or-1 notation for '{column}'. No runtime reader for this field was found in the verified build, so this is a style recommendation only.",
   "basic.integerBacktick": "'`' is not written as a normal integer. The game converts it to 48. Replace it with the number you actually want.",
   "basic.integerPolicy": "'{value}' is not a standard integer for '{column}'. Use a plain whole number; the game may read a different value.",
   "basic.fixed4Unknown": "Unknown code '{value}'. The game reads this code as '{effective}'.{legend} Check the four-character code and letter case.",
@@ -39,6 +41,10 @@ const EN_MESSAGES = {
   "cube.numInputsMismatch": 'numinputs is {declared}, but the recipe contains {actual} input item(s).',
   "cube.unknownOutputProperty": 'Unknown cube output property "{property}".',
   "cube.invalidOp": "Cube op must be an integer from 0 through 28.",
+  "cube.opUnconditional": 'Cube op "{value}" becomes {effective}, so it does not restrict this recipe. Choose an op from 0 through 28.',
+  "cube.opParamUnconditional": 'Cube op {op} uses param "{param}" as {effective}, so it does not restrict this recipe. Choose an ItemStatCost ID or name.',
+  "cube.opParamUnmatchable": 'Cube op {op} uses param "{param}" as {effective}, so no input can satisfy this recipe. Choose an ItemStatCost ID or name.',
+  "cube.opParamNameFallback": 'Cube op {op} cannot find stat name "{param}", so it uses ItemStatCost ID 0. Choose an existing ItemStatCost ID or name.',
   "cube.opRequiresParam": "Cube op requires a param value.",
   "cube.invalidOpParam": 'Cube op param "{param}" is not a valid item stat index or stat name.',
   "cube.opRequiresValue": "Cube op requires a value.",
@@ -71,12 +77,15 @@ const EN_MESSAGES = {
   "items.unknownGambleCode": 'Unknown item code "{code}". Check the four-character code and letter case.',
   "items.characterOnlyGamble": 'Item "{code}" belongs to the character-only item type tree. Remove it from gamble.txt unless this is intentional.',
   "items.statParameterInteger": '{column} value "{value}" is not a normal integer; {behavior}. Use a plain whole number or valid skill name.',
+  "items.statParameterIntegerNumeric": '{column} value "{value}" is not a normal integer; the game reads it as {effective}. Use a plain whole number.',
   "items.statParameterNumericPrefix": '{column} value "{value}" is not a normal integer; the game reads the initial integer as {effective}. Use a plain whole number or valid skill name.',
+  "items.statParameterNumericPrefixNumeric": '{column} value "{value}" is not a normal integer; the game reads the initial integer as {effective}. Use a plain whole number.',
   "items.statParameterSkillFallback": '{column} value "{value}" is not a normal integer; the game tries it as a skill name and uses 0 if no name matches. Use a plain whole number or valid skill name.',
   "items.statParameterZeroFallback": '{column} value "{value}" is not a normal integer; the game reads it as 0. Use a plain whole number or valid skill name.',
   "items.statParameterRange": "{column} value {value} is {direction} for saved item data. Use {lower} through {upper}.",
   "items.statParameterBelowRange": "{column} value {value} is below the minimum {lower} for saved item data. Use {lower} through {upper}.",
   "items.statParameterAboveRange": "{column} value {value} is above the maximum {upper} for saved item data. Use {lower} through {upper}.",
+  "items.propertyGroupMemberIssue": 'PropertyGroups member "{memberCode}" is possible through {groupField} value "{groupValue}"; {detail}',
   "items.unknownSkill": '{column} "{value}" is not a known skill. The game uses skill 0 instead; choose a valid skill name.',
   "items.skillOutOfRange": "{column} resolves to skill id {skillId}, outside the allowed range 0..{maximum}. Choose a skill from skills.txt within this range.",
   "items.chargeCap": "{column} maximum charges {value} exceeds 255. The game limits it to 255; enter 255 or less.",
@@ -99,10 +108,10 @@ export const legacyLintEnglishRuleMetadata = Object.freeze({
   "Basic/LinkedExcel": ["Linked Excel references", "Checks linked TXT values with the matching rules used by each field. Four-character item-type codes are case-sensitive; letter case does not matter for verified name fields."],
   "Basic/MissileRangeFieldSemantics": ["Missile range field semantics", "Checks that missiles.txt range values use the plain integer format expected by D2R 2.4."],
   "Basic/MonstatsDesecratedTreasureClassSemantics": ["Desecrated treasure class semantics", "Checks that desecrated champion or unique treasure classes also have the matching base desecrated treasure class in D2R 2.4."],
-  "Basic/MonEquipLevelOrder": ["Monster equipment level order", "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level in D2R 2.4."],
+  "Basic/MonEquipLevelOrder": ["Monster equipment level order", "Checks that monequip.txt rows for the same monster are ordered from higher level to lower level."],
   "Basic/StringCheck": ["String references", "Warns when different keys reuse one string ID. This is an editor consistency check when the game's behavior is not confirmed."],
   "Basic/NumericBounds": ["Numeric bounds", "Checks plain integer spelling and the allowed range for the selected profile."],
-  "Basic/BooleanFields": ["Boolean fields", "Uses 0=false and nonzero=true for the confirmed missile fields, and recommends 0 or 1 for other boolean fields."],
+  "Basic/BooleanFields": ["Boolean fields", "Checks signed decimal integer notation for verified Boolean fields. Enter 0 for off or 1 for on when correcting invalid text; other signed decimal integers remain valid."],
   "Cube/ValidInputs": ["Valid cube inputs", "Checks input modifiers, qty=N/qty,N forms, quantities from 0 through 255, text ignored after an unknown modifier, and matching numinputs values."],
   "Cube/ValidOutputs": ["Valid cube outputs", "Checks cubemain output item references, output qualifiers, and output property codes."],
   "Cube/ValidOp": ["Valid cube op", "Checks the supported op values and their required number or ItemStatCost name parameters. Letter case does not matter for stat names."],
@@ -156,8 +165,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "basic.hitSummonNu": "여기서 NU는 숫자 모드 ID가 아닙니다. 게임은 이를 1(NU)로 바꿉니다. 중립 모드에는 1을 사용하세요.",
     "basic.hitSummonNonNumericFallback": "여기서 숫자 모드 ID로 해석할 수 없는 입력값: \"{value}\". 게임은 이를 1(NU)로 바꿉니다. 0~15 사이의 값을 입력하세요.",
     "basic.hitSummonNonNumeric": "여기서 숫자 모드 ID로 해석할 수 없는 입력값: \"{value}\". 게임은 이를 {effective}({mode})로 읽습니다. 0~15 사이에서 원하는 모드 번호로 바꾸세요.",
-    "basic.booleanType29": "\"{column}\" 열에서 숫자로 해석할 수 없는 입력값: \"{value}\". false에는 0을, true에는 0이 아닌 정수를 사용하세요.",
-    "basic.booleanStandard": "\"{column}\" 열에서 표준 불리언 값으로 해석할 수 없는 입력값: \"{value}\". false에는 0을, true에는 1을 사용하세요.",
+    "basic.booleanType29": "'{value}'는 이 칸에서 사용할 수 있는 숫자 형식이 아닙니다. 끄려면 0, 켜려면 1을 입력하세요.",
+    "basic.booleanRawByte": "'{value}'는 이 칸에서 사용할 수 있는 숫자 형식이 아닙니다. 끄려면 0, 켜려면 1을 입력하세요.",
+    "basic.booleanStandard": "\"{column}\" 열의 값 \"{value}\"은 권장 표기인 0 또는 1과 다릅니다. 검증한 빌드에서 이 필드를 읽는 런타임 코드를 찾지 못했으므로 스타일 권고로만 보고합니다.",
     "basic.integerBacktick": "백틱(`)은 일반 정수 표기가 아닙니다. 게임은 이를 48로 변환합니다. 원하는 숫자로 바꾸세요.",
     "basic.integerPolicy": "\"{column}\" 열에서 표준 정수로 해석할 수 없는 입력값: \"{value}\". 일반 정수를 사용하세요. 게임은 다른 값으로 읽을 수 있습니다.",
     "basic.fixed4Unknown": "알 수 없는 코드 \"{value}\"입니다. 게임은 이 코드를 \"{effective}\"로 읽습니다.{legend} 4자 코드와 대소문자를 확인하세요.",
@@ -227,6 +237,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "treasure.textTooLong": "보물 아이템 텍스트가 너무 깁니다. 값은 64 UTF-8바이트 미만으로 유지하세요."
   }),
   zhTW: Object.freeze({
+    "basic.booleanType29": "「{value}」不是此欄位可接受的數字格式。若要關閉請輸入 0，若要開啟請輸入 1。",
+    "basic.booleanRawByte": "「{value}」不是此欄位可接受的數字格式。若要關閉請輸入 0，若要開啟請輸入 1。",
+    "basic.booleanStandard": "「{column}」欄位的值「{value}」未使用建議的 0 或 1 表記。在已驗證的版本中找不到讀取此欄位的執行階段程式碼，因此這只是一項樣式建議。",
     "basic.integerBacktick": "反引號 (`) 不是一般整數寫法。遊戲會將它轉換為 48。請改成實際需要的數字。",
     "basic.missileRangeInteger": "D2R 2.4 要求 missiles.range 為一般整數。",
     "basic.unknownSummode": "技能「{skill}」的 summode「{summode}」未知。請從 monmode.txt 選擇有效代碼。",
@@ -249,6 +262,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "cube.invalidModifier": "{modifier} 不是有效的 Cube 修飾符。"
   }),
   deDE: Object.freeze({
+    "basic.booleanType29": "„{value}“ ist kein Zahlenformat, das in diesem Feld akzeptiert wird. Geben Sie 0 zum Ausschalten oder 1 zum Einschalten ein.",
+    "basic.booleanRawByte": "„{value}“ ist kein Zahlenformat, das in diesem Feld akzeptiert wird. Geben Sie 0 zum Ausschalten oder 1 zum Einschalten ein.",
+    "basic.booleanStandard": "„{value}“ verwendet für „{column}“ nicht die empfohlene Schreibweise 0 oder 1. Im verifizierten Build wurde kein Laufzeitcode gefunden, der dieses Feld liest; daher ist dies nur eine Stilempfehlung.",
     "basic.integerBacktick": "Das Backtick-Zeichen (`) ist keine normale Ganzzahlschreibweise. Das Spiel wandelt es in 48 um. Ersetzen Sie es durch die gewünschte Zahl.",
     "basic.missileRangeInteger": "D2R 2.4 erwartet für missiles.range eine einfache Ganzzahl.",
     "basic.unknownSummode": "Unbekanntes summode \"{summode}\" für \"{skill}\". Wählen Sie einen gültigen Code aus monmode.txt.",
@@ -261,6 +277,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) überschreitet die Inventargröße {width} x {height}; das Spiel begrenzt die effektive Socket-Anzahl."
   }),
   esES: Object.freeze({
+    "basic.booleanType29": "'{value}' no tiene un formato numérico aceptado en este campo. Introduce 0 para desactivarlo o 1 para activarlo.",
+    "basic.booleanRawByte": "'{value}' no tiene un formato numérico aceptado en este campo. Introduce 0 para desactivarlo o 1 para activarlo.",
+    "basic.booleanStandard": "'{value}' no usa la notación recomendada 0 o 1 para '{column}'. En la compilación verificada no se encontró ningún lector en tiempo de ejecución para este campo, por lo que esto es solo una recomendación de estilo.",
     "basic.integerBacktick": "El acento grave (`) no se escribe como un entero normal. El juego lo convierte en 48. Sustitúyelo por el número que realmente quieres.",
     "basic.missileRangeInteger": "D2R 2.4 espera que missiles.range sea un entero simple.",
     "basic.unknownSummode": "summode \"{summode}\" desconocido para \"{skill}\". Elige un código válido de monmode.txt.",
@@ -273,6 +292,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) supera el tamaño del inventario {width} x {height}; el juego limita el número efectivo de sockets."
   }),
   frFR: Object.freeze({
+    "basic.booleanType29": "« {value} » n’est pas un format numérique accepté dans ce champ. Saisissez 0 pour désactiver ou 1 pour activer.",
+    "basic.booleanRawByte": "« {value} » n’est pas un format numérique accepté dans ce champ. Saisissez 0 pour désactiver ou 1 pour activer.",
+    "basic.booleanStandard": "« {value} » n’utilise pas la notation recommandée 0 ou 1 pour « {column} ». Aucun code d’exécution lisant ce champ n’a été trouvé dans la version vérifiée ; il s’agit donc uniquement d’une recommandation de style.",
     "basic.integerBacktick": "L’accent grave (`) ne s’écrit pas comme un entier normal. Le jeu le convertit en 48. Remplacez-le par le nombre voulu.",
     "basic.missileRangeInteger": "D2R 2.4 attend une valeur entière simple pour missiles.range.",
     "basic.unknownSummode": "summode \"{summode}\" inconnu pour \"{skill}\". Choisissez un code valide dans monmode.txt.",
@@ -285,6 +307,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) dépasse la taille d’inventaire {width} x {height} ; le jeu limite le nombre effectif de sockets."
   }),
   itIT: Object.freeze({
+    "basic.booleanType29": "'{value}' non è un formato numerico accettato in questo campo. Inserisci 0 per disattivare o 1 per attivare.",
+    "basic.booleanRawByte": "'{value}' non è un formato numerico accettato in questo campo. Inserisci 0 per disattivare o 1 per attivare.",
+    "basic.booleanStandard": "'{value}' non usa la notazione consigliata 0 o 1 per '{column}'. Nella build verificata non è stato trovato alcun codice runtime che legga questo campo, quindi si tratta solo di un consiglio di stile.",
     "basic.integerBacktick": "Il backtick (`) non è scritto come un normale intero. Il gioco lo converte in 48. Sostituiscilo con il numero desiderato.",
     "basic.missileRangeInteger": "D2R 2.4 richiede che missiles.range sia un intero semplice.",
     "basic.unknownSummode": "summode \"{summode}\" sconosciuto per \"{skill}\". Scegli un codice valido da monmode.txt.",
@@ -297,6 +322,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) supera le dimensioni dell’inventario {width} x {height}; il gioco limita il numero effettivo di socket."
   }),
   plPL: Object.freeze({
+    "basic.booleanType29": "„{value}” nie ma formatu liczbowego akceptowanego w tym polu. Wpisz 0, aby wyłączyć, lub 1, aby włączyć.",
+    "basic.booleanRawByte": "„{value}” nie ma formatu liczbowego akceptowanego w tym polu. Wpisz 0, aby wyłączyć, lub 1, aby włączyć.",
+    "basic.booleanStandard": "„{value}” nie używa zalecanego zapisu 0 lub 1 dla „{column}”. W zweryfikowanej kompilacji nie znaleziono kodu wykonywanego w czasie działania, który odczytuje to pole, dlatego jest to wyłącznie zalecenie stylistyczne.",
     "basic.integerBacktick": "Znak odwrotnego apostrofu (`) nie jest zwykłym zapisem liczby całkowitej. Gra konwertuje go na 48. Zastąp go żądaną liczbą.",
     "basic.missileRangeInteger": "D2R 2.4 oczekuje zwykłej liczby całkowitej w missiles.range.",
     "basic.unknownSummode": "Nieznane summode \"{summode}\" dla \"{skill}\". Wybierz prawidłowy kod z monmode.txt.",
@@ -309,6 +337,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) przekracza rozmiar ekwipunku {width} x {height}; gra ogranicza efektywną liczbę gniazd."
   }),
   esMX: Object.freeze({
+    "basic.booleanType29": "'{value}' no tiene un formato numérico aceptado en este campo. Ingresa 0 para desactivarlo o 1 para activarlo.",
+    "basic.booleanRawByte": "'{value}' no tiene un formato numérico aceptado en este campo. Ingresa 0 para desactivarlo o 1 para activarlo.",
+    "basic.booleanStandard": "'{value}' no usa la notación recomendada 0 o 1 para '{column}'. En la compilación verificada no se encontró código de ejecución que lea este campo, por lo que esto es solo una recomendación de estilo.",
     "basic.integerBacktick": "El acento grave (`) no se escribe como un entero normal. El juego lo convierte en 48. Reemplázalo con el número que realmente quieras.",
     "basic.missileRangeInteger": "D2R 2.4 espera que missiles.range sea un entero simple.",
     "basic.unknownSummode": "summode \"{summode}\" desconocido para \"{skill}\". Elige un código válido de monmode.txt.",
@@ -321,6 +352,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) supera el tamaño del inventario {width} x {height}; el juego limita el número efectivo de sockets."
   }),
   jaJP: Object.freeze({
+    "basic.booleanType29": "「{value}」は、このフィールドで使用できる数値形式ではありません。オフにするには 0、オンにするには 1 を入力してください。",
+    "basic.booleanRawByte": "「{value}」は、このフィールドで使用できる数値形式ではありません。オフにするには 0、オンにするには 1 を入力してください。",
+    "basic.booleanStandard": "「{value}」は「{column}」で推奨される 0 または 1 の表記を使用していません。検証済みビルドではこのフィールドを読み取るランタイムコードが見つからなかったため、これはスタイル上の推奨にすぎません。",
     "basic.integerBacktick": "バッククォート (`) は通常の整数表記ではありません。ゲームでは 48 に変換されます。実際に必要な数値に置き換えてください。",
     "basic.missileRangeInteger": "D2R 2.4 では missiles.range は単純な整数である必要があります。",
     "basic.unknownSummode": "スキル「{skill}」の summode「{summode}」は不明です。monmode.txt から有効なコードを選択してください。",
@@ -333,6 +367,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) はインベントリサイズ {width} x {height} を超えています。ゲームは有効なソケット数を制限します。"
   }),
   ptBR: Object.freeze({
+    "basic.booleanType29": "'{value}' não está em um formato numérico aceito neste campo. Digite 0 para desativar ou 1 para ativar.",
+    "basic.booleanRawByte": "'{value}' não está em um formato numérico aceito neste campo. Digite 0 para desativar ou 1 para ativar.",
+    "basic.booleanStandard": "'{value}' não usa a notação recomendada 0 ou 1 para '{column}'. Nenhum código de execução que leia este campo foi encontrado na build verificada; portanto, isto é apenas uma recomendação de estilo.",
     "basic.integerBacktick": "O acento grave (`) não é escrito como um número inteiro normal. O jogo o converte em 48. Substitua-o pelo número desejado.",
     "basic.missileRangeInteger": "O D2R 2.4 espera que missiles.range seja um número inteiro simples.",
     "basic.unknownSummode": "summode \"{summode}\" desconhecido para \"{skill}\". Escolha um código válido em monmode.txt.",
@@ -345,6 +382,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.inventorySocketCap": "gemsockets ({gemsockets}) excede o tamanho do inventário {width} x {height}; o jogo limita a quantidade efetiva de soquetes."
   }),
   ruRU: Object.freeze({
+    "basic.booleanType29": "«{value}» имеет формат числа, который не принимается в этом поле. Введите 0, чтобы выключить, или 1, чтобы включить.",
+    "basic.booleanRawByte": "«{value}» имеет формат числа, который не принимается в этом поле. Введите 0, чтобы выключить, или 1, чтобы включить.",
+    "basic.booleanStandard": "«{value}» не использует рекомендуемую запись 0 или 1 для «{column}». В проверенной сборке не найден код времени выполнения, читающий это поле, поэтому это только рекомендация по стилю.",
     "basic.integerBacktick": "Обратная кавычка (`) не является обычной записью целого числа. Игра преобразует её в 48. Замените её нужным числом.",
     "basic.missileRangeInteger": "D2R 2.4 ожидает простое целое значение в missiles.range.",
     "basic.unknownSummode": "Неизвестный summode «{summode}» для «{skill}». Выберите допустимый код из monmode.txt.",
@@ -358,6 +398,9 @@ const LEGACY_LINT_QUALITY_OVERRIDES = Object.freeze({
     "items.skillOutOfRange": "{column} преобразуется в ID навыка {skillId}, выходящий за допустимый диапазон 0..{maximum}. Выберите навык из skills.txt в этом диапазоне."
   }),
   zhCN: Object.freeze({
+    "basic.booleanType29": "“{value}”不是此字段可接受的数字格式。要关闭请输入 0，要开启请输入 1。",
+    "basic.booleanRawByte": "“{value}”不是此字段可接受的数字格式。要关闭请输入 0，要开启请输入 1。",
+    "basic.booleanStandard": "“{column}”字段的值“{value}”未使用建议的 0 或 1 写法。在已验证的版本中未找到读取此字段的运行时代码，因此这只是一项样式建议。",
     "basic.integerBacktick": "反引号 (`) 不是普通整数写法。游戏会将其转换为 48。请改为实际需要的数字。",
     "basic.missileRangeInteger": "D2R 2.4 要求 missiles.range 为普通整数。",
     "basic.unknownSummode": "技能“{skill}”的 summode“{summode}”未知。请从 monmode.txt 选择有效代码。",
@@ -388,10 +431,10 @@ const LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES = Object.freeze({
     "Basic/LinkedExcel": ["연결된 Excel 참조", "각 필드의 일치 규칙으로 연결된 TXT 값을 확인합니다. 4자 아이템 유형 코드는 대소문자를 구분하며, 확인된 이름 필드에서는 대소문자를 구분하지 않습니다."],
     "Basic/MissileRangeFieldSemantics": ["missiles.range 필드 규칙", "missiles.txt의 range 값이 D2R 2.4에서 요구하는 일반 정수 형식인지 확인합니다."],
     "Basic/MonstatsDesecratedTreasureClassSemantics": ["Desecrated 보물 등급 규칙", "D2R 2.4에서 Desecrated 챔피언 또는 유니크 보물 등급에 대응하는 기본 Desecrated 보물 등급도 있는지 확인합니다."],
-    "Basic/MonEquipLevelOrder": ["몬스터 장비 레벨 순서", "D2R 2.4에서 같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
+    "Basic/MonEquipLevelOrder": ["몬스터 장비 레벨 순서", "같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
     "Basic/StringCheck": ["문자열 참조", "서로 다른 키가 하나의 문자열 ID를 재사용하면 경고합니다. 게임 동작이 확인되지 않은 경우의 편집기 일관성 검사입니다."],
     "Basic/NumericBounds": ["숫자 범위", "일반 정수 표기와 선택한 프로필에서 허용되는 범위를 확인합니다."],
-    "Basic/BooleanFields": ["불리언 필드", "확인된 missile 필드에는 0=false 및 0이 아닌 값=true를 사용하고, 다른 불리언 필드에는 0 또는 1을 권장합니다."],
+    "Basic/BooleanFields": ["불리언 필드", "검증된 불리언 필드가 부호 있는 10진 정수 표기인지 확인합니다. 잘못된 텍스트를 고칠 때는 끄려면 0, 켜려면 1을 입력하세요. 다른 부호 있는 10진 정수도 유효합니다."],
     "Cube/ValidInputs": ["유효한 Cube 입력", "입력 modifier, qty=N/qty,N 형식, 0~255 수량, 알 수 없는 modifier 뒤에서 무시되는 텍스트, 일치하는 numinputs 값을 확인합니다."],
     "Cube/ValidOutputs": ["유효한 Cube 출력", "cubemain 출력 아이템 참조, 출력 한정자, 출력 속성 코드를 확인합니다."],
     "Cube/ValidOp": ["유효한 Cube op", "지원되는 op 값과 필요한 숫자 또는 ItemStatCost 이름 param을 확인합니다. Stat 이름은 대소문자를 구분하지 않습니다."],
@@ -406,7 +449,55 @@ const LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES = Object.freeze({
     "TC/ValidTreasure": ["유효한 보물 참조", "4자 아이템 코드, 보물/유니크/세트 이름, 유효한 modifier, 알 수 없는 modifier 뒤에서 무시되는 텍스트를 확인합니다. 이름은 대소문자를 구분하지 않습니다."],
     "TC/ValidNegativePicks": ["음수 Picks 유효성", "Picks가 음수인 행에서 비어 있지 않은 확률 필드가 정수를 포함하는지 확인합니다. 게임은 그 합이 abs(Picks)와 같을 것을 요구하지 않습니다."],
     "TC/ValidProbs": ["유효한 확률", "빈 값 또는 0 이하 확률로 건너뛴 항목과 첫 빈 Item 슬롯 이후 무시되는 필드를 설명합니다."]
+  }),
+  zhTW: Object.freeze({
+    "Basic/BooleanFields": ["布林欄位", "檢查已驗證的布林欄位是否使用帶符號十進位整數寫法。修正無效文字時，可輸入 0 來關閉或輸入 1 來開啟；其他帶符號十進位整數也有效。"]
+  }),
+  deDE: Object.freeze({
+    "Basic/BooleanFields": ["Boolesche Felder", "Prüft die Schreibweise vorzeichenbehafteter Dezimal-Ganzzahlen in verifizierten booleschen Feldern. Geben Sie beim Korrigieren ungültigen Textes 0 zum Ausschalten oder 1 zum Einschalten ein; andere vorzeichenbehaftete Dezimal-Ganzzahlen bleiben gültig."]
+  }),
+  esES: Object.freeze({
+    "Basic/BooleanFields": ["Campos booleanos", "Comprueba la notación de enteros decimales con signo en los campos booleanos verificados. Al corregir texto no válido, introduce 0 para desactivar o 1 para activar; los demás enteros decimales con signo siguen siendo válidos."]
+  }),
+  frFR: Object.freeze({
+    "Basic/BooleanFields": ["Champs booléens", "Vérifie la notation des entiers décimaux signés dans les champs booléens vérifiés. Pour corriger un texte non valide, saisissez 0 pour désactiver ou 1 pour activer ; les autres entiers décimaux signés restent valides."]
+  }),
+  itIT: Object.freeze({
+    "Basic/BooleanFields": ["Campi booleani", "Controlla la notazione degli interi decimali con segno nei campi booleani verificati. Per correggere testo non valido, inserisci 0 per disattivare o 1 per attivare; gli altri interi decimali con segno restano validi."]
+  }),
+  plPL: Object.freeze({
+    "Basic/BooleanFields": ["Pola logiczne", "Sprawdza zapis dziesiętnych liczb całkowitych ze znakiem w zweryfikowanych polach logicznych. Przy poprawianiu nieprawidłowego tekstu wpisz 0, aby wyłączyć, lub 1, aby włączyć; inne dziesiętne liczby całkowite ze znakiem pozostają prawidłowe."]
+  }),
+  esMX: Object.freeze({
+    "Basic/BooleanFields": ["Campos booleanos", "Comprueba la notación de enteros decimales con signo en los campos booleanos verificados. Al corregir texto no válido, ingresa 0 para desactivar o 1 para activar; los demás enteros decimales con signo siguen siendo válidos."]
+  }),
+  jaJP: Object.freeze({
+    "Basic/BooleanFields": ["ブールフィールド", "検証済みのブールフィールドが符号付き10進整数の表記か確認します。無効な文字列を修正するときは、オフにするには 0、オンにするには 1 を入力してください。ほかの符号付き10進整数も有効です。"]
+  }),
+  ptBR: Object.freeze({
+    "Basic/BooleanFields": ["Campos booleanos", "Verifica a notação de inteiros decimais com sinal nos campos booleanos verificados. Ao corrigir texto inválido, digite 0 para desativar ou 1 para ativar; outros inteiros decimais com sinal continuam válidos."]
+  }),
+  ruRU: Object.freeze({
+    "Basic/BooleanFields": ["Логические поля", "Проверяет запись знаковых десятичных целых чисел в проверенных логических полях. При исправлении недопустимого текста введите 0, чтобы выключить, или 1, чтобы включить; другие знаковые десятичные целые числа также допустимы."]
+  }),
+  zhCN: Object.freeze({
+    "Basic/BooleanFields": ["布尔字段", "检查已验证的布尔字段是否使用有符号十进制整数写法。修正无效文本时，可输入 0 来关闭或输入 1 来开启；其他有符号十进制整数也有效。"]
   })
+});
+
+const LEGACY_LINT_VERSION_NEUTRAL_RULE_METADATA = Object.freeze({
+  zhTW: ["怪物裝備等級順序", "檢查同一怪物的 monequip.txt 行是否依照從較高等級到較低等級的順序排列。"],
+  deDE: ["Reihenfolge der Monster-Ausrüstungsstufen", "Überprüft, ob monequip.txt-Zeilen für dasselbe Monster von einer höheren zur niedrigeren Ebene geordnet sind."],
+  esES: ["Orden de nivel de equipamiento de monstruos", "Comprueba que las filas de monequip.txt para el mismo monstruo estén ordenadas de nivel superior a nivel inferior."],
+  frFR: ["Ordre des niveaux d’équipement de monstre", "Vérifie que les lignes de monequip.txt pour le même monstre sont classées du niveau le plus élevé au plus bas."],
+  itIT: ["Ordine livelli equipaggiamento mostro", "Controlla che le righe di monequip.txt per lo stesso mostro siano ordinate dal livello più alto al più basso."],
+  koKR: ["몬스터 장비 레벨 순서", "같은 몬스터의 monequip.txt 행이 높은 레벨부터 낮은 레벨 순으로 정렬되어 있는지 확인합니다."],
+  plPL: ["Kolejność poziomów wyposażenia potwora", "Sprawdza, czy wiersze monequip.txt dla tego samego potwora są uporządkowane od wyższego poziomu do niższego."],
+  esMX: ["Orden de nivel de equipamiento de monstruos", "Comprueba que las filas de monequip.txt para el mismo monstruo estén ordenadas de nivel superior a nivel inferior."],
+  jaJP: ["モンスター装備レベル順", "同じモンスターの monequip.txt 行が高いレベルから低いレベルの順に並んでいることを確認します。"],
+  ptBR: ["Ordem de nível de equipamento monstro", "Verifica se as linhas de monequip.txt para o mesmo monstro estão ordenadas do nível mais alto para o mais baixo."],
+  ruRU: ["Порядок уровней экипировки монстров", "Проверяет, что строки monequip.txt для одного и того же монстра упорядочены от более высокого уровня к более низкому."],
+  zhCN: ["怪物装备等级顺序", "检查同一怪物的 monequip.txt 行是否按从较高级别到较低级别的顺序排列。"]
 });
 
 const LEGACY_LINT_TERMS = Object.freeze({
@@ -441,11 +532,161 @@ const LEGACY_LINT_LEGEND_TERMS = Object.freeze({
   zhCN: { spaceLegend: " ␠ 表示空格。", tabLegend: " ⇥ 表示制表符。", spaceTabLegend: " ␠ 表示空格，⇥ 表示制表符。" }
 });
 
+const LEGACY_LINT_ADDITIONAL_TRANSLATIONS = Object.freeze({
+  zhTW: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} 值「{value}」不是普通整數；遊戲將其讀取為 {effective}。請使用純整數。",
+    "items.statParameterNumericPrefixNumeric": "{column} 值「{value}」不是普通整數；遊戲將開頭整數讀取為 {effective}。請使用純整數。",
+    "items.propertyGroupMemberIssue": "PropertyGroups 成員「{memberCode}」可能透過 {groupField} 值「{groupValue}」選取；{detail}"
+  }),
+  deDE: Object.freeze({
+    "items.statParameterIntegerNumeric": "Der Wert {column} „{value}“ ist keine normale Ganzzahl; das Spiel liest ihn als {effective}. Verwenden Sie eine einfache Ganzzahl.",
+    "items.statParameterNumericPrefixNumeric": "Der Wert {column} „{value}“ ist keine normale Ganzzahl; das Spiel liest die anfängliche Ganzzahl als {effective}. Verwenden Sie eine einfache Ganzzahl.",
+    "items.propertyGroupMemberIssue": "Das PropertyGroups-Mitglied „{memberCode}“ ist über den Wert „{groupValue}“ des Feldes {groupField} möglich; {detail}"
+  }),
+  esES: Object.freeze({
+    "items.statParameterIntegerNumeric": "El valor {column} «{value}» no es un entero normal; el juego lo interpreta como {effective}. Usa un entero simple.",
+    "items.statParameterNumericPrefixNumeric": "El valor {column} «{value}» no es un entero normal; el juego lee el entero inicial como {effective}. Usa un entero simple.",
+    "items.propertyGroupMemberIssue": "El miembro de PropertyGroups «{memberCode}» es posible mediante el valor «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  frFR: Object.freeze({
+    "items.statParameterIntegerNumeric": "La valeur {column} « {value} » n’est pas un entier normal ; le jeu la lit comme {effective}. Utilisez un entier simple.",
+    "items.statParameterNumericPrefixNumeric": "La valeur {column} « {value} » n’est pas un entier normal ; le jeu lit l’entier initial comme {effective}. Utilisez un entier simple.",
+    "items.propertyGroupMemberIssue": "Le membre PropertyGroups « {memberCode} » est possible via la valeur « {groupValue} » du champ {groupField} ; {detail}"
+  }),
+  itIT: Object.freeze({
+    "items.statParameterIntegerNumeric": "Il valore {column} «{value}» non è un intero normale; il gioco lo legge come {effective}. Usa un intero semplice.",
+    "items.statParameterNumericPrefixNumeric": "Il valore {column} «{value}» non è un intero normale; il gioco legge l'intero iniziale come {effective}. Usa un intero semplice.",
+    "items.propertyGroupMemberIssue": "Il membro PropertyGroups «{memberCode}» è possibile tramite il valore «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  koKR: Object.freeze({
+    "items.statParameterIntegerNumeric": '"{column}" 열 입력값 "{value}" 일반 정수가 아님: 게임은 이를 {effective}(으)로 읽습니다. 일반 정수만 입력하세요.',
+    "items.statParameterNumericPrefixNumeric": '"{column}" 열 입력값 "{value}" 일반 정수가 아님: 게임 앞부분 정수 {effective} 읽음. 일반 정수만 입력하세요.',
+    "items.propertyGroupMemberIssue": 'PropertyGroups 멤버 "{memberCode}" 가능 경로: {groupField} 값 "{groupValue}". {detail}'
+  }),
+  plPL: Object.freeze({
+    "items.statParameterIntegerNumeric": "Wartość {column} „{value}” nie jest zwykłą liczbą całkowitą; gra odczytuje ją jako {effective}. Użyj zwykłej liczby całkowitej.",
+    "items.statParameterNumericPrefixNumeric": "Wartość {column} „{value}” nie jest zwykłą liczbą całkowitą; gra odczytuje początkową liczbę całkowitą jako {effective}. Użyj zwykłej liczby całkowitej.",
+    "items.propertyGroupMemberIssue": "Element PropertyGroups „{memberCode}” jest możliwy przez wartość „{groupValue}” pola {groupField}; {detail}"
+  }),
+  esMX: Object.freeze({
+    "items.statParameterIntegerNumeric": "El valor {column} «{value}» no es un entero normal; el juego lo interpreta como {effective}. Usa un entero simple.",
+    "items.statParameterNumericPrefixNumeric": "El valor {column} «{value}» no es un entero normal; el juego lee el entero inicial como {effective}. Usa un entero simple.",
+    "items.propertyGroupMemberIssue": "El miembro de PropertyGroups «{memberCode}» es posible mediante el valor «{groupValue}» del campo {groupField}; {detail}"
+  }),
+  jaJP: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} の値「{value}」は通常の整数ではありません。ゲームはこれを {effective} として読み取ります。通常の整数を入力してください。",
+    "items.statParameterNumericPrefixNumeric": "{column} の値「{value}」は通常の整数ではありません。ゲームは先頭の整数を {effective} として読み取ります。通常の整数を入力してください。",
+    "items.propertyGroupMemberIssue": "PropertyGroups のメンバー「{memberCode}」は {groupField} の値「{groupValue}」で選択される可能性があります。{detail}"
+  }),
+  ptBR: Object.freeze({
+    "items.statParameterIntegerNumeric": "O valor {column} \"{value}\" não é um número inteiro normal; o jogo o lê como {effective}. Use um número inteiro simples.",
+    "items.statParameterNumericPrefixNumeric": "O valor {column} \"{value}\" não é um número inteiro normal; o jogo lê o número inteiro inicial como {effective}. Use um número inteiro simples.",
+    "items.propertyGroupMemberIssue": "O membro PropertyGroups \"{memberCode}\" é possível pelo valor \"{groupValue}\" do campo {groupField}; {detail}"
+  }),
+  ruRU: Object.freeze({
+    "items.statParameterIntegerNumeric": "Значение {column} «{value}» не является обычным целым числом; игра считывает его как {effective}. Введите простое целое число.",
+    "items.statParameterNumericPrefixNumeric": "Значение {column} «{value}» не является обычным целым числом; игра считывает начальное целое число как {effective}. Введите простое целое число.",
+    "items.propertyGroupMemberIssue": "Член PropertyGroups «{memberCode}» возможен через значение «{groupValue}» поля {groupField}; {detail}"
+  }),
+  zhCN: Object.freeze({
+    "items.statParameterIntegerNumeric": "{column} 的值“{value}”不是普通整数；游戏将其读取为 {effective}。请输入普通整数。",
+    "items.statParameterNumericPrefixNumeric": "{column} 的值“{value}”不是普通整数；游戏将开头整数读取为 {effective}。请输入普通整数。",
+    "items.propertyGroupMemberIssue": "PropertyGroups 成员“{memberCode}”可能通过 {groupField} 值“{groupValue}”被选中；{detail}"
+  })
+});
+
+const LEGACY_LINT_CLASSIC113_TRANSLATIONS = Object.freeze({
+  zhTW: Object.freeze({
+    "basic.monEquipRepeatedBlock": '「{monster}」在第 {row} 行再次出現；第一個 monequip.txt 區塊從第 {firstRow} 行開始，因此後面的區塊無法到達。每個怪物應保留在一個連續區塊中。',
+    "cube.opUnconditional": 'Cube op「{value}」會變成 {effective}，因此不會限制此配方。請選擇 0 到 28 的 op。',
+    "cube.opParamUnconditional": 'Cube op {op} 將參數「{param}」視為 {effective}，因此不會限制此配方。請選擇 ItemStatCost ID 或名稱。',
+    "cube.opParamUnmatchable": 'Cube op {op} 將參數「{param}」視為 {effective}，因此沒有輸入可符合此配方。請選擇 ItemStatCost ID 或名稱。',
+    "cube.opParamNameFallback": 'Cube op {op} 找不到統計名稱「{param}」，因此使用 ItemStatCost ID 0。請選擇現有的 ItemStatCost ID 或名稱。'
+  }),
+  deDE: Object.freeze({
+    "basic.monEquipRepeatedBlock": '„{monster}“ erscheint erneut in Zeile {row}; sein erster monequip.txt-Block beginnt in Zeile {firstRow}, daher ist dieser spätere Block nicht erreichbar. Halten Sie jeden Monster-Eintrag in einem zusammenhängenden Block.',
+    "cube.opUnconditional": 'Cube-Op „{value}“ wird zu {effective}; dadurch wird dieses Rezept nicht eingeschränkt. Wählen Sie einen Op-Wert von 0 bis 28.',
+    "cube.opParamUnconditional": 'Cube-Op {op} verwendet den Parameter „{param}“ als {effective}; dadurch wird dieses Rezept nicht eingeschränkt. Wählen Sie eine ItemStatCost-ID oder einen Namen.',
+    "cube.opParamUnmatchable": 'Cube-Op {op} verwendet den Parameter „{param}“ als {effective}; dadurch kann keine Eingabe dieses Rezept erfüllen. Wählen Sie eine ItemStatCost-ID oder einen Namen.',
+    "cube.opParamNameFallback": 'Cube-Op {op} findet den Stat-Namen „{param}“ nicht und verwendet daher ItemStatCost-ID 0. Wählen Sie eine vorhandene ItemStatCost-ID oder einen Namen.'
+  }),
+  esES: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» reaparece en la fila {row}; su primer bloque de monequip.txt comienza en la fila {firstRow}, por lo que este bloque posterior es inalcanzable. Mantén cada monstruo en un bloque contiguo.',
+    "cube.opUnconditional": 'El op de cubo «{value}» se convierte en {effective}, por lo que no limita esta receta. Elige un op de 0 a 28.',
+    "cube.opParamUnconditional": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, por lo que no limita esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamUnmatchable": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, por lo que ninguna entrada puede cumplir esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamNameFallback": 'El op de cubo {op} no encuentra el nombre de estadística «{param}», por lo que usa el ID 0 de ItemStatCost. Elige un ID o nombre de ItemStatCost existente.'
+  }),
+  frFR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '« {monster} » réapparaît à la ligne {row} ; son premier bloc monequip.txt commence à la ligne {firstRow}, donc ce bloc ultérieur est inaccessible. Conservez chaque monstre dans un seul bloc contigu.',
+    "cube.opUnconditional": 'L’opération de cube « {value} » devient {effective} et ne limite donc pas cette recette. Choisissez une opération de 0 à 28.',
+    "cube.opParamUnconditional": 'L’opération de cube {op} utilise le paramètre « {param} » comme {effective} et ne limite donc pas cette recette. Choisissez un ID ou un nom ItemStatCost.',
+    "cube.opParamUnmatchable": 'L’opération de cube {op} utilise le paramètre « {param} » comme {effective}; aucune entrée ne peut donc satisfaire cette recette. Choisissez un ID ou un nom ItemStatCost.',
+    "cube.opParamNameFallback": 'L’opération de cube {op} ne trouve pas le nom de statistique « {param} » et utilise donc l’ID ItemStatCost 0. Choisissez un ID ou un nom ItemStatCost existant.'
+  }),
+  itIT: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» ricompare alla riga {row}; il suo primo blocco monequip.txt inizia alla riga {firstRow}, quindi questo blocco successivo è irraggiungibile. Mantieni ogni mostro in un unico blocco contiguo.',
+    "cube.opUnconditional": 'L’op del cubo «{value}» diventa {effective}, quindi non limita questa ricetta. Scegli un op da 0 a 28.',
+    "cube.opParamUnconditional": 'L’op del cubo {op} usa il parametro «{param}» come {effective}, quindi non limita questa ricetta. Scegli un ID o nome ItemStatCost.',
+    "cube.opParamUnmatchable": 'L’op del cubo {op} usa il parametro «{param}» come {effective}, quindi nessun input può soddisfare questa ricetta. Scegli un ID o nome ItemStatCost.',
+    "cube.opParamNameFallback": 'L’op del cubo {op} non trova il nome statistica «{param}» e usa quindi l’ID ItemStatCost 0. Scegli un ID o nome ItemStatCost esistente.'
+  }),
+  koKR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '몬스터 {monster} 항목이 {row}행에 다시 나타납니다. 첫 monequip.txt 블록은 {firstRow}행에서 시작하므로 뒤의 블록에는 도달할 수 없습니다. 각 몬스터는 하나의 연속된 블록에 두세요.',
+    "cube.opUnconditional": 'Cube op 값: {value}. 적용 결과: {effective}. 이 조합법을 제한하지 않습니다. 0부터 28 사이의 op를 선택하세요.',
+    "cube.opParamUnconditional": 'Cube op 값: {op}. param 값: {param}. 적용 결과: {effective}. 이 조합법을 제한하지 않습니다. ItemStatCost ID 또는 이름을 선택하세요.',
+    "cube.opParamUnmatchable": 'Cube op 값: {op}. param 값: {param}. 적용 결과: {effective}. 어떤 입력도 이 조합법을 만족할 수 없습니다. ItemStatCost ID 또는 이름을 선택하세요.',
+    "cube.opParamNameFallback": 'Cube op 값: {op}. stat 이름: {param}. 이 이름을 찾을 수 없어 ItemStatCost ID 0을 사용합니다. 존재하는 ItemStatCost ID 또는 이름을 선택하세요.'
+  }),
+  plPL: Object.freeze({
+    "basic.monEquipRepeatedBlock": '„{monster}” pojawia się ponownie w wierszu {row}; pierwszy blok monequip.txt zaczyna się w wierszu {firstRow}, więc ten późniejszy blok jest nieosiągalny. Każdego potwora zachowaj w jednym ciągłym bloku.',
+    "cube.opUnconditional": 'Operacja kostki „{value}” staje się wartością {effective}, więc nie ogranicza tego przepisu. Wybierz operację od 0 do 28.',
+    "cube.opParamUnconditional": 'Operacja kostki {op} używa parametru „{param}” jako {effective}, więc nie ogranicza tego przepisu. Wybierz ID lub nazwę ItemStatCost.',
+    "cube.opParamUnmatchable": 'Operacja kostki {op} używa parametru „{param}” jako {effective}, więc żadne wejście nie spełni tego przepisu. Wybierz ID lub nazwę ItemStatCost.',
+    "cube.opParamNameFallback": 'Operacja kostki {op} nie znajduje nazwy statystyki „{param}”, więc używa ID ItemStatCost 0. Wybierz istniejący ID lub nazwę ItemStatCost.'
+  }),
+  esMX: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» vuelve a aparecer en la fila {row}; su primer bloque de monequip.txt empieza en la fila {firstRow}, así que este bloque posterior es inalcanzable. Mantén cada monstruo en un bloque contiguo.',
+    "cube.opUnconditional": 'El op de cubo «{value}» se convierte en {effective}, así que no limita esta receta. Elige un op de 0 a 28.',
+    "cube.opParamUnconditional": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, así que no limita esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamUnmatchable": 'El op de cubo {op} usa el parámetro «{param}» como {effective}, así que ninguna entrada puede cumplir esta receta. Elige un ID o nombre de ItemStatCost.',
+    "cube.opParamNameFallback": 'El op de cubo {op} no encuentra el nombre de estadística «{param}», así que usa el ID 0 de ItemStatCost. Elige un ID o nombre de ItemStatCost existente.'
+  }),
+  jaJP: Object.freeze({
+    "basic.monEquipRepeatedBlock": '「{monster}」が行 {row} で再び現れます。最初の monequip.txt ブロックは行 {firstRow} から始まるため、この後のブロックには到達できません。各モンスターは連続した一つのブロックにしてください。',
+    "cube.opUnconditional": 'Cube op「{value}」は {effective} になり、このレシピを制限しません。0 から 28 の op を選んでください。',
+    "cube.opParamUnconditional": 'Cube op {op} は param「{param}」を {effective} として扱うため、このレシピを制限しません。ItemStatCost ID または名前を選んでください。',
+    "cube.opParamUnmatchable": 'Cube op {op} は param「{param}」を {effective} として扱うため、このレシピを満たす入力はありません。ItemStatCost ID または名前を選んでください。',
+    "cube.opParamNameFallback": 'Cube op {op} は stat 名「{param}」を見つけられないため、ItemStatCost ID 0 を使用します。存在する ItemStatCost ID または名前を選んでください。'
+  }),
+  ptBR: Object.freeze({
+    "basic.monEquipRepeatedBlock": '“{monster}” reaparece na linha {row}; seu primeiro bloco de monequip.txt começa na linha {firstRow}, portanto este bloco posterior é inacessível. Mantenha cada monstro em um único bloco contínuo.',
+    "cube.opUnconditional": 'A operação de cubo “{value}” torna-se {effective}, portanto não limita esta receita. Escolha uma operação de 0 a 28.',
+    "cube.opParamUnconditional": 'A operação de cubo {op} usa o parâmetro “{param}” como {effective}, portanto não limita esta receita. Escolha um ID ou nome de ItemStatCost.',
+    "cube.opParamUnmatchable": 'A operação de cubo {op} usa o parâmetro “{param}” como {effective}, portanto nenhuma entrada pode satisfazer esta receita. Escolha um ID ou nome de ItemStatCost.',
+    "cube.opParamNameFallback": 'A operação de cubo {op} não encontra o nome de estatística “{param}” e usa o ID ItemStatCost 0. Escolha um ID ou nome ItemStatCost existente.'
+  }),
+  ruRU: Object.freeze({
+    "basic.monEquipRepeatedBlock": '«{monster}» снова появляется в строке {row}; его первый блок monequip.txt начинается в строке {firstRow}, поэтому этот поздний блок недостижим. Оставляйте каждого монстра в одном непрерывном блоке.',
+    "cube.opUnconditional": 'Операция куба «{value}» становится {effective}, поэтому не ограничивает этот рецепт. Выберите операцию от 0 до 28.',
+    "cube.opParamUnconditional": 'Операция куба {op} использует параметр «{param}» как {effective}, поэтому не ограничивает этот рецепт. Выберите ID или имя ItemStatCost.',
+    "cube.opParamUnmatchable": 'Операция куба {op} использует параметр «{param}» как {effective}, поэтому ни один вход не может удовлетворить этот рецепт. Выберите ID или имя ItemStatCost.',
+    "cube.opParamNameFallback": 'Операция куба {op} не находит имя характеристики «{param}» и использует ID ItemStatCost 0. Выберите существующий ID или имя ItemStatCost.'
+  }),
+  zhCN: Object.freeze({
+    "basic.monEquipRepeatedBlock": '“{monster}”在第 {row} 行再次出现；其第一个 monequip.txt 区块从第 {firstRow} 行开始，因此后面的区块无法访问。请将每个怪物保持在一个连续区块中。',
+    "cube.opUnconditional": '魔盒 op“{value}”会变为 {effective}，因此不会限制此配方。请选择 0 到 28 的 op。',
+    "cube.opParamUnconditional": '魔盒 op {op} 将参数“{param}”视为 {effective}，因此不会限制此配方。请选择 ItemStatCost ID 或名称。',
+    "cube.opParamUnmatchable": '魔盒 op {op} 将参数“{param}”视为 {effective}，因此没有输入能满足此配方。请选择 ItemStatCost ID 或名称。',
+    "cube.opParamNameFallback": '魔盒 op {op} 找不到属性名称“{param}”，因此使用 ItemStatCost ID 0。请选择现有的 ItemStatCost ID 或名称。'
+  })
+});
+
 export const legacyLintCatalogs = Object.freeze({
   enUS: Object.freeze(EN_MESSAGES),
   ...Object.fromEntries(LEGACY_LINT_LOCALES.filter((locale) => locale !== "enUS").map((locale) => [
     locale,
-    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale] })
+    Object.freeze({ ...LEGACY_LINT_TRANSLATIONS[locale], ...LEGACY_LINT_QUALITY_OVERRIDES[locale], ...LEGACY_LINT_ADDITIONAL_TRANSLATIONS[locale], ...LEGACY_LINT_CLASSIC113_TRANSLATIONS[locale] })
   ]))
 });
 
@@ -491,7 +732,10 @@ export function legacyRuleMetadata(id, locale = LEGACY_LINT_DEFAULT_LOCALE) {
   const normalized = normalizeLegacyLintLocale(locale);
   const english = legacyLintEnglishRuleMetadata[id] ?? [id, ""];
   if (normalized === "enUS") return { label: english[0], note: english[1] };
-  const translated = LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES[normalized]?.[id]
+  const translated = (id === "Basic/MonEquipLevelOrder"
+    ? LEGACY_LINT_VERSION_NEUTRAL_RULE_METADATA[normalized]
+    : undefined)
+    ?? LEGACY_LINT_RULE_METADATA_QUALITY_OVERRIDES[normalized]?.[id]
     ?? LEGACY_LINT_RULE_METADATA_TRANSLATIONS[normalized]?.[id];
   return { label: translated?.[0] ?? english[0], note: translated?.[1] ?? english[1] };
 }
@@ -533,6 +777,7 @@ function escapeHtml(value) {
 }
 
 function resolveLegacyParameter(value, locale) {
+  if (value?.legacyKey) return resolveLegacyMessage(value, locale);
   if (value?.legacyTermKey) {
     const normalized = normalizeLegacyLintLocale(locale);
     return LEGACY_LINT_TERMS[normalized]?.[value.legacyTermKey]

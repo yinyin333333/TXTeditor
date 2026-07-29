@@ -68,6 +68,18 @@ export function pasteTextToRangesCommand(doc, ranges, focus, text) {
   const matrixWidth = rows.reduce((width, row) => Math.max(width, row.length), 0);
   if (rows.length > 1 || matrixWidth > 1) {
     const [range] = ranges;
+    const isSingleVerticalRange = ranges.length === 1
+      && range.left === range.right
+      && range.bottom > range.top;
+    if (rows.length === 1 && matrixWidth > 1 && isSingleVerticalRange) {
+      const edits = [];
+      for (let row = range.top; row <= range.bottom; row++) {
+        for (let column = 0; column < rows[0].length; column++) {
+          edits.push({ row, column: range.left + column, value: rows[0][column] });
+        }
+      }
+      return makeCellCommand("Paste Selection", doc, edits);
+    }
     const isSingleMultiCellRange = ranges.length === 1
       && (range.bottom > range.top || range.right > range.left);
     if (isSingleMultiCellRange) {

@@ -181,21 +181,21 @@ test("prewarm is disabled so background hover cannot block user hover", () => {
   assert.equal(shouldCancelPrewarmForUserHover(), true);
 });
 
-test("release metadata remains 0.4.8 while the README introduction stays version-independent", () => {
+test("release metadata remains 0.4.9 while the README introduction stays version-independent", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.4.8");
-  assert.equal(lock.version, "0.4.8");
-  assert.equal(lock.packages[""].version, "0.4.8");
-  assert.match(pkg.description, /TXTeditor 0\.4\.8/);
-  assert.match(cargoToml, /version = "0\.4\.8"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.4\.8/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.8"/);
-  assert.equal(tauri.version, "0.4.8");
+  assert.equal(pkg.version, "0.4.9");
+  assert.equal(lock.version, "0.4.9");
+  assert.equal(lock.packages[""].version, "0.4.9");
+  assert.match(pkg.description, /TXTeditor 0\.4\.9/);
+  assert.match(cargoToml, /version = "0\.4\.9"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.4\.9/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.9"/);
+  assert.equal(tauri.version, "0.4.9");
   assert.match(readme, /^# TXTeditor\r?\n\r?\nTXTeditor is a Windows-focused desktop editor/);
-  assert.doesNotMatch(readme, /TXTeditor 0\.4\.8 is/);
+  assert.doesNotMatch(readme, /TXTeditor 0\.4\.9 is/);
 });

@@ -149,6 +149,30 @@ test("Freeze toggles persist independently and update the active document", () =
   assert.equal(renders, 2);
 });
 
+test("zoom commands report each user-selected zoom level", () => {
+  const doc = { zoom: 1 };
+  const remembered = [];
+  const controller = createGridCommandController({
+    state: {},
+    grid: { setZoom: (value) => { doc.zoom = value; } },
+    activeDoc: () => doc,
+    hasOpenDocument: () => true,
+    execute: () => {},
+    saveSelectionState: () => {},
+    renderChrome: () => {},
+    showError: (error) => { throw error; },
+    applyFreezeToDoc: () => {},
+    rowsForContextOperation: () => [],
+    columnsFromSelection: () => [],
+    onZoomChanged: (zoom) => remembered.push(zoom)
+  });
+
+  controller.zoomBy(0.1);
+  controller.zoomReset();
+
+  assert.deepEqual(remembered, [1.1, 1]);
+});
+
 test("document lifecycle retains the freeze preference while no document is open", async () => {
   installFakeAppStartupDom();
   const emptyDoc = { name: "Empty" };

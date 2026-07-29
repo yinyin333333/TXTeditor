@@ -5,7 +5,7 @@ import { makeCellCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument } from "./core/document-undo-state.js";
 import {
   isTauriRuntime,
-  listenForNativeDrops,
+  listenForNativeOpenPaths,
   startupOpenPathsNative
 } from "./core/io.js";
 import { exposeTxteditorPerf } from "./core/perf-instrumentation.js";
@@ -36,6 +36,7 @@ import {
   askText as askPromptText,
   promptNumber as promptForNumber
 } from "./ui/prompt-dialog.js";
+import { createCellInputController } from "./ui/controllers/cell-input-controller.js";
 import { createCommandController } from "./ui/controllers/command-controller.js";
 import { createCommandSurfaceController } from "./ui/controllers/command-surface-controller.js";
 import { createDiagnosticsController } from "./ui/controllers/diagnostics-controller.js";
@@ -53,6 +54,7 @@ import { createSettingsController } from "./ui/controllers/settings-controller.j
 import { createShortcutSettingsController } from "./ui/controllers/shortcut-settings-controller.js";
 import { createShellController } from "./ui/controllers/shell-controller.js";
 import { createLocaleController, initializeLocale } from "./ui/controllers/locale-controller.js";
+import { createManualHighlightController } from "./ui/manual-highlight.js";
 import { t, tText } from "./core/i18n.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
@@ -70,12 +72,12 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null, manualHighlightController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
   onDocumentChanged: (doc, changeMeta = {}) => {
-    renderChrome(); lspController?.updateDoc(doc, { kind: "json", changes: changeMeta.changes })
+    searchController?.notifyDocumentChanged(doc); renderChrome(); lspController?.updateDoc(doc, { kind: "json", changes: changeMeta.changes })
       .catch((error) => handleLspUpdateError(doc, error, "json-edit"));
   },
   onLoadError: showError
@@ -100,6 +102,7 @@ const diagnosticsController = createDiagnosticsController({
   lintDocKey,
   lintPathKey,
   escapeHtml,
+  showDiagnosticContextMenu: (options) => commandSurfaceController?.showDiagnosticContextMenu(options),
   saveSelectionState,
   storage: localStorage
 });
@@ -151,11 +154,9 @@ const {
   workspaceFileStatesForExplorer: legacyWorkspaceFileStatesForExplorer,
   workspaceTxtFiles: legacyWorkspaceTxtFiles
 } = legacyLintController;
-
 syncDockLayout();
 
-let shellController = null;
-let gridCommandController = null;
+let shellController = null, gridCommandController = null, settingsController = null;
 const grid = new CanvasGrid({
   host: els.host,
   canvas: els.canvas,
@@ -172,11 +173,11 @@ const grid = new CanvasGrid({
   onHoverRequest: (row, column, meta) => lspController.requestHover(row, column, meta).catch((error) => lspController.reportHoverDispatchFailure(row, column, error, "grid-hover-request")),
   onHoverInvalidated: () => lspController.clearVisibleHover("grid-hover-cleared"),
   onViewportChanged: (reason) => lspController.scheduleHoverPrewarm(reason),
-  onSelectionChanged: () => {
-    saveSelectionState();
-    diagnosticsController.handleSelectionChanged();
-  }
+  onSelectionChanged: () => { saveSelectionState(); diagnosticsController.handleSelectionChanged(); cellInputController?.refresh(); },
+  onZoomChanged: (zoom) => settingsController?.recordZoomLevel(zoom),
+  highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
 });
+manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage });
 
 documentEditorController = createDocumentEditorController({
   grid,
@@ -185,7 +186,6 @@ documentEditorController = createDocumentEditorController({
   selection: state.selection,
   applyFreezeToDoc
 });
-
 grid.setFontFamily(state.gridFont);
 grid.setColorizeColumns(state.colorizeColumns);
 grid.setMouseResizeLocked(state.mouseResizeLocked);
@@ -203,7 +203,8 @@ gridCommandController = createGridCommandController({
   promptNumber,
   applyFreezeToDoc,
   rowsForContextOperation,
-  columnsFromSelection
+  columnsFromSelection,
+  onZoomChanged: (zoom) => settingsController.recordZoomLevel(zoom)
 });
 const { toggleFreeze, unhideAll, zoomBy, zoomReset, resetRowHeights, goToRow, resizeFit, cloneRows, cloneColumns } = gridCommandController;
 lspController = createLspController({
@@ -235,13 +236,23 @@ lspController = createLspController({
     }),
   handleWatchedFilesChanged: (payload) => documentController?.handleWatchedFilesChanged(payload)
 });
+cellInputController = createCellInputController({
+  els,
+  grid,
+  activeDoc,
+  hasOpenDocument,
+  applyEdits,
+  resolveFieldMetadata: (doc, columnName) => lspController.fieldMetadata(doc, columnName),
+  metadataRevision: () => state.lsp.started ? state.lsp.generation : "offline",
+  focusGrid: () => els.host.focus()
+});
 const localeController = createLocaleController({ state, storage: localStorage, ownerDocument: document, legacyActive: isLegacyLintEngine, scheduleLegacyLintFull, lspController, activeDoc, setLintDiagnostics, updateGridDiagnostics, renderChrome, refreshJsonEditorLocale: jsonEditorController.refreshLocale });
 exposeTxteditorPerf(window, {
   uiPerfSamples,
   lintEngineEvents,
   ...lspController.perf
 });
-const settingsController = createSettingsController({
+settingsController = createSettingsController({
   state,
   els,
   grid,
@@ -300,7 +311,7 @@ documentController = createDocumentController({
   handleLspUpdateError,
   reportLspCloseFailure,
   lspRebindSavedDoc: (doc, previousUri) => lspController.rebindSavedDoc(doc, previousUri),
-  lspStartWorkspace, lspStopSession: (reason) => lspController.stopSession(reason),
+  lspStartWorkspace, lspClaimSession: () => lspController.claimSession(), lspStopSession: (reason) => lspController.stopSession(reason),
   ensureDocumentSession: lspController.ensureStandaloneSession,
   scheduleHoverPrewarm,
   resetUndoManagerForDocument,
@@ -312,9 +323,9 @@ documentController = createDocumentController({
   isLegacyLintEngine,
   setLintDiagnostics, updateGridDiagnostics,
   resetWorkspaceView: () => shellController?.resetWorkspaceView(),
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile, resizeOpenedDocumentToFit: () => gridCommandController.resizeFit(false), ...manualHighlightController.documentLifecycleHooks()
 });
-const searchController = createSearchController({
+searchController = createSearchController({
   state,
   els,
   grid,
@@ -323,6 +334,8 @@ const searchController = createSearchController({
   saveSelectionState,
   applyEdits,
   jsonSearch: jsonEditorController,
+  selectTableMatch: (start, end) => cellInputController?.selectTextRange(start, end),
+  escapeHtml,
   focusActiveEditor
 });
 const editCommandController = createEditCommandController({
@@ -403,7 +416,7 @@ const commandController = createCommandController({
   }
 });
 const { commandLabels, commands } = commandController;
-const commandSurfaceController = createCommandSurfaceController({
+commandSurfaceController = createCommandSurfaceController({
   state,
   els,
   grid,
@@ -414,7 +427,7 @@ const commandSurfaceController = createCommandSurfaceController({
   cellHasReference,
   clearVisibleLspHover,
   showError,
-  escapeHtml
+  escapeHtml, manualHighlights: manualHighlightController
 });
 shellController = createShellController({
   state,
@@ -490,20 +503,27 @@ settingsController.loadConfig().catch((error) => {
   state.config = {};
   reportStartupFailure("Configuration load", error);
 });
-listenForNativeDrops((paths) => openDroppedNativePaths(paths)).catch(showError);
+listenForNativeOpenPaths((paths) => openDroppedNativePaths(paths), showError).catch(showError);
 lspController.startListeners();
-startupOpenPathsNative()
+documentController.restoreWorkspace().then(() => startupOpenPathsNative())
   .then((paths) => openDroppedNativePaths(paths))
   .catch(showError);
 
 function activeDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
 
-function activateDocument(doc = activeDoc(), options) { return documentEditorController.activateDocument(doc, options); }
-function commitActiveEditor() { documentEditorController.commitDocument(activeDoc()); }
+function activateDocument(doc = activeDoc(), options) {
+  const result = documentEditorController.activateDocument(doc, options);
+  searchController?.notifyDocumentActivated(doc);
+  cellInputController?.refresh({ force: true });
+  return result;
+}
+function commitActiveEditor() {
+  cellInputController?.commit();
+  documentEditorController.commitDocument(activeDoc());
+}
 function focusActiveEditor() { documentEditorController.focusDocument(activeDoc()); }
 
 function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
-
 function saveSelectionState(doc = activeDoc()) { if (hasOpenDocument() && doc !== EMPTY_DOC) documentEditorController.saveViewState(doc); }
 
 function isVectorLintEngine() {
@@ -528,15 +548,19 @@ function execute(command) {
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
-  command.redo(doc);
+  manualHighlightController.executeTableCommand(doc, command);
   documentEditorController.pushTableCommand(doc, command);
   finishCommand(doc, command, "edit", started);
 }
 
 function finishCommand(doc, command, context = "edit", started = perfNow()) {
   if (!isTableDocument(doc)) return;
+  if (context === "undo" || context === "redo") manualHighlightController.afterCommand(doc, command, context);
   const contentChanged = command.contentChanged !== false;
-  if (contentChanged) markLegacyLintDocChanged(doc);
+  if (contentChanged) {
+    markLegacyLintDocChanged(doc);
+    searchController?.notifyDocumentChanged(doc);
+  }
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
   saveSelectionState(doc);
   grid.layout();
@@ -648,7 +672,9 @@ function scheduleHoverPrewarm(reason = "schedule") {
 
 function updateGridDiagnostics(options) {
   jsonEditorController.reconcileDiagnosticHighlight(state.lint.diagnostics);
-  return diagnosticsController.updateGridDiagnostics(options);
+  const result = diagnosticsController.updateGridDiagnostics(options);
+  cellInputController?.drawDiagnostics();
+  return result;
 }
 
 function docDiagnosticSeverity(_doc) {
@@ -698,7 +724,9 @@ function renderLintControls() {
 }
 
 function renderChrome() {
-  return shellController.renderChrome();
+  const result = shellController.renderChrome();
+  cellInputController?.refresh();
+  return result;
 }
 function renderDiagnosticsChrome() {
   return shellController.renderDiagnosticsChrome();

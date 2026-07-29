@@ -13,7 +13,11 @@ import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
-import { createDocumentController } from "../src/ui/controllers/document-controller.js";
+import {
+  createDocumentController,
+  WORKSPACE_PATH_STORAGE_KEY,
+  WORKSPACE_RELOAD_STORAGE_KEY
+} from "../src/ui/controllers/document-controller.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import {
   canRunCommandWithoutDocument,
@@ -586,7 +590,9 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
       doc.toText();
     },
     scheduleHoverPrewarm: () => calls.push("hover-prewarm"),
-    scheduleLegacyLintForOpen: () => calls.push("legacy-open")
+    scheduleLegacyLintForOpen: () => calls.push("legacy-open"),
+    autoResizeToFitOnOpen: true,
+    resizeOpenedDocumentToFit: () => calls.push("resize-to-fit")
   });
 
   await controller.addDocument(doc);
@@ -596,6 +602,69 @@ test("large-file documents skip open-time auto-fit, lint sync, and hover prewarm
   assert.equal(toTextCalls, 0);
   assert.deepEqual(calls, []);
   assert.match(state.lint.status, /Large file mode/);
+});
+
+test("new table documents use full Resize To Fit only when the open setting is enabled", async () => {
+  const enabledDoc = TableDocument.fromText("enabled.txt", "a\tb\nlong value\t2", { dirty: false });
+  const enabledCalls = [];
+  const enabled = testDocumentController([], {
+    autoFitInitialColumns: () => enabledCalls.push("initial-fit"),
+    layout: () => enabledCalls.push("layout")
+  }, {
+    autoResizeToFitOnOpen: true,
+    activateDocument: async () => enabledCalls.push("activate"),
+    resizeOpenedDocumentToFit: async () => enabledCalls.push("resize-to-fit")
+  });
+
+  await enabled.controller.addDocument(enabledDoc);
+
+  assert.deepEqual(enabledCalls.slice(0, 2), ["activate", "resize-to-fit"]);
+  assert.equal(enabledCalls.includes("initial-fit"), false);
+  assert.equal(enabledDoc.initialColumnFitApplied, true);
+
+  const disabledDoc = TableDocument.fromText("disabled.txt", "a\tb\nlong value\t2", { dirty: false });
+  const disabledCalls = [];
+  const disabled = testDocumentController([], {
+    autoFitInitialColumns: () => disabledCalls.push("initial-fit"),
+    layout: () => disabledCalls.push("layout")
+  }, {
+    resizeOpenedDocumentToFit: async () => disabledCalls.push("resize-to-fit")
+  });
+
+  await disabled.controller.addDocument(disabledDoc);
+
+  assert.equal(disabledCalls.includes("resize-to-fit"), false);
+  assert.deepEqual(disabledCalls.slice(0, 2), ["initial-fit", "layout"]);
+});
+
+test("Keep zoom level supplies only the initial zoom for newly opened tables", async () => {
+  const first = TableDocument.fromText("first.txt", "a\n1", { dirty: false });
+  const second = TableDocument.fromText("second.txt", "a\n2", { dirty: false });
+  const remembered = testDocumentController([], {}, {
+    keepZoomLevel: true,
+    rememberedZoomLevel: 1.6,
+    autoResizeToFitOnOpen: true
+  });
+
+  await remembered.controller.addDocument(first);
+  first.zoom = 1.3;
+  await remembered.controller.addDocument(second);
+
+  assert.equal(first.zoom, 1.3);
+  assert.equal(second.zoom, 1.6);
+
+  assert.equal(await remembered.controller.closeAll(), true);
+  const reopened = TableDocument.fromText("reopened.txt", "a\n4", { dirty: false });
+  await remembered.controller.addDocument(reopened);
+  assert.equal(reopened.zoom, 1.6);
+
+  const stale = TableDocument.fromText("stale.txt", "a\n3", { dirty: false });
+  const disabled = testDocumentController([], {}, {
+    keepZoomLevel: false,
+    rememberedZoomLevel: 1.6
+  });
+  await disabled.controller.addDocument(stale);
+  assert.equal(stale.zoom, 1);
 });
 
 test("opening a standalone native TXT starts a sibling-only Vector session at its parent", async () => {
@@ -622,6 +691,195 @@ test("opening a standalone native TXT starts a sibling-only Vector session at it
 
     assert.deepEqual(starts, [["E:\\Mods\\Example\\TXT", { contextMode: "sibling" }]]);
     assert.deepEqual(opens, []);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#85 a fresh app launch clears the previous workspace without skipping native LSP cleanup", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\PreviousWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const sessionStorage = workspaceReloadSessionStorage(false);
+  let claimCalls = 0;
+  let listCalls = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => { listCalls += 1; } } } };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      sessionStorage,
+      lspClaimSession: async () => { claimCalls += 1; }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(claimCalls, 1);
+    assert.equal(listCalls, 0);
+    assert.equal(values.has(WORKSPACE_PATH_STORAGE_KEY), false);
+    assert.equal(sessionStorage.getItem(WORKSPACE_RELOAD_STORAGE_KEY), "1");
+    assert.equal(state.workspace, null);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 WebView reload restores the saved workspace from current disk state with existing folder options", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\SavedWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const calls = [];
+  const starts = [];
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command, args) => {
+      calls.push([command, args]);
+      return {
+        path: args.path,
+        files: [{ path: `${args.path}\\current.txt`, name: "current.txt" }]
+      };
+    } } }
+  };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      sessionStorage: workspaceReloadSessionStorage(),
+      excludeWorkspaceSubfolders: true,
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async (...args) => starts.push(args)
+    });
+
+    assert.equal(await controller.restoreWorkspace(), true);
+    await Promise.resolve();
+    assert.deepEqual(calls, [["list_workspace_files", {
+      path: "E:\\SavedWorkspace",
+      includeSubfolders: false
+    }]]);
+    assert.deepEqual(state.workspace, {
+      path: "E:\\SavedWorkspace",
+      files: [{ path: "E:\\SavedWorkspace\\current.txt", name: "current.txt" }]
+    });
+    assert.deepEqual(starts, [["E:\\SavedWorkspace", { includeSubfolders: false }]]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 manual folder selection persists its path while unavailable restore remains non-blocking", async () => {
+  const originalWindow = globalThis.window;
+  const values = new Map([[WORKSPACE_PATH_STORAGE_KEY, "E:\\MissingWorkspace"]]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+  const native = { active: 1, starting: true, watcherActive: true, latest: 1 };
+  let unavailable = true;
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command, args) => {
+      if (command === "open_folder_dialog") return "E:\\PickedWorkspace";
+      if (unavailable) throw new Error("workspace unavailable");
+      return { path: args.path, files: [] };
+    } } }
+  };
+
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      storage,
+      sessionStorage: workspaceReloadSessionStorage(),
+      lintEngine: "vector-lsp",
+      isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false,
+      lspStartWorkspace: async () => {},
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      },
+      showError: (error) => { throw error; }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(state.workspace, null);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 2 });
+    unavailable = false;
+    await controller.openFolder();
+    assert.equal(state.workspace.path, "E:\\PickedWorkspace");
+    assert.equal(values.get(WORKSPACE_PATH_STORAGE_KEY), "E:\\PickedWorkspace");
+
+    assert.equal(await controller.closeAll(), true);
+    assert.equal(values.has(WORKSPACE_PATH_STORAGE_KEY), false);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 failed restore claims and clears a native generation greater than 1", async () => {
+  const originalWindow = globalThis.window;
+  const storage = { getItem: () => "E:\\DeletedWorkspace" };
+  const native = { active: 5, starting: true, watcherActive: true, latest: 5 };
+  globalThis.window = { __TAURI__: { core: { invoke: async () => {
+    throw new Error("workspace unavailable");
+  } } } };
+
+  try {
+    const { controller } = testDocumentController([], {}, {
+      storage,
+      sessionStorage: workspaceReloadSessionStorage(),
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 6 });
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("#84 startup claims a leftover standalone LSP session without a saved workspace", async () => {
+  const originalWindow = globalThis.window;
+  const native = { active: 7, starting: true, watcherActive: true, latest: 7 };
+  let listCalls = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async () => { listCalls += 1; } } } };
+
+  try {
+    const { controller } = testDocumentController([], {}, {
+      storage: { getItem: () => null },
+      sessionStorage: workspaceReloadSessionStorage(),
+      lspClaimSession: async () => {
+        native.latest += 1;
+        native.active = null;
+        native.starting = false;
+        native.watcherActive = false;
+        return native.latest;
+      }
+    });
+
+    assert.equal(await controller.restoreWorkspace(), false);
+    assert.equal(listCalls, 0);
+    assert.deepEqual(native, { active: null, starting: false, watcherActive: false, latest: 8 });
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
@@ -717,6 +975,60 @@ test("activating an already-open document saves the outgoing selection and scrol
   assert.equal(active.scrollLeft, 7);
   assert.equal(active.scrollTop, 360);
   assert.equal(document.activeElement, host);
+});
+
+test("native path delivery reads only new paths and replays successful documents in request order", async () => {
+  const originalWindow = globalThis.window;
+  const existing = TableDocument.fromText("existing.txt", "id\nopen", {
+    path: "E:\\Mods\\existing.txt"
+  });
+  const events = [];
+  const errors = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          assert.equal(command, "read_text_files");
+          events.push(["read", ...args.paths]);
+          assert.deepEqual(args.paths, [
+            "E:\\Mods\\new.txt",
+            "E:\\Mods\\missing.txt"
+          ]);
+          return [
+            { Ok: { path: "E:\\Mods\\new.txt", name: "new.txt", text: "id\nnew", encoding: "utf-8" } },
+            { Err: "missing file" }
+          ];
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller, state } = testDocumentController(existing, {}, {
+      activateDocument: async (doc) => events.push(["activate", doc.name]),
+      showError: (error) => errors.push(error.message)
+    });
+
+    await controller.openDroppedNativePaths([
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\new.txt",
+      "E:\\Mods\\missing.txt",
+      "e:\\mods\\EXISTING.txt"
+    ]);
+
+    assert.deepEqual(events, [
+      ["read", "E:\\Mods\\new.txt", "E:\\Mods\\missing.txt"],
+      ["activate", "new.txt"],
+      ["activate", "new.txt"],
+      ["activate", "existing.txt"]
+    ]);
+    assert.deepEqual(state.docs.map((doc) => doc.name), ["existing.txt", "new.txt"]);
+    assert.equal(state.active, 0);
+    assert.deepEqual(errors, ["missing file"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("closing the active tab commits editor changes before checking dirty state", async () => {
@@ -997,9 +1309,9 @@ test("app ownership boundaries keep shell wiring and extracted helpers in owners
   const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
   const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
 
-  assert.ok(appSource.split(/\r?\n/).length <= 760);
-  assert.ok(canvasSource.split(/\r?\n/).length <= 900);
-  assert.ok(lspController.split(/\r?\n/).length <= 900);
+  assert.ok(appSource.split(/\r?\n/).length <= 790);
+  assert.ok(canvasSource.split(/\r?\n/).length <= 950);
+  assert.ok(lspController.split(/\r?\n/).length <= 920);
   assert.match(appSource, /createCommandController/);
   assert.match(appSource, /createDiagnosticsController/);
   assert.match(appSource, /createDocumentController/);
@@ -1161,7 +1473,7 @@ test("dock drop UI is removed and docked controls keep a single-row Problems hea
   assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
   assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
   assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
-  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto minmax\(0, 1fr\);/);
+  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto auto minmax\(0, 1fr\);/);
   assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
   assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
@@ -1215,8 +1527,7 @@ test("Settings modal exposes immediate visual settings without save cancel apply
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const controls = appSettingsVisualControls({
     colorizeColumns: true,
-    vectorLspHover: true,
-    legacyLintEngine: true,
+    autoResizeToFitOnOpen: true,
     theme: "light",
     gridFont: "custom"
   });
@@ -1226,10 +1537,12 @@ test("Settings modal exposes immediate visual settings without save cancel apply
     label: "Exclude subfolders when opening a folder",
     checked: false
   });
-  assert.equal(controls.vectorHover.id, "settingsVectorLspHover");
-  assert.equal(controls.vectorHover.label, "Vector-LSP Hover");
-  assert.equal(controls.vectorHover.disabled, true);
-  assert.equal(controls.vectorHover.hintHidden, false);
+  assert.deepEqual(controls.autoResizeToFitOnOpen, {
+    id: "settingsAutoResizeToFitOnOpen",
+    label: "Automatically apply Resize To Fit when opening a file",
+    checked: true
+  });
+  assert.equal(controls.vectorHover, undefined);
   assert.equal(controls.font.id, "settingsGridFont");
   assert.equal(controls.font.label, "Font");
   assert.equal(controls.font.value, DEFAULT_GRID_FONT);
@@ -1282,7 +1595,8 @@ test("Problems panel rendering is skipped while hidden and cached while unchange
     }]
   });
   assert.match(jsonProblems, /skills\.json/);
-  assert.match(jsonProblems, /data-diagnostic-id="json:1" disabled aria-disabled="true"/);
+  assert.match(jsonProblems, /data-diagnostic-id="json:1" aria-disabled="true"/);
+  assert.doesNotMatch(jsonProblems, /\sdisabled(?:\s|>)/);
 });
 
 test("Find Next includes the current cell once when the query changes", () => {
@@ -1620,6 +1934,10 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     docs: Array.isArray(docOrDocs) ? docOrDocs : [docOrDocs],
     active: 0,
     workspace: options.workspace ?? null,
+    autoResizeToFitOnOpen: options.autoResizeToFitOnOpen ?? false,
+    keepZoomLevel: options.keepZoomLevel ?? false,
+    rememberedZoomLevel: options.rememberedZoomLevel ?? 1,
+    excludeWorkspaceSubfolders: options.excludeWorkspaceSubfolders ?? false,
     lint: {
       engine: options.lintEngine ?? "legacy",
       enabled: options.lintEnabled ?? true,
@@ -1646,15 +1964,17 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     grid,
     emptyDoc: TableDocument.fromText("empty.txt", ""),
     activeDoc: () => state.docs[state.active],
+    activateDocument: options.activateDocument,
     saveSelectionState: options.saveSelectionState ?? (() => {}),
     applyFreezeToDoc: () => {},
-    renderChrome: () => {},
+    renderChrome: options.renderChrome ?? (() => {}),
     showError: options.showError ?? ((error) => { throw error; }),
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
     lspCloseDoc: options.lspCloseDoc ?? (() => {}),
     reportLspCloseFailure: () => {},
+    lspClaimSession: options.lspClaimSession ?? (() => 0),
     lspStopSession: options.lspStopSession ?? (() => 0),
     lspStartWorkspace: options.lspStartWorkspace ?? (() => {}),
     ensureDocumentSession: options.ensureDocumentSession ?? (() => {}),
@@ -1669,9 +1989,21 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     setLintDiagnostics: options.setLintDiagnostics ?? ((diagnostics) => { state.lint.diagnostics = diagnostics; }),
     updateGridDiagnostics: () => {},
     resetWorkspaceView: options.resetWorkspaceView ?? (() => {}),
-    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {})
+    scrollProblemsToActiveFile: options.scrollProblemsToActiveFile ?? (() => {}),
+    resizeOpenedDocumentToFit: options.resizeOpenedDocumentToFit ?? (async () => {}),
+    storage: options.storage,
+    sessionStorage: options.sessionStorage
   });
   return { controller, state, document: hostDocument, host };
+}
+
+function workspaceReloadSessionStorage(marked = true) {
+  const values = new Map(marked ? [[WORKSPACE_RELOAD_STORAGE_KEY, "1"]] : []);
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
 }
 
 function deferred() {

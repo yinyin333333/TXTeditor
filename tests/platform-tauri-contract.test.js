@@ -13,6 +13,7 @@ import {
   isTauriRuntime,
   lspCloseFile,
   lspDefinition,
+  lspFieldMetadata,
   lspGetDiagnostics,
   lspGetDiagnosticsBatch,
   lspHover,
@@ -20,6 +21,7 @@ import {
   lspLogListen,
   lspOpenFile,
   lspReadyListen,
+  lspReserveGeneration,
   lspStart,
   lspStop,
   lspStoppedListen,
@@ -221,7 +223,8 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
   const jsCommands = [...platformSources.matchAll(/(?:^|[^\w.])(?:api\.)?invoke\("([^"]+)"/g)]
     .map((match) => match[1])
     .sort();
-  const rustCommands = [...rust.matchAll(/\b[a-z_]+::([a-z_]+),/g)]
+  const rustHandler = rust.match(/tauri::generate_handler!\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const rustCommands = [...rustHandler.matchAll(/\b[a-z_]+::([a-z_]+),/g)]
     .map((match) => match[1])
     .sort();
 
@@ -233,13 +236,15 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "load_lint_reference_dataset",
     "lsp_close_file",
     "lsp_definition",
+    "lsp_field_metadata",
     "lsp_get_diagnostics",
     "lsp_get_diagnostics_batch",
     "lsp_hover",
-      "lsp_open_file",
-      "lsp_start",
-      "lsp_stop",
-      "lsp_update_file",
+    "lsp_open_file",
+    "lsp_reserve_generation",
+    "lsp_start",
+    "lsp_stop",
+    "lsp_update_file",
     "lsp_update_file_incremental",
     "open_files_dialog",
     "open_folder_dialog",
@@ -249,6 +254,7 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "save_config",
     "save_file_dialog",
     "startup_open_paths",
+    "take_pending_open_paths",
     "write_clipboard_text",
     "write_text_file_chunk_safe",
     "write_text_file_safe"
@@ -336,6 +342,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       files: [{ path: "E:\\Mod\\global\\excel\\ItemTypes.txt", name: "ItemTypes.txt" }]
     }]],
     ["save_file_dialog", ["E:\\SavedAs.txt", "E:\\Export.txt"]],
+    ["lsp_reserve_generation", [7]],
     ["lsp_get_diagnostics", [[{ row: 1, column: 2, message: "warn" }]]],
     ["lsp_get_diagnostics_batch", [[{
       generation: 7,
@@ -344,6 +351,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       diagnostics: [{ row: 1, column: 2, message: "warn" }]
     }]]],
     ["lsp_hover", [{ contents: "hover" }]],
+    ["lsp_field_metadata", [{ fieldType: "parse", maxLength: 255, source: "schema" }]],
     ["lsp_definition", [{ uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } }]]
   ]);
   const invoke = async (command, args) => {
@@ -405,6 +413,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     assert.equal(saveAsDoc.dirty, false);
     assert.equal(await saveTextNative("export.txt", "id\n3"), true);
 
+    assert.equal(await lspReserveGeneration(), 7);
     await lspStart("E:\\Workspace", 7);
     await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace", true, "koKR");
     await lspStart("E:\\Workspace", 9, "workspace", "", false);
@@ -421,6 +430,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       diagnostics: [{ row: 1, column: 2, message: "warn" }]
     }]);
     assert.deepEqual(await lspHover("file:///items.txt", 4, 5, 7), { contents: "hover" });
+    assert.deepEqual(await lspFieldMetadata("file:///items.txt", "calc1", 7), { fieldType: "parse", maxLength: 255, source: "schema" });
     assert.deepEqual(await lspDefinition("file:///items.txt", 6, 7, 7), { uri: "file:///skills.txt", range: { start: { line: 0, character: 0 } } });
     const diagnosticsEvents = [];
     const logEvents = [];
@@ -462,6 +472,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "write_text_file_chunk_safe", { path: "E:\\SavedAs.txt", text: "id\n2", encoding: "utf-8", transactionId: chunkTransactionIds[1], first: true, last: true }],
       ["invoke", "save_file_dialog", { defaultName: "export.txt" }],
       ["invoke", "write_text_file_safe", { path: "E:\\Export.txt", text: "id\n3", encoding: "utf-8" }],
+      ["invoke", "lsp_reserve_generation", undefined],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7, locale: "enUS" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8, locale: "koKR" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", includeSubfolders: false, generation: 9, locale: "enUS" }],
@@ -473,6 +484,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "lsp_get_diagnostics", { uri: "file:///items.txt", generation: 7, sequence: 9 }],
       ["invoke", "lsp_get_diagnostics_batch", { requests: [{ uri: "file:///items.txt", sequence: 9 }], generation: 7 }],
       ["invoke", "lsp_hover", { uri: "file:///items.txt", line: 4, character: 5, generation: 7 }],
+      ["invoke", "lsp_field_metadata", { uri: "file:///items.txt", columnName: "calc1", generation: 7 }],
       ["invoke", "lsp_definition", { uri: "file:///items.txt", line: 6, character: 7, generation: 7 }],
       ["listen", "lsp-diagnostics-changed"],
       ["listen", "lsp-log"],

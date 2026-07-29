@@ -21,7 +21,8 @@ import {
   downloadText,
   encodeText,
   isTauriRuntime,
-  openNativePaths,
+  listWorkspaceNative,
+  openNativePathsBulk,
   openWorkspaceNative,
   pickOpenFilePathsNative,
   readFileAsDocument,
@@ -39,6 +40,9 @@ import {
   unsavedDocuments
 } from "../document-lifecycle-policy.js";
 import { tText } from "../../core/i18n.js";
+
+export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
+export const WORKSPACE_RELOAD_STORAGE_KEY = "txteditor.workspaceReload";
 
 export function createDocumentController({
   state,
@@ -64,6 +68,7 @@ export function createDocumentController({
   reportLspCloseFailure,
   lspRebindSavedDoc = async () => {},
   lspStartWorkspace,
+  lspClaimSession = async () => 0,
   lspStopSession = async () => 0,
   ensureDocumentSession = async () => {},
   scheduleHoverPrewarm,
@@ -77,7 +82,14 @@ export function createDocumentController({
   setLintDiagnostics = () => {},
   updateGridDiagnostics,
   resetWorkspaceView = () => {},
-  scrollProblemsToActiveFile
+  scrollProblemsToActiveFile,
+  onTableDocumentOpened = () => {},
+  onTableDocumentClosed = () => {},
+  captureTableAnnotationIdentity = () => "",
+  onTableDocumentSaved = () => {},
+  resizeOpenedDocumentToFit = async () => {},
+  storage = globalThis.localStorage,
+  sessionStorage = globalThis.sessionStorage
 }) {
   let pendingCloseResolve = null;
   let pendingExternalResolve = null;
@@ -148,14 +160,15 @@ export function createDocumentController({
     }
     if (isTableDocument(doc)) {
       resetUndoManagerForDocument(doc);
-      doc.zoom = 1;
+      doc.zoom = state.keepZoomLevel ? state.rememberedZoomLevel : 1;
       applyFreezeToDoc(doc);
+      onTableDocumentOpened(doc);
     }
     state.docs.push(doc);
     saveSelectionState();
     state.active = plan.activeIndex;
     await activateDocument(doc, { focus: false });
-    if (isTableDocument(doc)) prepareOpenedTable(doc);
+    if (isTableDocument(doc)) await prepareOpenedTable(doc);
     renderChrome();
     if (scrollProblems) scrollProblemsToActiveFile();
     if (focus) focusActiveEditor();
@@ -170,14 +183,17 @@ export function createDocumentController({
     return doc;
   }
 
-  function prepareOpenedTable(doc) {
+  async function prepareOpenedTable(doc) {
     if (doc.largeFileMode) {
       doc.initialColumnFitApplied = true;
       state.lint.status = `Large file mode: lint paused for ${doc.name}.`;
     } else if (isOpenStatus(state.lint.status)) {
       state.lint.status = "";
     }
-    if (!doc.largeFileMode && !doc.initialColumnFitApplied) {
+    if (!doc.largeFileMode && state.autoResizeToFitOnOpen) {
+      await resizeOpenedDocumentToFit();
+      doc.initialColumnFitApplied = true;
+    } else if (!doc.largeFileMode && !doc.initialColumnFitApplied) {
       grid.autoFitInitialColumns();
       doc.initialColumnFitApplied = true;
       grid.layout();
@@ -240,9 +256,34 @@ export function createDocumentController({
     const tablePaths = candidates.filter(isTextLikePath);
     const jsonPaths = candidates.filter(isJsonPath);
     if (tablePaths.length) {
-      await showOpeningFeedback(`Opening ${tablePaths.length} file(s)...`);
-      const docs = await openNativePaths(tablePaths, TableDocument);
-      for (const doc of docs) await addDocument(doc);
+      const documentsByPath = new Map(state.docs
+        .filter((doc) => isTableDocument(doc) && doc.path)
+        .map((doc) => [normalizePath(doc.path), doc]));
+      const unopenedPaths = [];
+      const queuedPaths = new Set();
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        if (!documentsByPath.has(key) && !queuedPaths.has(key)) {
+          queuedPaths.add(key);
+          unopenedPaths.push(path);
+        }
+      }
+      const errors = [];
+      if (unopenedPaths.length) {
+        await showOpeningFeedback(`Opening ${unopenedPaths.length} file(s)...`);
+        const results = await openNativePathsBulk(unopenedPaths, TableDocument);
+        for (let index = 0; index < results.length; index += 1) {
+          const result = results[index];
+          if (result?.doc) documentsByPath.set(normalizePath(unopenedPaths[index]), result.doc);
+          else if (result?.error) errors.push(result.error);
+        }
+      }
+      for (const path of tablePaths) {
+        const key = normalizePath(path);
+        const doc = documentsByPath.get(key);
+        if (doc) documentsByPath.set(key, await addDocument(doc));
+      }
+      if (errors.length) showError(new Error(errors.join("\n")));
     }
     for (const path of jsonPaths) {
       await openJsonDocumentPath(path, { requireCurrentMode: requireCurrentJsonMode });
@@ -297,19 +338,64 @@ export function createDocumentController({
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
-      state.workspace = workspace;
-      resetLegacyWorkspaceIndex();
-      if (isVectorLintEngine()) {
-        if (state.lint.enabled) {
-          lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
-        }
-      } else {
-        const schedule = legacyLintImmediateSchedule("workspace-opened");
-        scheduleLegacyLintFull(schedule.reason, schedule.delay);
-      }
-      renderChrome();
+      activateWorkspace(workspace, includeSubfolders, true);
     } catch (error) {
       showError(error);
+    }
+  }
+
+  async function restoreWorkspace() {
+    if (!isTauriRuntime()) return false;
+    await lspClaimSession();
+    if (!isWorkspaceReload()) {
+      writeWorkspacePath("");
+      return false;
+    }
+    const path = readWorkspacePath();
+    if (!path) return false;
+    const includeSubfolders = !state.excludeWorkspaceSubfolders;
+    try {
+      const workspace = await listWorkspaceNative(path, null, { includeSubfolders });
+      activateWorkspace(workspace, includeSubfolders, false);
+      return true;
+    } catch {
+      state.workspace = null;
+      renderChrome();
+      return false;
+    }
+  }
+
+  function activateWorkspace(workspace, includeSubfolders, persist) {
+    state.workspace = workspace;
+    if (persist) writeWorkspacePath(workspace.path);
+    resetLegacyWorkspaceIndex();
+    if (isVectorLintEngine()) {
+      if (state.lint.enabled) lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
+    } else {
+      const schedule = legacyLintImmediateSchedule("workspace-opened");
+      scheduleLegacyLintFull(schedule.reason, schedule.delay);
+    }
+    renderChrome();
+  }
+
+  function readWorkspacePath() {
+    try { return storage?.getItem(WORKSPACE_PATH_STORAGE_KEY) || ""; } catch { return ""; }
+  }
+
+  function writeWorkspacePath(path) {
+    try {
+      if (path) storage?.setItem(WORKSPACE_PATH_STORAGE_KEY, path);
+      else storage?.removeItem(WORKSPACE_PATH_STORAGE_KEY);
+    } catch {}
+  }
+
+  function isWorkspaceReload() {
+    try {
+      const reload = sessionStorage?.getItem(WORKSPACE_RELOAD_STORAGE_KEY) === "1";
+      sessionStorage?.setItem(WORKSPACE_RELOAD_STORAGE_KEY, "1");
+      return reload;
+    } catch {
+      return false;
     }
   }
 
@@ -351,7 +437,11 @@ export function createDocumentController({
     setLintDiagnostics([]);
     state.lint.status = "";
     state.workspace = null;
+    writeWorkspacePath("");
     resetWorkspaceView();
+    for (const doc of state.docs) {
+      if (isTableDocument(doc)) onTableDocumentClosed(doc);
+    }
     state.docs.splice(0, state.docs.length);
     state.active = -1;
     await activateDocument(emptyDoc, { focus: false });
@@ -384,10 +474,12 @@ export function createDocumentController({
 
   async function saveFileNow(doc) {
     const previousUri = docToUri(doc);
+    const previousAnnotationIdentity = isTableDocument(doc) ? captureTableAnnotationIdentity(doc) : "";
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, false, { validateTarget: (path) => validateSaveTarget(doc, path) });
       if (!saved) return false;
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: false, previousKey: previousAnnotationIdentity });
       grid.draw();
       renderChrome();
       return true;
@@ -398,6 +490,7 @@ export function createDocumentController({
     await writable.close();
     markDocumentSaved(doc, snapshot.revision, snapshot);
     await lspRebindSavedDoc(doc, previousUri);
+    if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: false, previousKey: previousAnnotationIdentity });
     renderChrome();
     return true;
   }
@@ -416,10 +509,12 @@ export function createDocumentController({
 
   async function saveAsNow(doc) {
     const previousUri = docToUri(doc);
+    const previousAnnotationIdentity = isTableDocument(doc) ? captureTableAnnotationIdentity(doc) : "";
     if (isTauriRuntime()) {
       const saved = await saveDocumentNative(doc, true, { validateTarget: (path) => validateSaveTarget(doc, path) });
       if (!saved) return false;
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
       grid.draw();
       renderChrome();
       return true;
@@ -434,12 +529,14 @@ export function createDocumentController({
       doc.name = handle.name ?? doc.name;
       markDocumentSaved(doc, snapshot.revision, snapshot);
       await lspRebindSavedDoc(doc, previousUri);
+      if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
       renderChrome();
       return true;
     }
     const snapshot = documentTextSnapshot(doc);
     downloadText(doc.name, snapshot.text, doc.encoding);
     markDocumentSaved(doc, snapshot.revision, snapshot);
+    if (isTableDocument(doc)) onTableDocumentSaved(doc, { saveAs: true, previousKey: previousAnnotationIdentity });
     renderChrome();
     return true;
   }
@@ -483,6 +580,7 @@ export function createDocumentController({
       : null;
     if (!lspClosePromise && isTableDocument(doc)) cancelLegacyLintJobs({ clearDiagnostics: false });
     const documentCountBeforeClose = state.docs.length;
+    if (isTableDocument(doc)) onTableDocumentClosed(doc);
     state.docs.splice(index, 1);
     if (!state.docs.length) {
       state.active = -1;
@@ -689,6 +787,7 @@ export function createDocumentController({
     openDroppedNativePaths,
     openFile,
     openFolder,
+    restoreWorkspace,
     openJsonDocumentPath,
     saveAs,
     saveFile,

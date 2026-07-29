@@ -20,6 +20,7 @@ export function sameProblemsPresentation(left = [], right = []) {
   const fields = [
     "id", "fileKey", "fileName", "rowIndex", "columnIndex",
     "severity", "message", "ruleId", "profile", "navigationDisabled",
+    "columnName", "rowLabel", "recordKey", "offendingValue", "filePath",
     "startCharacter", "endCharacter", "endRowIndex"
   ];
   return left.every((diagnostic, index) => fields.every(

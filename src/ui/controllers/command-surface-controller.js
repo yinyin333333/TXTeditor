@@ -13,6 +13,7 @@ import {
 } from "../context-menu-policy.js";
 import { shortcutDisplayForAction } from "../shortcut-policy.js";
 import { tText } from "../../core/i18n.js";
+import { MANUAL_HIGHLIGHT_PALETTE } from "../manual-highlight.js";
 
 export function createCommandSurfaceController({
   state,
@@ -25,8 +26,11 @@ export function createCommandSurfaceController({
   cellHasReference,
   clearVisibleLspHover,
   showError,
-  escapeHtml
+  escapeHtml,
+  manualHighlights = null
 }) {
+  let diagnosticContextMenu = null;
+
   function showPalette() {
     hideContextMenu();
     els.palette.classList.remove("hidden");
@@ -51,6 +55,7 @@ export function createCommandSurfaceController({
   }
 
   function showContextMenu({ x, y, hit }) {
+    diagnosticContextMenu = null;
     state.contextHit = hit;
     state.contextMenuActiveGroup = "";
     setContextMenuOpen(true);
@@ -65,6 +70,7 @@ export function createCommandSurfaceController({
       { id: "unhide-all", label: tText("menu.unhideAll"), disabled: !canUnhide },
       { type: "submenu", label: tText("menu.fill"), items: fillCommandItems() },
       { type: "submenu", label: tText("menu.math"), items: mathCommandItems() },
+      { type: "submenu", id: "highlight", label: tText("highlight.menu"), items: highlightItems() },
       { id: "go-to-definition", label: tText("menu.goToDefinition"), disabled: !cellHasReference(focusRow, focusCol) },
       { id: "cut", label: tText("command.cut"), shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
       { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
@@ -74,6 +80,22 @@ export function createCommandSurfaceController({
     for (const button of els.contextMenu.querySelectorAll("button[data-run]")) {
       button.addEventListener("click", () => {
         Promise.resolve(runCommand(button.dataset.run)).catch(showError);
+        hideContextMenu();
+      });
+    }
+    for (const button of els.contextMenu.querySelectorAll("button[data-highlight-color]")) {
+      button.addEventListener("click", () => {
+        Promise.resolve(manualHighlights?.applyColor(button.dataset.highlightColor)).catch(showError);
+        hideContextMenu();
+      });
+    }
+    for (const button of els.contextMenu.querySelectorAll("button[data-highlight-action]")) {
+      button.addEventListener("click", () => {
+        const action = button.dataset.highlightAction;
+        const result = action === "remove"
+          ? manualHighlights?.removeSelection()
+          : manualHighlights?.clearAll();
+        Promise.resolve(result).catch(showError);
         hideContextMenu();
       });
     }
@@ -95,14 +117,42 @@ export function createCommandSurfaceController({
     positionContextMenu();
   }
 
+  function showDiagnosticContextMenu({ x, y, onCopyMessage, onCopyFull }) {
+    diagnosticContextMenu = { x, y, onCopyMessage, onCopyFull };
+    state.contextHit = null;
+    state.contextMenuActiveGroup = "";
+    setContextMenuOpen(true);
+    const entries = [
+      { id: "message", label: tText("problems.copyMessage") },
+      { id: "full", label: tText("problems.copyFull") }
+    ];
+    els.contextMenu.innerHTML = entries.map((entry) => (
+      `<button data-diagnostic-copy="${entry.id}"><span>${escapeHtml(entry.label)}</span></button>`
+    )).join("");
+    for (const button of els.contextMenu.querySelectorAll("button[data-diagnostic-copy]")) {
+      button.addEventListener("click", () => {
+        const callback = button.dataset.diagnosticCopy === "message" ? onCopyMessage : onCopyFull;
+        Promise.resolve(callback?.()).catch(showError);
+        hideContextMenu();
+      });
+    }
+    els.contextMenu.classList.remove("hidden");
+    els.contextMenu.dataset.x = String(x);
+    els.contextMenu.dataset.y = String(y);
+    positionContextMenu();
+  }
+
   function rerenderOpenSurface() {
     if (!els.palette.classList.contains("hidden")) renderPalette();
     if (!els.contextMenu.classList.contains("hidden")) {
-      showContextMenu({
-        x: Number(els.contextMenu.dataset.x),
-        y: Number(els.contextMenu.dataset.y),
-        hit: state.contextHit
-      });
+      if (diagnosticContextMenu) showDiagnosticContextMenu(diagnosticContextMenu);
+      else {
+        showContextMenu({
+          x: Number(els.contextMenu.dataset.x),
+          y: Number(els.contextMenu.dataset.y),
+          hit: state.contextHit
+        });
+      }
     }
   }
 
@@ -158,6 +208,7 @@ export function createCommandSurfaceController({
 
   function hideContextMenu() {
     els.contextMenu.classList.add("hidden");
+    diagnosticContextMenu = null;
     Object.assign(state, contextMenuHiddenState());
     setContextMenuOpen(false);
     closeContextSubmenu();
@@ -175,13 +226,48 @@ export function createCommandSurfaceController({
   }
 
   function menuEntry(entry) {
-    if (entry.type === "submenu") return submenu(entry.label, entry.items);
+    if (entry.type === "submenu") return submenu(entry.label, entry.items, entry.id);
     return menuButton(entry);
   }
 
-  function submenu(label, items) {
-    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu">${items.map(menuButton).join("")}</div></div>`;
+  function submenu(label, items, id = "") {
+    const key = id || label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const submenuClass = id ? ` submenu-${id}` : "";
+    return `<div class="menu-group" data-menu-group="${key}"><button class="submenu-label"><span>${escapeHtml(label)}</span><span class="menu-arrow">></span></button><div class="submenu${submenuClass}">${items.map(submenuEntry).join("")}</div></div>`;
+  }
+
+  function submenuEntry(item) {
+    if (item.type === "separator") return `<div class="separator" role="separator"></div>`;
+    if (item.type === "highlight-color") {
+      return `<button data-highlight-color="${escapeHtml(item.color)}"><span class="highlight-menu-label"><span class="highlight-swatch" data-highlight-color="${escapeHtml(item.color)}"></span>${escapeHtml(item.label)}</span></button>`;
+    }
+    if (item.type === "highlight-action") {
+      return `<button data-highlight-action="${escapeHtml(item.action)}" ${item.disabled ? "disabled" : ""}><span>${escapeHtml(item.label)}</span></button>`;
+    }
+    return menuButton(item);
+  }
+
+  function highlightItems() {
+    return [
+      ...MANUAL_HIGHLIGHT_PALETTE.map(({ id, labelKey }) => ({
+        type: "highlight-color",
+        color: id,
+        label: tText(labelKey)
+      })),
+      { type: "separator" },
+      {
+        type: "highlight-action",
+        action: "remove",
+        label: tText("highlight.remove"),
+        disabled: !manualHighlights?.selectionHasHighlight?.()
+      },
+      {
+        type: "highlight-action",
+        action: "clear-all",
+        label: tText("highlight.clearAll"),
+        disabled: !manualHighlights?.hasAnyHighlights?.()
+      }
+    ];
   }
 
   function rowItems() {
@@ -201,6 +287,7 @@ export function createCommandSurfaceController({
     renderPalette,
     setContextMenuOpen,
     showContextMenu,
+    showDiagnosticContextMenu,
     showPalette
   };
 }

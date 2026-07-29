@@ -1,8 +1,20 @@
 import { isTauriRuntime, tauriApi } from "./tauri-api.js";
 import { normalizeLocale } from "../i18n.js";
 
+let generationReservationQueue = Promise.resolve();
+
 function withGeneration(payload, generation) {
   return generation == null ? payload : { ...payload, generation };
+}
+
+export function lspReserveGeneration() {
+  if (!isTauriRuntime()) return Promise.resolve();
+  const reservation = generationReservationQueue.then(async () => {
+    const api = await tauriApi();
+    return api.invoke("lsp_reserve_generation");
+  });
+  generationReservationQueue = reservation.catch(() => {});
+  return reservation;
 }
 
 export async function lspStart(workspacePath, generation, contextMode = "workspace", referenceRootPath = "", includeSubfolders = true, locale = "enUS") {
@@ -64,6 +76,12 @@ export async function lspHover(uri, line, character, generation) {
   if (!isTauriRuntime()) return null;
   const api = await tauriApi();
   return api.invoke("lsp_hover", withGeneration({ uri, line, character }, generation));
+}
+
+export async function lspFieldMetadata(uri, columnName, generation) {
+  if (!isTauriRuntime()) return null;
+  const api = await tauriApi();
+  return api.invoke("lsp_field_metadata", withGeneration({ uri, columnName }, generation));
 }
 
 export async function lspDefinition(uri, line, character, generation) {

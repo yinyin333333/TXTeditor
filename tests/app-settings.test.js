@@ -24,6 +24,7 @@ function makeSettingsController({
   lspStarted = false,
   lintEnabled = true,
   saveConfigError = null,
+  saveConfigHandler = null,
   workspace = null,
   legacy = false,
   listWorkspaceHandler = null
@@ -36,6 +37,7 @@ function makeSettingsController({
     if (command === "get_config") return config;
     if (command === "save_config") {
       if (saveConfigError) throw saveConfigError;
+      if (saveConfigHandler) return saveConfigHandler(args);
       return undefined;
     }
     if (command === "open_folder_dialog") return "E:\\PickedFolder";
@@ -61,6 +63,9 @@ function makeSettingsController({
     locale: "enUS",
     colorizeColumns: true,
     mouseResizeLocked: false,
+    autoResizeToFitOnOpen: false,
+    keepZoomLevel: false,
+    rememberedZoomLevel: 1,
     excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
@@ -88,9 +93,11 @@ function makeSettingsController({
     },
     config: { ...config }
   };
+  const lintControls = document.createElement("div");
+  const lintRulesPanel = document.createElement("div");
   const controller = createSettingsController({
     state,
-    els: { host, lintControls: document.createElement("div"), lintRulesPanel: document.createElement("div") },
+    els: { host, lintControls, lintRulesPanel },
     grid: {
       syncTheme: () => calls.push("sync-theme"),
       draw: () => calls.push("draw"),
@@ -131,7 +138,7 @@ function makeSettingsController({
     },
     escapeHtml
   });
-  return { controller, document, calls, host, lspStarts, state };
+  return { controller, document, calls, host, lintControls, lintRulesPanel, lspStarts, state };
 }
 
 async function waitForSelector(document, selector) {
@@ -143,6 +150,14 @@ async function waitForSelector(document, selector) {
   return null;
 }
 
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.fail("Timed out waiting for the expected async operation.");
+}
+
 test("App Settings modal renders visual controls in the controller behavior path", () => {
   const { controller, document } = makeSettingsController();
 
@@ -150,12 +165,13 @@ test("App Settings modal renders visual controls in the controller behavior path
 
   assert.equal(document.body.querySelector("#settingsColorizeColumns")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsMouseResizeLocked")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsAutoResizeToFitOnOpen")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
-  assert.equal(document.body.querySelector("#settingsVectorLspHover")?.tagName, "INPUT");
+  assert.equal(document.body.querySelector("#settingsVectorLspHover"), null);
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("#settingsLocale")?.tagName, "SELECT");
-  assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']")?.tagName, "BUTTON");
-  assert.equal(document.body.querySelector("[data-settings-lint-engine='legacy']")?.tagName, "BUTTON");
+  assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']"), null);
+  assert.equal(document.body.querySelector("[data-settings-lint-engine='legacy']"), null);
   assert.equal(document.body.querySelector("[data-settings-theme='dark']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
@@ -285,6 +301,52 @@ test("mouse resize lock defaults off, applies immediately, and is restored from 
   assert.equal(createInitialAppState({ storage: localStorage }).state.mouseResizeLocked, true);
 });
 
+test("automatic Resize To Fit on open defaults off and is restored from storage", () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.autoResizeToFitOnOpen, false);
+
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsAutoResizeToFitOnOpen");
+  assert.equal(input.checked, false);
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+
+  assert.equal(state.autoResizeToFitOnOpen, true);
+  assert.equal(localStorage.getItem("txteditor.autoResizeToFitOnOpen"), "on");
+  assert.equal(calls.includes("render"), true);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.autoResizeToFitOnOpen, true);
+});
+
+test("Keep zoom level defaults off, persists independently, and records only while enabled", () => {
+  const { controller, document, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.keepZoomLevel, false);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.rememberedZoomLevel, 1);
+
+  controller.recordZoomLevel(1.5);
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), null);
+  controller.showAppSettings();
+  const input = document.body.querySelector("#settingsKeepZoomLevel");
+  assert.equal(input.checked, false);
+  assert.equal(input.parentElement.textContent.trim(), "Keep zoom level");
+
+  input.checked = true;
+  input.dispatchEvent({ type: "change", bubbles: true });
+  assert.equal(state.keepZoomLevel, true);
+  assert.equal(localStorage.getItem("txteditor.keepZoomLevel"), "on");
+  controller.recordZoomLevel(1.5);
+  assert.equal(state.rememberedZoomLevel, 1.5);
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), "1.5");
+
+  input.checked = false;
+  input.dispatchEvent({ type: "change", bubbles: true });
+  controller.recordZoomLevel(1.8);
+  assert.equal(localStorage.getItem("txteditor.keepZoomLevel"), "off");
+  assert.equal(localStorage.getItem("txteditor.zoomLevel"), "1.5");
+  assert.equal(createInitialAppState({ storage: localStorage }).state.keepZoomLevel, false);
+  assert.equal(createInitialAppState({ storage: localStorage }).state.rememberedZoomLevel, 1.5);
+});
+
 test("App Settings closes on Escape and removes its temporary key listener", () => {
   const { controller, document, host } = makeSettingsController();
 
@@ -396,7 +458,7 @@ test("Lint Options recreates itself in the new locale without discarding an open
   document.body.querySelector("[data-settings-choice='cancel']").click();
 });
 
-test("standalone Vector Lint Options save and Restart LSP force-rebind the active document session", async () => {
+test("Vector Lint Options retain diagnostics settings while Game Version is toolbar-only", async () => {
   const { controller, document, calls, state } = makeSettingsController({
     lspStarted: true,
     diagnostics: [{ id: "old" }],
@@ -405,6 +467,10 @@ test("standalone Vector Lint Options save and Restart LSP force-rebind the activ
 
   const savePending = controller.showSettings();
   assert.ok(await waitForSelector(document, ".settings-modal"));
+  assert.equal(document.body.querySelectorAll("#settingsGameVersion").length, 0);
+  assert.equal(document.body.querySelector("#settingsBasicSection")?.classList.contains("hidden"), false);
+  assert.equal(document.body.querySelector("#settingsSchemaVersion"), null);
+  assert.equal(document.body.querySelector("#settingsReferenceVersion"), null);
   const jsonDiagnostics = document.body.querySelector("#settingsJsonDiagnostics");
   assert.equal(jsonDiagnostics.checked, false);
   assert.equal(document.body.querySelector("#settingsJsonDuplicateIdsAction").disabled, true);
@@ -416,13 +482,12 @@ test("standalone Vector Lint Options save and Restart LSP force-rebind the activ
   document.body.querySelector("#settingsJsonStringFormatAction").value = "ignore";
   document.body.querySelector("#settingsJsonKeyUsageAction").value = "warn";
   document.body.querySelector("#settingsJsonKeyUsageIdStart").value = "56000.5";
-  document.body.querySelector("#settingsSchemaVersion").value = "3.1";
-  document.body.querySelector("#settingsReferenceVersion").value = "3.1";
   document.body.querySelector("[data-settings-choice='save']").click();
   await savePending;
 
-  assert.equal(state.config.schemaVersion, "3.1");
-  assert.equal(state.config.referenceVersion, "3.1");
+  assert.equal(state.config.schemaVersion, "3.2");
+  assert.equal(state.config.referenceVersion, "3.2");
+  assert.equal(state.config.gameVersion, "3.2");
   assert.equal(state.config.jsonDiagnostics, true);
   assert.deepEqual(state.config.jsonDiagnosticRules, {
     duplicateIds: { action: "warn" },
@@ -447,15 +512,16 @@ test("standalone Vector Lint Options save and Restart LSP force-rebind the activ
   ]);
 });
 
-test("Legacy reference changes force a fresh Vector session while lint reactivation ensures one", async () => {
+test("Legacy game-version changes force a fresh Vector session while lint reactivation ensures one", async () => {
   const engineSwitch = makeSettingsController({
     legacy: true,
     config: { schemaVersion: "3.2", referenceVersion: "3.2" }
   });
-  assert.equal(await engineSwitch.controller.setLegacyLintReferenceVersion("3.1"), true);
+  assert.equal(await engineSwitch.controller.setLegacyGameVersion("3.1"), true);
   engineSwitch.controller.setLintEngine(LINT_ENGINE_VECTOR);
   assert.equal(engineSwitch.state.lint.engine, LINT_ENGINE_VECTOR);
   assert.equal(engineSwitch.state.config.referenceVersion, "3.1");
+  assert.equal(engineSwitch.state.config.gameVersion, "3.1");
   assert.deepEqual(engineSwitch.calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
     ["ensure-document-session", { forceRestart: true }]
   ]);
@@ -503,7 +569,7 @@ test("Lint Off stops Vector-LSP and Lint On rebuilds the workspace session", asy
   assert.deepEqual(disabled.lspStarts, [["E:\\Workspace", { includeSubfolders: true }]]);
 });
 
-test("rapid Legacy reference selections persist latest-wins and schedule one immediate re-lint", async () => {
+test("rapid Legacy game-version selections persist latest-wins and schedule one immediate re-lint", async () => {
   const { controller, calls, state } = makeSettingsController({
     legacy: true,
     diagnostics: [{ id: "old" }],
@@ -511,21 +577,206 @@ test("rapid Legacy reference selections persist latest-wins and schedule one imm
     config: { lintMode: "basic", schemaVersion: "3.2" }
   });
 
-  const first = controller.setLegacyLintReferenceVersion("3.1");
-  const latest = controller.setLegacyLintReferenceVersion("2.4");
+  const first = controller.setLegacyGameVersion("3.1");
+  const latest = controller.setLegacyGameVersion("2.4");
   assert.equal(await first, false);
   assert.equal(await latest, true);
 
   assert.equal(state.config.referenceVersion, "2.4");
+  assert.equal(state.config.gameVersion, "2.4");
+  assert.equal(state.config.schemaVersion, "2.4");
   assert.deepEqual(state.lint.diagnostics, []);
   assert.equal(state.lint.legacy.referenceDataset.status, "not-started");
   assert.deepEqual(state.lint.legacy.referenceDataset.documents, []);
   assert.deepEqual(state.lint.legacy.workspaceIndexCache, { signature: "", profile: "", index: null });
   assert.equal(calls.some((entry) => entry === "lsp-start"), false);
-  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "reference-version-changed" && entry[2] === 0).length, 1);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "game-version-changed" && entry[2] === 0).length, 1);
   assert.deepEqual(calls
     .filter((entry) => Array.isArray(entry) && entry[0] === "invoke" && entry[1] === "save_config")
     .map((entry) => entry[2].config.referenceVersion), ["3.1", "2.4"]);
+});
+
+test("cross-engine game-version selections share one latest-wins save queue", async () => {
+  const pendingSaves = [];
+  const { controller, calls, state } = makeSettingsController({
+    config: { gameVersion: "3.2", schemaVersion: "3.2", referenceVersion: "3.2" },
+    saveConfigHandler: () => new Promise((resolve) => pendingSaves.push(resolve))
+  });
+
+  const stale = controller.setVectorGameVersion("3.1");
+  await waitFor(() => pendingSaves.length === 1);
+  controller.setLintEngine("legacy");
+  const latest = controller.setLegacyGameVersion("2.4");
+  pendingSaves.shift()();
+  await waitFor(() => pendingSaves.length === 1);
+  pendingSaves.shift()();
+
+  assert.equal(await stale, false);
+  assert.equal(await latest, true);
+  assert.deepEqual(
+    { gameVersion: state.config.gameVersion, schemaVersion: state.config.schemaVersion, referenceVersion: state.config.referenceVersion },
+    { gameVersion: "2.4", schemaVersion: "2.4", referenceVersion: "2.4" }
+  );
+  assert.equal(state.lint.legacy.settings.profile, "2.4");
+  assert.equal(state.lint.legacy.referenceDataset.status, "not-started");
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "game-version-changed").length, 1);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session").length, 0);
+});
+
+test("a pending Legacy version applies one Vector rebind after an engine switch", async () => {
+  const pendingSaves = [];
+  const { controller, calls, state } = makeSettingsController({
+    legacy: true,
+    config: { gameVersion: "3.2", schemaVersion: "3.2", referenceVersion: "3.2" },
+    saveConfigHandler: () => new Promise((resolve) => pendingSaves.push(resolve))
+  });
+
+  const selection = controller.setLegacyGameVersion("3.1");
+  await waitFor(() => pendingSaves.length === 1);
+  controller.setLintEngine(LINT_ENGINE_VECTOR);
+  pendingSaves.shift()();
+
+  assert.equal(await selection, true);
+  assert.equal(state.config.gameVersion, "3.1");
+  assert.equal(state.lint.engine, LINT_ENGINE_VECTOR);
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy").length, 0);
+});
+
+test("a pending Vector version applies one Legacy reference refresh after an engine switch", async () => {
+  const pendingSaves = [];
+  const { controller, calls, state } = makeSettingsController({
+    config: { gameVersion: "3.2", schemaVersion: "3.2", referenceVersion: "3.2" },
+    saveConfigHandler: () => new Promise((resolve) => pendingSaves.push(resolve))
+  });
+
+  const selection = controller.setVectorGameVersion("1.13c");
+  await waitFor(() => pendingSaves.length === 1);
+  controller.setLintEngine("legacy");
+  pendingSaves.shift()();
+
+  assert.equal(await selection, true);
+  assert.equal(state.config.gameVersion, "1.13c");
+  assert.equal(state.lint.legacy.settings.profile, "1.13c");
+  assert.equal(state.lint.legacy.referenceDataset.status, "not-started");
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "game-version-changed").length, 1);
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session").length, 0);
+});
+
+test("toolbar game-version changes keep Vector coherent and latest selection wins", async () => {
+  const { controller, calls, lintControls, state } = makeSettingsController({
+    diagnostics: [{ id: "old" }],
+    config: { gameVersion: "3.2", schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+
+  controller.renderLintControls();
+  assert.equal(lintControls.querySelectorAll("#lintEngineSelect").length, 1);
+  assert.equal(lintControls.querySelectorAll("#lintGameVersionSelect").length, 1);
+  assert.equal(lintControls.querySelectorAll("[data-command='toggle-vector-lsp-hover']").length, 1);
+  assert.equal(lintControls.querySelectorAll("[data-command='open-settings']").length, 1);
+
+  const first = controller.setVectorGameVersion("3.1");
+  const latest = controller.setVectorGameVersion("1.13c");
+  assert.equal(await first, false);
+  assert.equal(await latest, true);
+  assert.deepEqual(
+    { gameVersion: state.config.gameVersion, schemaVersion: state.config.schemaVersion, referenceVersion: state.config.referenceVersion },
+    { gameVersion: "1.13c", schemaVersion: "1.13", referenceVersion: "1.13c" }
+  );
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+  assert.equal(state.lint.legacy.settings.profile, "1.13c");
+});
+
+test("toolbar changes engine immediately, preserves hover, and only shows it for Vector-LSP", () => {
+  const { controller, lintControls, state, calls } = makeSettingsController();
+  controller.renderLintControls();
+  assert.match(lintControls.innerHTML, /data-command="toggle-vector-lsp-hover"/);
+  controller.toggleVectorLspHover();
+  assert.equal(state.vectorLspHover, false);
+
+  controller.setLintEngine("legacy");
+  controller.renderLintControls();
+  assert.doesNotMatch(lintControls.innerHTML, /data-command="toggle-vector-lsp-hover"/);
+  assert.match(lintControls.innerHTML, /data-command="toggle-lint-rules"/);
+  assert.equal(calls.some((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy"), true);
+});
+
+test("Advanced Vector options preserve custom paths while Game Version stays toolbar-only", async () => {
+  const { controller, document, calls, state } = makeSettingsController({
+    lspStarted: true,
+    config: {
+      lintMode: "advanced",
+      gameVersion: "3.2",
+      schemaVersion: "3.2",
+      referenceVersion: "3.2",
+      pluginPath: "E:\\Plugins",
+      schemaPath: "E:\\Schemas",
+      vectorLspPath: "E:\\Tools\\vector-lsp.exe"
+    }
+  });
+  const pending = controller.showSettings();
+  assert.ok(await waitForSelector(document, ".settings-modal"));
+  assert.equal(document.body.querySelectorAll("#settingsGameVersion").length, 0);
+  assert.equal(document.body.querySelector("#settingsAdvancedSection")?.classList.contains("hidden"), false);
+  assert.equal(document.body.querySelector("#settingsPluginPath")?.value, "E:\\Plugins");
+  document.body.querySelector("[data-settings-choice='save']").click();
+  await pending;
+
+  assert.deepEqual(
+    { gameVersion: state.config.gameVersion, schemaVersion: state.config.schemaVersion, referenceVersion: state.config.referenceVersion },
+    { gameVersion: "3.2", schemaVersion: "3.2", referenceVersion: "3.2" }
+  );
+  assert.equal(state.config.pluginPath, "E:\\Plugins");
+  assert.equal(state.config.schemaPath, "E:\\Schemas");
+  assert.equal(state.config.vectorLspPath, "E:\\Tools\\vector-lsp.exe");
+  assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "ensure-document-session"), [
+    ["ensure-document-session", { forceRestart: true }]
+  ]);
+});
+
+test("switching from Vector to Legacy remaps stale Legacy families from the unified version", async () => {
+  for (const [gameVersion, staleProfile, family] of [
+    ["3.1", "2.4", "RotW"],
+    ["3.2", "1.13c", "RotW"],
+    ["1.13c", "RotW", "1.13c"]
+  ]) {
+    const { controller, calls, state } = makeSettingsController({
+      config: {
+        gameVersion,
+        schemaVersion: gameVersion === "1.13c" ? "1.13" : gameVersion,
+        referenceVersion: gameVersion
+      }
+    });
+    state.lint.legacy.settings.profile = staleProfile;
+    await controller.loadConfig();
+    assert.equal(state.lint.legacy.settings.profile, family);
+    state.lint.legacy.settings.profile = staleProfile;
+    controller.setLintEngine("legacy");
+
+    assert.equal(state.lint.legacy.settings.profile, family);
+    assert.equal(state.config.referenceVersion, gameVersion);
+    assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy" && entry[1] === "engine-switched-legacy").length, 1);
+  }
+});
+
+test("one Legacy game version selection atomically maps its rule family and bundled reference", async () => {
+  const { controller, calls, state } = makeSettingsController({
+    legacy: true,
+    config: { schemaVersion: "3.2", referenceVersion: "3.2" }
+  });
+  state.lint.legacy.settings.profile = "RotW";
+
+  assert.equal(await controller.setLegacyGameVersion("1.13c"), true);
+  assert.equal(state.lint.legacy.settings.profile, "1.13c");
+  assert.deepEqual(
+    { gameVersion: state.config.gameVersion, schemaVersion: state.config.schemaVersion, referenceVersion: state.config.referenceVersion },
+    { gameVersion: "1.13c", schemaVersion: "1.13", referenceVersion: "1.13c" }
+  );
+  assert.equal(calls.filter((entry) => Array.isArray(entry) && entry[0] === "schedule-legacy").length, 1);
 });
 
 test("Lint Options Escape behaves like Cancel without saving or restarting LSP", async () => {

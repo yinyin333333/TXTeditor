@@ -1,4 +1,5 @@
 import { TableDocument } from "./table-model.js";
+import { legacyGameVersion } from "./game-version.js";
 
 const REFERENCE_VERSION_ALIASES = new Map([
   ["1.13", "1.13c"],
@@ -10,7 +11,8 @@ const REFERENCE_VERSION_ALIASES = new Map([
 
 const PROFILE_REFERENCE_VERSIONS = new Map([
   ["rotw", "3.2"],
-  ["2.4", "2.4"]
+  ["2.4", "2.4"],
+  ["1.13c", "1.13c"]
 ]);
 
 export function normalizeLintReferenceVersion(value) {
@@ -20,6 +22,9 @@ export function normalizeLintReferenceVersion(value) {
 // An explicit reference selection has the strongest authority. An invalid
 // explicit value is not silently replaced with a different game version.
 export function resolveLegacyLintReferenceVersion(config = {}, profile = "") {
+  if (String(config?.gameVersion ?? "").trim()) {
+    return legacyGameVersion(config, profile);
+  }
   const explicit = String(config?.referenceVersion ?? "").trim();
   if (explicit) return normalizeLintReferenceVersion(explicit);
 

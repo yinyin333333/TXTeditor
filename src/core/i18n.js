@@ -50,6 +50,21 @@ const CATALOG_ROWS = {
   "empty.open": ["Open a file or folder to begin", "開啟檔案或資料夾以開始", "Öffnen Sie zum Starten eine Datei oder einen Ordner", "Abra un archivo o una carpeta para comenzar", "Ouvrez un fichier ou un dossier pour commencer", "Apri un file o una cartella per iniziare", "시작하려면 파일 또는 폴더를 여세요", "Otwórz plik lub folder, aby rozpocząć", "Abra un archivo o una carpeta para comenzar", "開始するにはファイルまたはフォルダーを開きます", "Abra um arquivo ou pasta para começar", "Откройте файл или папку, чтобы начать", "打开文件或文件夹以开始"],
   "explorer.search": ["Search file", "搜尋檔案", "Datei suchen", "Buscar archivo", "Rechercher un fichier", "Cerca file", "파일 검색", "Szukaj pliku", "Buscar archivo", "ファイルを検索", "Pesquisar arquivo", "Поиск файла", "搜索文件"],
   "problems.log": ["Log", "記錄", "Protokoll", "Registro", "Journal", "Registro", "로그", "Dziennik", "Registro", "ログ", "Registro", "Журнал", "日志"],
+  "problems.copyMessage": ["Copy message", "複製訊息", "Meldung kopieren", "Copiar mensaje", "Copier le message", "Copia messaggio", "메시지 복사", "Kopiuj komunikat", "Copiar mensaje", "メッセージをコピー", "Copiar mensagem", "Копировать сообщение", "复制消息"],
+  "problems.copyFull": ["Copy full diagnostic", "複製完整診斷", "Vollständige Diagnose kopieren", "Copiar diagnóstico completo", "Copier le diagnostic complet", "Copia diagnostica completa", "전체 진단 복사", "Kopiuj pełną diagnostykę", "Copiar diagnóstico completo", "診断情報をすべてコピー", "Copiar diagnóstico completo", "Копировать диагностику полностью", "复制完整诊断"],
+  "problems.displayLocation": ["Row ID: {row} · Column: {column}", "列 ID：{row} · 欄：{column}", "Zeilen-ID: {row} · Spalte: {column}", "ID de fila: {row} · Columna: {column}", "ID de ligne : {row} · Colonne : {column}", "ID riga: {row} · Colonna: {column}", "행 ID: {row} · 열: {column}", "Identyfikator wiersza: {row} · Kolumna: {column}", "ID de fila: {row} · Columna: {column}", "行 ID: {row} · 列: {column}", "ID da linha: {row} · Coluna: {column}", "ID строки: {row} · Столбец: {column}", "行 ID：{row} · 列：{column}"],
+  "problems.displayRow": ["Row ID: {row}", "列 ID：{row}", "Zeilen-ID: {row}", "ID de fila: {row}", "ID de ligne : {row}", "ID riga: {row}", "행 ID: {row}", "Identyfikator wiersza: {row}", "ID de fila: {row}", "行 ID: {row}", "ID da linha: {row}", "ID строки: {row}", "行 ID：{row}"],
+  "problems.displayColumn": ["Column: {column}", "欄：{column}", "Spalte: {column}", "Columna: {column}", "Colonne : {column}", "Colonna: {column}", "열: {column}", "Kolumna: {column}", "Columna: {column}", "列: {column}", "Coluna: {column}", "Столбец: {column}", "列：{column}"],
+  "problems.copy.inlineSeparator": [": ", "：", " – ", " — ", " : ", " – ", " · ", " — ", " — ", "：", " — ", " — ", "："],
+  "problems.copy.blockSeparator": [":\n", "：\n", " –\n", " —\n", " :\n", " –\n", " ·\n", " —\n", " —\n", "：\n", " —\n", " —\n", "：\n"],
+  "problems.copy.file": ["File", "檔案", "Datei", "Archivo", "Fichier", "Documento", "파일", "Plik", "Archivo", "ファイル", "Arquivo", "Файл", "文件"],
+  "problems.copy.path": ["Path", "路徑", "Pfad", "Ruta", "Chemin", "Percorso", "경로", "Ścieżka", "Ruta", "パス", "Caminho", "Путь", "路径"],
+  "problems.copy.row": ["Row ID", "列 ID", "Zeilen-ID", "ID de fila", "ID de ligne", "ID riga", "행 ID", "Identyfikator wiersza", "ID de fila", "行 ID", "ID da linha", "ID строки", "行 ID"],
+  "problems.copy.column": ["Column", "欄位", "Spalte", "Columna", "Colonne", "Colonna", "열", "Kolumna", "Columna", "列", "Coluna", "Столбец", "列"],
+  "problems.copy.messageLabel": ["Message", "訊息", "Meldung", "Mensaje", "Message de diagnostic", "Messaggio", "메시지", "Komunikat", "Mensaje", "メッセージ", "Mensagem", "Сообщение", "消息"],
+  "problems.copy.rule": ["Rule ID", "規則 ID", "Regel-ID", "ID de regla", "ID de règle", "ID regola", "규칙 ID", "Identyfikator reguły", "ID de regla", "ルール ID", "ID da regra", "Идентификатор правила", "规则 ID"],
+  "problems.copy.profile": ["Rule profile", "規則設定檔", "Regelprofil", "Perfil de reglas", "Profil de règles", "Profilo regole", "규칙 프로필", "Profil reguł", "Perfil de reglas", "ルールプロファイル", "Perfil de regras", "Профиль правил", "规则配置"],
+  "problems.copy.value": ["Cell value", "儲存格值", "Zellenwert", "Valor de celda", "Valeur de cellule", "Valore cella", "셀 값", "Wartość komórki", "Valor de celda", "セルの値", "Valor da célula", "Значение ячейки", "单元格值"],
   "search.title": ["Find", "尋找", "Suchen", "Buscar", "Rechercher", "Trova", "찾기", "Znajdź", "Buscar", "検索", "Localizar", "Найти", "查找"],
   "search.placeholder": ["Search in current table", "在目前表格中搜尋", "In aktueller Tabelle suchen", "Buscar en la tabla actual", "Rechercher dans le tableau actuel", "Cerca nella tabella corrente", "현재 표에서 검색", "Szukaj w bieżącej tabeli", "Buscar en la tabla actual", "現在の表を検索", "Pesquisar na tabela atual", "Искать в текущей таблице", "在当前表中搜索"],
   "search.replaceWith": ["Replace with", "取代為", "Ersetzen durch", "Reemplazar por", "Remplacer par", "Sostituisci con", "바꿀 내용", "Zamień na", "Reemplazar por", "置換後", "Substituir por", "Заменить на", "替换为"],
@@ -60,6 +75,21 @@ const CATALOG_ROWS = {
   "search.replaceAll": ["Replace All", "全部取代", "Alle ersetzen", "Reemplazar todo", "Tout remplacer", "Sostituisci tutto", "모두 바꾸기", "Zamień wszystko", "Reemplazar todo", "すべて置換", "Substituir tudo", "Заменить все", "全部替换"],
   "search.previous": ["Find Prev", "尋找上一個", "Vorherige suchen", "Buscar anterior", "Rechercher précédent", "Trova precedente", "이전 찾기", "Znajdź poprzedni", "Buscar anterior", "前を検索", "Localizar anterior", "Найти предыдущее", "查找上一个"],
   "search.next": ["Find Next", "尋找下一個", "Nächste suchen", "Buscar siguiente", "Rechercher suivant", "Trova successivo", "다음 찾기", "Znajdź następny", "Buscar siguiente", "次を検索", "Localizar próximo", "Найти следующее", "查找下一个"],
+  "search.findAll": ["Find All", "尋找全部", "Alle suchen", "Buscar todo", "Tout rechercher", "Trova tutto", "모두 찾기", "Znajdź wszystkie", "Buscar todo", "すべて検索", "Localizar tudo", "Найти все", "查找全部"],
+  "search.matchCase": ["Match case", "區分大小寫", "Groß-/Kleinschreibung", "Distinguir mayúsculas", "Respecter la casse", "Maiuscole/minuscole", "대/소문자 구분", "Uwzględnij wielkość liter", "Distinguir mayúsculas", "大文字と小文字を区別", "Diferenciar maiúsculas", "Учитывать регистр", "区分大小写"],
+  "search.results": ["Search results", "搜尋結果", "Suchergebnisse", "Resultados de búsqueda", "Résultats de recherche", "Risultati di ricerca", "검색 결과", "Wyniki wyszukiwania", "Resultados de búsqueda", "検索結果", "Resultados da pesquisa", "Результаты поиска", "搜索结果"],
+  "search.searching": ["Searching…", "搜尋中…", "Suche…", "Buscando…", "Recherche…", "Ricerca…", "검색 중…", "Wyszukiwanie…", "Buscando…", "検索中…", "Pesquisando…", "Поиск…", "正在搜索…"],
+  "search.resultCount": ["{count} results", "{count} 個結果", "{count} Ergebnisse", "{count} resultados", "{count} résultats", "{count} risultati", "결과 {count}개", "{count} wyników", "{count} resultados", "{count} 件", "{count} resultados", "Результатов: {count}", "{count} 个结果"],
+  "search.resultCountLimited": ["Showing {shown} of {count} results", "顯示 {count} 個結果中的 {shown} 個", "{shown} von {count} Ergebnissen angezeigt", "Se muestran {shown} de {count} resultados", "Affichage de {shown} résultats sur {count}", "Visualizzati {shown} risultati su {count}", "결과 {count}개 중 {shown}개 표시", "Wyświetlono {shown} z {count} wyników", "Se muestran {shown} de {count} resultados", "{count} 件中 {shown} 件を表示", "Mostrando {shown} de {count} resultados", "Показано {shown} из {count} результатов", "显示 {count} 个结果中的 {shown} 个"],
+  "search.resultsStale": ["Results are outdated. Run Find All again.", "結果已過期。請再次執行「尋找全部」。", "Die Ergebnisse sind veraltet. Führen Sie „Alle suchen“ erneut aus.", "Los resultados están desactualizados. Ejecute Buscar todo otra vez.", "Les résultats sont obsolètes. Relancez Tout rechercher.", "I risultati non sono aggiornati. Esegui di nuovo Trova tutto.", "결과가 오래되었습니다. 모두 찾기를 다시 실행하세요.", "Wyniki są nieaktualne. Uruchom ponownie Znajdź wszystkie.", "Los resultados están desactualizados. Ejecute Buscar todo otra vez.", "結果が古くなっています。もう一度すべて検索を実行してください。", "Os resultados estão desatualizados. Execute Localizar tudo novamente.", "Результаты устарели. Снова выполните «Найти все».", "结果已过期。请再次执行“查找全部”。"],
+  "search.placeholderJson": ["Search in current JSON document", "在目前 JSON 文件中搜尋", "Im aktuellen JSON-Dokument suchen", "Buscar en el documento JSON actual", "Rechercher dans le document JSON actuel", "Cerca nel documento JSON corrente", "현재 JSON 문서에서 검색", "Szukaj w bieżącym dokumencie JSON", "Buscar en el documento JSON actual", "現在の JSON ドキュメントを検索", "Pesquisar no documento JSON atual", "Искать в текущем документе JSON", "在当前 JSON 文档中搜索"],
+  "search.tableResultLocation": ["Display row {row} · {column}", "顯示列 {row} · {column}", "Anzeigezeile {row} · {column}", "Fila visible {row} · {column}", "Ligne affichée {row} · {column}", "Riga visualizzata {row} · {column}", "표시 행 {row} · {column}", "Wiersz widoczny {row} · {column}", "Fila visible {row} · {column}", "表示行 {row} · {column}", "Linha exibida {row} · {column}", "Отображаемая строка {row} · {column}", "显示行 {row} · {column}"],
+  "search.jsonResultLocation": ["Line {line}, column {column}", "第 {line} 行，第 {column} 欄", "Zeile {line}, Spalte {column}", "Línea {line}, columna {column}", "Ligne {line}, colonne {column}", "Riga {line}, colonna {column}", "{line}행, {column}열", "Wiersz {line}, kolumna {column}", "Línea {line}, columna {column}", "{line} 行、{column} 列", "Linha {line}, coluna {column}", "Строка {line}, столбец {column}", "第 {line} 行，第 {column} 列"],
+  "cellInput.aria": ["Active cell input", "作用中儲存格輸入", "Eingabe der aktiven Zelle", "Entrada de celda activa", "Saisie de la cellule active", "Input cella attiva", "활성 셀 입력", "Pole aktywnej komórki", "Entrada de celda activa", "アクティブセル入力", "Entrada da célula ativa", "Ввод активной ячейки", "活动单元格输入"],
+  "cellInput.value": ["Cell value", "儲存格值", "Zellenwert", "Valor de celda", "Valeur de la cellule", "Valore della cella", "셀 값", "Wartość komórki", "Valor de celda", "セルの値", "Valor da célula", "Значение ячейки", "单元格值"],
+  "cellInput.location": ["R{row}:C{column} · {header}", "第 {row} 列：第 {column} 欄 · {header}", "Z{row}:S{column} · {header}", "F{row}:C{column} · {header}", "L{row}:C{column} · {header}", "Riga {row}:Colonna {column} · {header}", "행 {row}:열 {column} · {header}", "W{row}:K{column} · {header}", "F{row}:C{column} · {header}", "行{row}:列{column} · {header}", "L{row}:C{column} · {header}", "С{row}:К{column} · {header}", "第 {row} 行：第 {column} 列 · {header}"],
+  "cellInput.count": ["Character count: {current}/{limit}", "字元數：{current}/{limit}", "Zeichenanzahl: {current}/{limit}", "Número de caracteres: {current}/{limit}", "Nombre de caractères : {current}/{limit}", "Numero di caratteri: {current}/{limit}", "글자 수: {current}/{limit}", "Liczba znaków: {current}/{limit}", "Número de caracteres: {current}/{limit}", "文字数: {current}/{limit}", "Contagem de caracteres: {current}/{limit}", "Количество символов: {current}/{limit}", "字符数：{current}/{limit}"],
+  "cellInput.overLimit": ["Recommended length exceeded by {over}", "超過建議長度 {over} 個字元", "Empfohlene Länge um {over} überschritten", "Longitud recomendada excedida por {over}", "Longueur recommandée dépassée de {over}", "Lunghezza consigliata superata di {over}", "권장 길이를 {over}자 초과했습니다", "Przekroczono zalecaną długość o {over}", "Longitud recomendada excedida por {over}", "推奨長を {over} 文字超えています", "Comprimento recomendado excedido em {over}", "Рекомендуемая длина превышена на {over}", "超出建议长度 {over} 个字符"],
   "common.close": ["Close", "關閉", "Schließen", "Cerrar", "Fermer", "Chiudi", "닫기", "Zamknij", "Cerrar", "閉じる", "Fechar", "Закрыть", "关闭"],
   "settings.language": ["Language", "語言", "Sprache", "Idioma", "Langue", "Lingua", "언어", "Język", "Idioma", "言語", "Idioma", "Язык", "语言"],
   "settings.theme": ["Theme", "佈景主題", "Design", "Tema", "Thème", "Tema", "테마", "Motyw", "Tema", "テーマ", "Tema", "Тема", "主题"],
@@ -110,6 +140,20 @@ Object.assign(CATALOG_ROWS, {
   "menu.unhideAll": ["Unhide All", "顯示全部", "Alle einblenden", "Mostrar todo", "Tout afficher", "Mostra tutto", "모두 표시", "Pokaż wszystko", "Mostrar todo", "すべて再表示", "Mostrar tudo", "Показать всё", "显示全部"],
   "menu.fill": ["Fill", "填滿", "Ausfüllen", "Rellenar", "Remplir", "Riempi", "채우기", "Wypełnij", "Rellenar", "塗りつぶし", "Preencher", "Заполнить", "填充"],
   "menu.math": ["Math", "數學", "Mathematik", "Matemáticas", "Mathématiques", "Matematica", "수학", "Matematyka", "Matemáticas", "計算", "Matemática", "Математика", "数学"],
+  "highlight.menu": ["Highlight Color", "醒目提示色", "Hervorhebungsfarbe", "Color de resaltado", "Couleur de surbrillance", "Colore evidenziazione", "강조 색상", "Kolor wyróżnienia", "Color de resaltado", "ハイライト色", "Cor de destaque", "Цвет выделения", "高亮颜色"],
+  "highlight.remove": ["Remove highlight", "移除醒目提示", "Hervorhebung entfernen", "Quitar resaltado", "Supprimer la surbrillance", "Rimuovi evidenziazione", "강조 제거", "Usuń wyróżnienie", "Quitar resaltado", "ハイライトを削除", "Remover destaque", "Удалить выделение", "移除高亮"],
+  "highlight.clearAll": ["Clear all…", "全部清除…", "Alle löschen…", "Borrar todo…", "Tout effacer…", "Cancella tutto…", "모두 지우기…", "Wyczyść wszystko…", "Borrar todo…", "すべて消去…", "Limpar tudo…", "Очистить всё…", "全部清除…"],
+  "highlight.color.red": ["Red", "紅色", "Rot", "Rojo", "Rouge", "Rosso", "빨강", "Czerwony", "Rojo", "赤", "Vermelho", "Красный", "红色"],
+  "highlight.color.orange": ["Orange", "橙色", "Orangefarben", "Naranja", "Orangé", "Arancione", "주황", "Pomarańczowy", "Naranja", "オレンジ", "Laranja", "Оранжевый", "橙色"],
+  "highlight.color.yellow": ["Yellow", "黃色", "Gelb", "Amarillo", "Jaune", "Giallo", "노랑", "Żółty", "Amarillo", "黄", "Amarelo", "Жёлтый", "黄色"],
+  "highlight.color.lime": ["Lime", "萊姆綠", "Limettengrün", "Lima", "Citron vert", "Verde lime", "라임", "Limonkowy", "Lima", "ライム", "Lima", "Лаймовый", "青柠色"],
+  "highlight.color.green": ["Green", "綠色", "Grün", "Verde", "Vert", "Verde", "초록", "Zielony", "Verde", "緑", "Verde", "Зелёный", "绿色"],
+  "highlight.color.sky": ["Sky", "天藍色", "Himmelblau", "Celeste", "Bleu ciel", "Azzurro", "하늘", "Błękitny", "Celeste", "スカイ", "Azul-céu", "Небесно-голубой", "天蓝色"],
+  "highlight.color.blue": ["Blue", "藍色", "Blau", "Azul", "Bleu", "Blu", "파랑", "Niebieski", "Azul", "青", "Azul", "Синий", "蓝色"],
+  "highlight.color.purple": ["Purple", "紫色", "Violett", "Morado", "Violet", "Viola", "보라", "Fioletowy", "Morado", "紫", "Roxo", "Фиолетовый", "紫色"],
+  "highlight.color.pink": ["Pink", "粉紅色", "Rosa", "Rosa", "Rose", "Rosa", "분홍", "Różowy", "Rosa", "ピンク", "Rosa", "Розовый", "粉色"],
+  "highlight.color.brown": ["Brown", "棕色", "Braun", "Marrón", "Marron", "Marrone", "갈색", "Brązowy", "Café", "茶", "Marrom", "Коричневый", "棕色"],
+  "highlight.color.gray": ["Gray", "灰色", "Grau", "Gris", "Gris", "Grigio", "회색", "Szary", "Gris", "グレー", "Cinza", "Серый", "灰色"],
   "menu.goToDefinition": ["Go To Definition", "前往定義", "Zur Definition", "Ir a la definición", "Aller à la définition", "Vai alla definizione", "정의로 이동", "Przejdź do definicji", "Ir a la definición", "定義へ移動", "Ir para definição", "Перейти к определению", "转到定义"],
   "command.cut": ["Cut", "剪下", "Ausschneiden", "Cortar", "Couper", "Taglia", "잘라내기", "Wytnij", "Cortar", "切り取り", "Recortar", "Вырезать", "剪切"],
   "command.copy": ["Copy", "複製", "Kopieren", "Copiar", "Copier", "Copia", "복사", "Kopiuj", "Copiar", "コピー", "Copiar", "Копировать", "复制"],
@@ -207,7 +251,7 @@ Object.assign(CATALOG_ROWS, Object.fromEntries(Object.entries(UI_COMMAND_LABELS)
 Object.assign(CATALOG_ROWS, {
   "lsp.noDefinition": ["No definition found.", "找不到定義。", "Keine Definition gefunden.", "No se encontró ninguna definición.", "Aucune définition trouvée.", "Nessuna definizione trovata.", "정의를 찾을 수 없습니다.", "Nie znaleziono definicji.", "No se encontró ninguna definición.", "定義が見つかりません。", "Nenhuma definição encontrada.", "Определение не найдено.", "未找到定义。"],
   "toast.externalReload": ["{file} reloaded after an external change.", "外部變更後已重新載入 {file}。", "{file} wurde nach einer externen Änderung neu geladen.", "{file} se recargó tras un cambio externo.", "{file} a été rechargé après une modification externe.", "{file} è stato ricaricato dopo una modifica esterna.", "외부 변경 후 {file}을(를) 다시 불러왔습니다.", "Wczytano ponownie {file} po zewnętrznej zmianie.", "{file} se recargó tras un cambio externo.", "外部変更後に {file} を再読み込みしました。", "{file} foi recarregado após uma alteração externa.", "{file} перезагружен после внешнего изменения.", "外部更改后已重新加载 {file}。"]
-  ,"lint.profileTitle": ["D2R lint profile", "D2R lint 設定檔", "D2R-Lint-Profil", "Perfil de lint D2R", "Profil de lint D2R", "Profilo lint D2R", "D2R lint 프로필", "Profil lint D2R", "Perfil de lint D2R", "D2R lint プロファイル", "Perfil de lint D2R", "Профиль lint D2R", "D2R lint 配置文件"]
+  ,"lint.profileTitle": ["Game Version", "遊戲版本", "Spielversion", "Versión del juego", "Version du jeu", "Versione del gioco", "게임 버전", "Wersja gry", "Versión del juego", "ゲームバージョン", "Versão do jogo", "Версия игры", "游戏版本"]
   ,"lint.referenceTitle": ["Bundled reference data version", "內建參照資料版本", "Version der gebündelten Referenzdaten", "Versión de datos de referencia incluidos", "Version des données de référence incluses", "Versione dati di riferimento inclusi", "번들 참조 데이터 버전", "Wersja dołączonych danych referencyjnych", "Versión de datos de referencia incluidos", "同梱参照データのバージョン", "Versão dos dados de referência incluídos", "Версия встроенных справочных данных", "内置参考数据版本"]
   ,"lint.profile": ["Profile", "設定檔", "Profil", "Perfil", "Profil", "Profilo", "프로필", "Profil", "Perfil", "プロファイル", "Perfil", "Профиль", "配置文件"]
 });
@@ -317,7 +361,7 @@ Object.assign(CATALOG_ROWS, {
   "common.browse": ["Browse", "瀏覽", "Durchsuchen", "Examinar", "Parcourir", "Sfoglia", "찾아보기", "Przeglądaj", "Examinar", "参照", "Procurar", "Обзор", "浏览"],
   "settings.basic": ["Basic", "基本", "Einfach", "Básico", "Basique", "Base", "기본", "Podstawowe", "Básico", "基本", "Básico", "Основные", "基本"],
   "settings.advanced": ["Advanced", "進階", "Erweitert", "Avanzado", "Avancé", "Avanzate", "고급", "Zaawansowane", "Avanzado", "詳細", "Avançado", "Расширенные", "高级"],
-  "settings.schemaVersion": ["Schema Version", "結構描述版本", "Schemaversion", "Versión del esquema", "Version du schéma", "Versione dello schema", "스키마 버전", "Wersja schematu", "Versión del esquema", "スキーマのバージョン", "Versão do esquema", "Версия схемы", "架构版本"],
+  "settings.schemaVersion": ["Game Version", "遊戲版本", "Spielversion", "Versión del juego", "Version du jeu", "Versione del gioco", "게임 버전", "Wersja gry", "Versión del juego", "ゲームバージョン", "Versão do jogo", "Версия игры", "游戏版本"],
   "settings.pluginFolder": ["Plugin Folder", "外掛資料夾", "Plugin-Ordner", "Carpeta de complementos", "Dossier des plugins", "Cartella dei plugin", "플러그인 폴더", "Folder wtyczek", "Carpeta de complementos", "プラグイン フォルダー", "Pasta de plugins", "Папка плагинов", "插件文件夹"],
   "settings.schemaFolder": ["Schema Folder", "結構描述資料夾", "Schema-Ordner", "Carpeta de esquemas", "Dossier des schémas", "Cartella degli schemi", "스키마 폴더", "Folder schematów", "Carpeta de esquemas", "スキーマ フォルダー", "Pasta de esquemas", "Папка схем", "架构文件夹"],
   "settings.vectorLspPath": ["Linter (vector-lsp) Path", "Linter（vector-lsp）路徑", "Pfad zum Linter (vector-lsp)", "Ruta del linter (vector-lsp)", "Chemin du linter (vector-lsp)", "Percorso del linter (vector-lsp)", "Linter(vector-lsp) 경로", "Ścieżka lintera (vector-lsp)", "Ruta del linter (vector-lsp)", "Linter（vector-lsp）のパス", "Caminho do linter (vector-lsp)", "Путь к линтеру (vector-lsp)", "Linter（vector-lsp）路径"],
@@ -369,6 +413,62 @@ Object.assign(CATALOG_ROWS, {
   ,"status.openingLargeFile": ["Opening large file: {file}...", "正在開啟大型檔案：{file}…", "Große Datei wird geöffnet: {file}...", "Abriendo archivo grande: {file}...", "Ouverture d’un grand fichier : {file}...", "Apertura file di grandi dimensioni: {file}...", "큰 파일을 여는 중: {file}...", "Otwieranie dużego pliku: {file}...", "Abriendo archivo grande: {file}...", "大きなファイルを開いています: {file}...", "Abrindo arquivo grande: {file}...", "Открывается большой файл: {file}...", "正在打开大文件：{file}..."],
   "error.jsonEditingDesktop": ["Localization JSON editing is available in the desktop app.", "本地化 JSON 編輯僅適用於桌面版應用程式。", "Die Bearbeitung von Lokalisierungs-JSON ist in der Desktop-App verfügbar.", "La edición de JSON de localización está disponible en la aplicación de escritorio.", "L’édition des JSON de localisation est disponible dans l’application de bureau.", "La modifica dei JSON di localizzazione è disponibile nell’app desktop.", "현지화 JSON 편집은 데스크톱 앱에서 사용할 수 있습니다.", "Edycja lokalizacyjnych JSON jest dostępna w aplikacji desktopowej.", "La edición de JSON de localización está disponible en la aplicación de escritorio.", "ローカリゼーション JSON の編集はデスクトップアプリで利用できます。", "A edição de JSON de localização está disponível no app de desktop.", "Редактирование JSON локализации доступно в настольном приложении.", "本地化 JSON 编辑仅在桌面应用中可用。"]
 });
+
+CATALOG_ROWS["settings.autoResizeToFitOnOpen"] = [
+  "Automatically apply Resize To Fit when opening a file",
+  "開啟檔案時自動套用「調整為合適大小」",
+  "Beim Öffnen einer Datei automatisch an den Inhalt anpassen",
+  "Aplicar automáticamente Ajustar al contenido al abrir un archivo",
+  "Ajuster automatiquement au contenu à l’ouverture d’un fichier",
+  "Adatta automaticamente al contenuto all’apertura di un file",
+  "파일을 열 때 자동으로 내용에 맞게 크기 조정",
+  "Automatycznie dopasuj do zawartości przy otwieraniu pliku",
+  "Aplicar automáticamente Ajustar al contenido al abrir un archivo",
+  "ファイルを開くときに内容に合わせて自動調整",
+  "Ajustar automaticamente ao conteúdo ao abrir um arquivo",
+  "Автоматически подгонять по содержимому при открытии файла",
+  "打开文件时自动调整为适合内容"
+];
+
+CATALOG_ROWS["settings.keepZoomLevel"] = [
+  "Keep zoom level",
+  "保留縮放比例",
+  "Zoomstufe beibehalten",
+  "Mantener nivel de zoom",
+  "Conserver le niveau de zoom",
+  "Mantieni livello di zoom",
+  "확대/축소 수준 유지",
+  "Zachowaj poziom powiększenia",
+  "Mantener nivel de zoom",
+  "ズーム レベルを保持",
+  "Manter nível de zoom",
+  "Сохранять уровень масштаба",
+  "保持缩放级别"
+];
+
+CATALOG_ROWS["lint.hoverOn"] = [
+  "Hover: On", "懸停：開啟", "Hover: Ein", "Información emergente: activada", "Infobulle : activée", "Hover: attivo", "호버: 켜짐", "Podpowiedź: włączona", "Información emergente: activada", "ホバー: オン", "Dica: ligada", "Подсказка: вкл.", "悬停：开启"
+];
+
+CATALOG_ROWS["lint.hoverOff"] = [
+  "Hover: Off", "懸停：關閉", "Hover: Aus", "Información emergente: desactivada", "Infobulle : désactivée", "Hover: disattivo", "호버: 꺼짐", "Podpowiedź: wyłączona", "Información emergente: desactivada", "ホバー: オフ", "Dica: desligada", "Подсказка: выкл.", "悬停：关闭"
+];
+
+CATALOG_ROWS["error.gameVersionSave"] = [
+  "Failed to save game version: {error}",
+  "無法儲存遊戲版本：{error}",
+  "Spielversion konnte nicht gespeichert werden: {error}",
+  "No se pudo guardar la versión del juego: {error}",
+  "Impossible d’enregistrer la version du jeu : {error}",
+  "Impossibile salvare la versione del gioco: {error}",
+  "게임 버전을 저장하지 못했습니다: {error}",
+  "Nie udało się zapisać wersji gry: {error}",
+  "No se pudo guardar la versión del juego: {error}",
+  "ゲームバージョンを保存できませんでした: {error}",
+  "Não foi possível salvar a versão do jogo: {error}",
+  "Не удалось сохранить версию игры: {error}",
+  "无法保存游戏版本：{error}"
+];
 
 for (const [key, values] of Object.entries(CATALOG_ROWS)) {
   if (values.length !== SUPPORTED_LOCALES.length) throw new Error(`Catalog locale count mismatch: ${key}`);

@@ -517,6 +517,40 @@ test("single-cell paste fills non-contiguous cells while matrix paste remains fo
   assert.equal(doc.getCell(0, 0), "a");
 });
 
+test("#82 horizontal cells repeat from every row in a vertical selection as one undo command", () => {
+  const doc = TableDocument.fromText(
+    "x.txt",
+    "source-a\tsource-b\tkeep-0\tkeep-0b\nold-1a\told-1b\told-1c\tkeep-1\nold-2a\told-2b\told-2c\tkeep-2\nold-3a\told-3b\told-3c\tkeep-3\ntail-a\ttail-b\ttail-c\tkeep-tail",
+    { dirty: false }
+  );
+  const undo = new UndoManager();
+  const beforeRows = doc.rows.map((row) => [...row]);
+  const command = pasteTextToRangesCommand(
+    doc,
+    [{ top: 1, left: 1, bottom: 3, right: 1 }],
+    { row: 3, column: 1 },
+    "5\t15"
+  );
+
+  assert.equal(command.label, "Paste Selection");
+  assert.equal(command.changes.length, 6);
+  assert.deepEqual(command.lspChange, { kind: "replaceRows", rows: [1, 2, 3] });
+
+  command.redo(doc);
+  undo.push(command);
+  assert.equal(undo.undoStack.length, 1);
+  assert.deepEqual(doc.rows, [
+    beforeRows[0],
+    ["old-1a", "5", "15", "keep-1"],
+    ["old-2a", "5", "15", "keep-2"],
+    ["old-3a", "5", "15", "keep-3"],
+    beforeRows[4]
+  ]);
+
+  undo.undo(doc);
+  assert.deepEqual(doc.rows, beforeRows);
+});
+
 test("matrix paste into a contiguous selection starts at top-left and remains one undo command", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\tc\td\te\n1\t2\t3\t4\t5\n6\t7\t8\t9\t10\n11\t12\t13\t14\t15", { dirty: false });
   const undo = new UndoManager();

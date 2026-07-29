@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   SEARCH_SCOPE_ALL,
@@ -62,9 +63,11 @@ function searchHarness({
   query = "needle",
   modalRect = { left: 100, top: 80, width: 420, height: 220 }
 }) {
+  const pointerCaptures = [];
+  const pointerReleases = [];
   const handle = eventTarget({
-    setPointerCapture: () => {},
-    releasePointerCapture: () => {}
+    setPointerCapture: (pointerId) => pointerCaptures.push(pointerId),
+    releasePointerCapture: (pointerId) => pointerReleases.push(pointerId)
   });
   const modal = eventTarget({
     classList: classList(),
@@ -144,6 +147,8 @@ function searchHarness({
     handle,
     modal,
     panel,
+    pointerCaptures,
+    pointerReleases,
     scopeInput,
     searchInput,
     searchReplaceInput,
@@ -193,7 +198,7 @@ test("opening Find starts again at the active cell and subsequent searches advan
   assert.deepEqual(rows.state.selection.focus, { row: 1, column: 1 });
 });
 
-test("Find title dragging clamps to the viewport and keeps its position when reopened", () => {
+test("Find header dragging clamps to the viewport and keeps its position when reopened", () => {
   const originalWindow = globalThis.window;
   const viewport = eventTarget({ innerWidth: 800, innerHeight: 600 });
   globalThis.window = viewport;
@@ -210,13 +215,29 @@ test("Find title dragging clamps to the viewport and keeps its position when reo
     assert.equal(harness.scopeInput.listeners.has("pointerdown"), false);
     assert.equal(harness.handle.listeners.has("pointerdown"), true);
 
-    harness.handle.dispatch("pointerdown", {
+    const inputTarget = { closest: (selector) => selector.includes("input") ? inputTarget : null };
+    const blocked = harness.handle.dispatch("pointerdown", {
+      button: 0,
+      isPrimary: true,
+      pointerId: 6,
+      clientX: 120,
+      clientY: 95,
+      target: inputTarget
+    });
+    assert.equal(blocked.defaultPrevented, undefined);
+    assert.deepEqual(harness.pointerCaptures, []);
+    assert.equal(harness.modal.classList.contains("search-modal-dragging"), false);
+
+    const started = harness.handle.dispatch("pointerdown", {
       button: 0,
       isPrimary: true,
       pointerId: 7,
       clientX: 120,
       clientY: 95
     });
+    assert.equal(started.defaultPrevented, true);
+    assert.deepEqual(harness.pointerCaptures, [7]);
+    assert.equal(harness.modal.classList.contains("search-modal-dragging"), true);
     harness.handle.dispatch("pointermove", {
       pointerId: 7,
       clientX: -100,
@@ -240,6 +261,8 @@ test("Find title dragging clamps to the viewport and keeps its position when reo
     assert.equal(harness.modal.style.top, "72px");
 
     harness.handle.dispatch("pointerup", { pointerId: 7 });
+    assert.deepEqual(harness.pointerReleases, [7]);
+    assert.equal(harness.modal.classList.contains("search-modal-dragging"), false);
     harness.controller.closeSearch();
     viewport.dispatch("resize");
     assert.equal(harness.modal.style.left, "72px");
@@ -253,6 +276,16 @@ test("Find title dragging clamps to the viewport and keeps its position when reo
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
   }
+});
+
+test("#78 search modal uses a dedicated full-width header without placing controls in the drag handle", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const header = html.match(/<header class="search-modal-header" data-search-drag-handle>([\s\S]*?)<\/header>/)?.[1] ?? "";
+  assert.match(header, /id="searchTitle"/);
+  assert.doesNotMatch(header, /<(?:input|button|select|textarea)\b/i);
+  assert.match(css, /\.search-modal-header\s*\{[\s\S]*margin:\s*-18px -18px 0;/);
+  assert.match(css, /\.search-modal\.search-modal-dragging \.search-modal-header\s*\{[\s\S]*cursor:\s*grabbing;/);
 });
 
 test("search modal clamp keeps all edges within the configured margin", () => {

@@ -19,7 +19,7 @@ export function lintCubeInputs(index, ctx) {
   if (!table) return;
   const lookup = buildCubeItemLookup(index);
   table.eachRow((row) => {
-    if (!isEnabled(row.get("enabled"))) return;
+    if (!isEnabled(index, row.get("enabled"))) return;
     const inputs = inputColumns(row, table).map((columnName) => ({ columnName, parsed: parseCubeInput(row.get(columnName)) })).filter((entry) => entry.parsed.raw);
     const declared = clean(row.get("numinputs"));
     const description = rawRowValue(table, row.rowIndex, "description");
@@ -57,7 +57,7 @@ export function lintCubeOutputs(index, ctx) {
   if (!table) return;
   const lookup = buildCubeOutputLookup(index);
   table.eachRow((row) => {
-    if (!isEnabled(row.get("enabled"))) return;
+    if (!isEnabled(index, row.get("enabled"))) return;
     for (const columnName of ["output", "output b", "output c"]) {
       if (!table.hasColumn(columnName)) continue;
       const parsed = parseCubeOutput(row.get(columnName));
@@ -83,10 +83,20 @@ export function lintCubeOp(index, ctx) {
   const table = index.tablesByName.get("cubemain.txt");
   if (!table) return;
   table.eachRow((row) => {
-    const op = clean(row.get("op"));
+    const classic113 = index.profile === "1.13c";
+    if (classic113 && !isEnabled(index, row.get("enabled"))) return;
+    const rawOp = clean(row.get("op"));
     const description = rawRowValue(table, row.rowIndex, "description");
+    const storedOp = classic113 ? byteValue(rawOp) : null;
+    const op = classic113 ? String(storedOp ?? 0) : rawOp;
+    if (classic113 && rawOp && (storedOp === 0 && rawOp !== "0")) {
+      ctx.add(table, row.rowIndex, "op", legacyMessage("cube.opUnconditional", { value: rawOp, effective: 0 }), {
+        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: op '${rawOp}' becomes 0, so it does not restrict recipe '${description}'. Choose an op from 0 through 28.`
+      });
+      return;
+    }
     if (!op || op === "0" || op === "28") return;
-    if (!isUnsignedDecimal(op)) {
+    if (!classic113 && !isUnsignedDecimal(op)) {
       ctx.add(table, row.rowIndex, "op", legacyMessage("cube.invalidOp"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid opcode for '${description}'`
       });
@@ -94,20 +104,45 @@ export function lintCubeOp(index, ctx) {
     }
     const opNumber = Number(op);
     if (opNumber < 0 || opNumber > 28) {
-      ctx.add(table, row.rowIndex, "op", legacyMessage("cube.invalidOp"), {
-        d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid opcode for '${description}'`
+      const message = classic113
+        ? legacyMessage("cube.opUnconditional", { value: rawOp, effective: opNumber })
+        : legacyMessage("cube.invalidOp");
+      ctx.add(table, row.rowIndex, "op", message, {
+        d2rMessage: classic113
+          ? `${table.displayName}, line ${row.rowIndex + 1}: op '${rawOp}' becomes ${opNumber}, so it does not restrict recipe '${description}'. Choose an op from 0 through 28.`
+          : `${table.displayName}, line ${row.rowIndex + 1}: invalid opcode for '${description}'`
       });
       return;
     }
     if (opNumber === 0 || opNumber === 28) return;
     const param = clean(row.get("param"));
     const value = clean(row.get("value"));
-    const needsParam = opNumber === 1 || (opNumber >= 3 && opNumber <= 26);
+    const usesStatParam = opNumber >= 3 && opNumber <= 26;
+    const needsParam = opNumber === 1 || usesStatParam;
     if (needsParam && !param) {
       ctx.add(table, row.rowIndex, "param", legacyMessage("cube.opRequiresParam"), {
         d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: opcode '${opNumber}' for recipe '${description}' requires a param, but none set`
       });
-    } else if (needsParam && validCubeStatParam(index, param) === false) {
+    } else if (classic113 && usesStatParam) {
+      const parsedParam = classicCubeStatParam(index, param);
+      if (parsedParam.kind === "name-fallback" && parsedParam.referenceAvailable) {
+        ctx.add(table, row.rowIndex, "param", legacyMessage("cube.opParamNameFallback", { op: opNumber, param }), {
+          d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: op '${opNumber}' cannot find stat name '${param}', so it uses ItemStatCost ID 0. Choose an existing ItemStatCost name or ID for recipe '${description}'.`
+        });
+      } else if ((parsedParam.referenceAvailable && !isValidCubeStatId(index, parsedParam.value)) || parsedParam.value < 0) {
+        const unconditional = opNumber <= 14 && (parsedParam.value < 0 || (parsedParam.referenceAvailable && parsedParam.value > itemStatCostRowCount(index)));
+        const message = legacyMessage(unconditional ? "cube.opParamUnconditional" : "cube.opParamUnmatchable", {
+          op: opNumber,
+          param,
+          effective: parsedParam.value
+        });
+        ctx.add(table, row.rowIndex, "param", message, {
+          d2rMessage: unconditional
+            ? `${table.displayName}, line ${row.rowIndex + 1}: op '${opNumber}' treats param '${param}' as ${parsedParam.value}, so it does not restrict recipe '${description}'. Choose an ItemStatCost ID or name.`
+            : `${table.displayName}, line ${row.rowIndex + 1}: op '${opNumber}' treats param '${param}' as ${parsedParam.value}, so no input can satisfy recipe '${description}'. Choose an ItemStatCost ID or name.`
+        });
+      }
+    } else if (usesStatParam && validCubeStatParam(index, param) === false) {
         ctx.add(table, row.rowIndex, "param", legacyMessage("cube.invalidOpParam", { param }), {
           d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: invalid param for recipe '${description}'`
         });
@@ -309,8 +344,35 @@ function validCubeStatParam(index, value) {
   return found;
 }
 
+function classicCubeStatParam(index, value) {
+  const text = clean(value);
+  const table = referenceTable(index, "itemstatcost.txt");
+  const referenceAvailable = Boolean(table?.hasColumn("stat"));
+  if (/^(?:-|\d)/.test(text)) {
+    const prefix = /^-?\d+/.exec(text)?.[0] ?? "0";
+    return { value: Number(prefix), kind: "numeric", referenceAvailable };
+  }
+  if (!referenceAvailable) return { value: 0, kind: "unknown", referenceAvailable: false };
+  const target = asciiLower(text);
+  let found = null;
+  table.eachRow((row) => {
+    if (found === null && asciiLower(clean(row.get("stat"))) === target) found = row.rowIndex - 1;
+  });
+  return found === null
+    ? { value: 0, kind: "name-fallback", referenceAvailable: true }
+    : { value: found, kind: "name-found", referenceAvailable: true };
+}
+
+function isValidCubeStatId(index, value) {
+  return Number.isInteger(value) && value >= 0 && value < itemStatCostRowCount(index);
+}
+
 function isUnsignedDecimal(value) {
   return /^[0-9]+$/.test(String(value ?? ""));
+}
+
+function isSignedDecimal(value) {
+  return /^-?\d+$/.test(String(value ?? ""));
 }
 
 function rawRowValue(table, rowIndex, columnName) {
@@ -318,7 +380,14 @@ function rawRowValue(table, rowIndex, columnName) {
   return String(table.rows[rowIndex]?.[table.columnIndex(columnName)] ?? "");
 }
 
-function isEnabled(value) {
+function isEnabled(index, value) {
+  if (index.profile === "1.13c") return byteValue(value) !== 0;
   const cleanValue = clean(value);
   return cleanValue !== "" && cleanValue !== "0";
+}
+
+function byteValue(value) {
+  const text = clean(value);
+  if (!isSignedDecimal(text)) return 0;
+  return Number(BigInt.asUintN(8, BigInt(text)));
 }
