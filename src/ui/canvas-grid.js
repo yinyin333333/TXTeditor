@@ -1,5 +1,5 @@
 import { clamp } from "../core/table-model.js";
-import { arrowNavigationDelta, editorBoxStyle, editorCellState, editorKeyAction, keyboardEditStartAction } from "./edit-policy.js";
+import { editorBoxStyle, editorCellState, editorKeyAction, keyboardEditStartAction } from "./edit-policy.js";
 import { boundedTableExtent, classifyGridHit, classifyPanePoint, classifyResizeHandle } from "./grid-geometry.js";
 import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";

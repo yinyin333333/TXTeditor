@@ -27,7 +27,6 @@ import {
   isLegacyLintWorkspaceDocument,
   isDirectTxtSibling,
   legacyDocumentDirectoryKey,
-  legacySiblingContextParentKey,
   legacySiblingContextTargets
 } from "../../core/lint-sibling-context.js";
 import { documentKey, normalizePath } from "../../core/lint-paths.js";

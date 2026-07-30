@@ -294,10 +294,13 @@ fn user_facing_path(path: &Path) -> String {
 }
 
 fn is_text_like(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|value| value.to_str()).map(|value| value.to_ascii_lowercase()),
-        Some(ext) if matches!(ext.as_str(), "txt" | "tsv" | "tbl" | "csv")
-    )
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            ["txt", "tsv", "tbl", "csv"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
 }
 
 fn is_txt(path: &Path) -> bool {
@@ -382,6 +385,7 @@ mod tests {
         fs::write(root.join("a.txt"), "a").unwrap();
         fs::write(root.join("b.md"), "b").unwrap();
         fs::write(root.join("sub").join("c.csv"), "c").unwrap();
+        fs::write(root.join("sub").join("d.CSV"), "d").unwrap();
 
         let mut files = Vec::new();
         collect_text_files(&root, &mut files, 0).unwrap();
@@ -389,7 +393,14 @@ mod tests {
         names.sort();
 
         fs::remove_dir_all(&root).unwrap();
-        assert_eq!(names, vec!["a.txt".to_string(), "c.csv".to_string()]);
+        assert_eq!(
+            names,
+            vec![
+                "a.txt".to_string(),
+                "c.csv".to_string(),
+                "d.CSV".to_string()
+            ]
+        );
     }
 
     #[test]

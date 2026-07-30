@@ -281,6 +281,7 @@ test("revalidated type-29 boolean fields accept every signed decimal", () => {
     ["monstats.txt", "enabled", "true"],
     ["states.txt", "remhit", "+1"]
   ]);
+  assert.ok(diagnostics.every((item) => item.messageKey === "basic.booleanType29"));
   assert.ok(diagnostics.every((item) => /number format accepted/.test(item.message)));
 });
 
@@ -303,6 +304,7 @@ test("verified stored booleans accept arbitrary signed decimal integers", () => 
     ["weapons.txt", "1or2handed", "no"],
     ["weapons.txt", "2handed", "+2"]
   ]);
+  assert.ok(diagnostics.every((item) => item.messageKey === "basic.booleanRawByte"));
   assert.ok(diagnostics.every((item) => /number format accepted/.test(item.message)));
   assert.ok(diagnostics.every((item) => /0 to turn it off or 1 to turn it on/.test(item.d2rMessage)));
 });
