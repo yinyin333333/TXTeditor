@@ -398,6 +398,7 @@ fn with_target_lock<T>(
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(&lock_path)
         .map_err(|err| err.to_string())?;
     lock_file.try_lock().map_err(|err| {
@@ -517,7 +518,7 @@ pub(crate) fn encode_text(
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
-    if bytes.len() % 2 != 0 {
+    if (bytes.len() & 1) != 0 {
         return Err("UTF-16 input has an odd number of bytes".to_string());
     }
     let units = bytes
@@ -677,6 +678,14 @@ mod tests {
         assert_eq!(lossy.chars().next(), Some('A'));
         assert_eq!(lossy.chars().nth(1).map(|ch| ch as u32), Some(0xE9));
         assert_eq!(lossy_encoding, "windows-1252");
+    }
+
+    #[test]
+    fn decode_utf16_rejects_odd_byte_count() {
+        assert_eq!(
+            decode_utf16(&[0x41], true).unwrap_err(),
+            "UTF-16 input has an odd number of bytes"
+        );
     }
 
     #[test]
