@@ -929,10 +929,7 @@ mod tests {
             |from, to| {
                 rename_calls += 1;
                 if rename_calls == 2 {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "simulated replacement failure",
-                    ))
+                    Err(std::io::Error::other("simulated replacement failure"))
                 } else {
                     fs::rename(from, to)
                 }
@@ -1030,6 +1027,7 @@ mod tests {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(lock_path_for(&target).unwrap())
             .unwrap();
         lock.try_lock().unwrap();

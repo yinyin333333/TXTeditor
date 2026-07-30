@@ -704,7 +704,7 @@ mod tests {
             "code": "calcCheck"
         })];
 
-        let diagnostics = diagnostics_from_lsp_publish(&raw, &[line.clone()]);
+        let diagnostics = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line));
 
         assert_eq!(
             diagnostics,
@@ -770,7 +770,7 @@ mod tests {
             "data": data
         })];
 
-        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+        let diagnostic = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line)).remove(0);
 
         assert_eq!(diagnostic.col, 1);
         assert_eq!(diagnostic.start_character, insertion);
@@ -805,7 +805,7 @@ mod tests {
             "message": "unicode range"
         })];
 
-        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+        let diagnostic = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line)).remove(0);
 
         assert_eq!(diagnostic.col, 2);
         assert_eq!(diagnostic.start_character, 11);

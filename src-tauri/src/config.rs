@@ -241,8 +241,8 @@ mod tests {
             load_app_config_from(&missing).schema_version.as_deref(),
             Some("3.2")
         );
-        assert_eq!(load_app_config_from(&missing).debug_logging, false);
-        assert_eq!(load_app_config_from(&missing).json_diagnostics, false);
+        assert!(!load_app_config_from(&missing).debug_logging);
+        assert!(!load_app_config_from(&missing).json_diagnostics);
         assert_eq!(
             load_app_config_from(&missing).json_diagnostic_rules,
             JsonDiagnosticRules::default()
@@ -252,8 +252,8 @@ mod tests {
             load_app_config_from(&invalid).schema_version.as_deref(),
             Some("3.2")
         );
-        assert_eq!(load_app_config_from(&invalid).debug_logging, false);
-        assert_eq!(load_app_config_from(&invalid).json_diagnostics, false);
+        assert!(!load_app_config_from(&invalid).debug_logging);
+        assert!(!load_app_config_from(&invalid).json_diagnostics);
         assert_eq!(
             load_app_config_from(&invalid).json_diagnostic_rules,
             JsonDiagnosticRules::default()
@@ -321,8 +321,8 @@ mod tests {
             Some("E:\\Tools\\vector-lsp.exe")
         );
         assert_eq!(config.lint_mode.as_deref(), Some("basic"));
-        assert_eq!(config.debug_logging, true);
-        assert_eq!(config.json_diagnostics, true);
+        assert!(config.debug_logging);
+        assert!(config.json_diagnostics);
         assert_eq!(
             config.json_diagnostic_rules,
             JsonDiagnosticRules::default(),
