@@ -1089,6 +1089,10 @@ pub(crate) async fn lsp_reserve_generation(
         .map_err(|error| format!("LSP generation reservation task failed: {error}"))?
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "named Tauri IPC parameters plus injected state preserve the frontend contract and LSP generation/session ordering"
+)]
 #[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
