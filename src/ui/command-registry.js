@@ -136,7 +136,7 @@ export function rowCommandItems({ cloneDisabled = false } = {}) {
 export function columnCommandItems({ cloneDisabled = false } = {}) {
   return [
     { id: "add-column", label: tText("command.add-columns") },
-    { id: "insert-column", label: tText("command.insert-columns") },
+    { id: "insert-column", label: tText("command.insert-column") },
     { id: "hide-column", label: tText("command.hide-columns") },
     { id: "delete-column", label: tText("command.delete-columns") },
     { id: "clone-column", label: tText("command.clone-columns"), disabled: cloneDisabled }
