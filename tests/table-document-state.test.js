@@ -304,6 +304,23 @@ test("undoing an inserted column restores sparse body rows", () => {
   assert.deepEqual(doc.rows, before);
 });
 
+test("undoing appended columns restores a short header above sparse body rows", () => {
+  const header = ["h0", "h1", "h2"].join("\t");
+  const sparseBody = ["a", "b", "c", "d", "e"].join("\t");
+  const doc = TableDocument.fromText("x.txt", `${header}\n${sparseBody}`);
+  const before = doc.rows.map((row) => [...row]);
+  const beforeSerializedColumnCount = doc.serializedColumnCount;
+  const undo = new UndoManager();
+  const command = addColumnsCommand(doc, 2);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+  assert.equal(doc.serializedColumnCount, beforeSerializedColumnCount);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();

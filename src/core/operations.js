@@ -297,12 +297,19 @@ export function insertColumnCommand(doc, index, count = 1) {
 export function addColumnsCommand(doc, count = 1) {
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
   const at = doc.columnCount;
+  const rowLengths = doc.rows.map((row) => row.length);
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Add ${safeCount} Column(s)`, {
     redo(target) {
       target.insertColumns(at, Array.from({ length: safeCount }, () => ""));
     },
     undo(target) {
       target.removeColumns(at, safeCount);
+      for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
+        target.rows[row].length = rowLengths[row];
+      }
+      target.serializedColumnCount = serializedColumnCount;
+      target.refreshShape();
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
