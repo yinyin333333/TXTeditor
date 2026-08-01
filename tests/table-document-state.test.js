@@ -392,6 +392,34 @@ test("undoing an inserted column restores a short header at a global index", () 
   assert.deepEqual(doc.rows, before);
 });
 
+test("undoing a cloned column restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const undo = new UndoManager();
+  const command = cloneColumnsCommand(doc, [0], 2);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, 6);
+});
+
+test("undoing an inserted column restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const undo = new UndoManager();
+  const command = insertColumnCommand(doc, 1, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, 6);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();

@@ -282,6 +282,7 @@ export function insertColumnCommand(doc, index, count = 1) {
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
   const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
   const rowLengths = doc.rows.map((row) => row.length);
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
       target.insertColumns(at, Array.from({ length: safeCount }, () => ""), { sparseAppend: false });
@@ -291,6 +292,7 @@ export function insertColumnCommand(doc, index, count = 1) {
       for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
         target.rows[row].length = rowLengths[row];
       }
+      target.serializedColumnCount = serializedColumnCount;
       target.refreshShape();
     },
     contentChanged: true,
@@ -330,6 +332,7 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
   const widths = targets.map((column) => doc.columnWidths[column]);
   const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
   const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
     empty: targets.length === 0,
     redo(target) {
@@ -337,6 +340,7 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
     },
     undo(target) {
       target.removeColumns(at, targets.length, { rowInsertionIndexes });
+      target.serializedColumnCount = serializedColumnCount;
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: targets.length },
