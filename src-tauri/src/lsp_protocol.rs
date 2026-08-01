@@ -37,6 +37,14 @@ pub(crate) fn read_lsp_msg<R: BufRead>(reader: &mut R) -> Option<Value> {
     serde_json::from_slice(&body).ok()
 }
 
+pub(crate) fn text_lines(text: &str) -> Vec<String> {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
 pub(crate) fn path_to_uri(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     if let Some(unc_path) = normalized.strip_prefix("//") {
@@ -569,6 +577,14 @@ mod tests {
             "B",
         );
         assert_eq!(unicode_lines, vec!["aBc".to_string()]);
+    }
+
+    #[test]
+    fn text_lines_accepts_bare_carriage_return_line_endings() {
+        assert_eq!(
+            text_lines("header\rvalue\rnext\r"),
+            vec!["header", "value", "next"]
+        );
     }
 
     #[test]
