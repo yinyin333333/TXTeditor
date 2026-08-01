@@ -366,10 +366,10 @@ export function deleteColumnsCommand(doc, index, count = 1) {
     redo(target) {
       deleted = target.deleteColumns(at, count);
     },
-      undo(target) {
-        target.restoreColumns(at, deleted.columns, deleted.columnWidths, { hiddenColumns: deleted.hiddenColumns });
-        target.serializedColumnCount = serializedColumnCount;
-      },
+    undo(target) {
+      target.restoreColumns(at, deleted.columns, deleted.columnWidths, { hiddenColumns: deleted.hiddenColumns });
+      target.serializedColumnCount = serializedColumnCount;
+    },
     contentChanged: true,
     lspChange: { kind: "deleteColumns", index: at, count },
     undoLspChange: { kind: "insertColumns", index: at, count }
