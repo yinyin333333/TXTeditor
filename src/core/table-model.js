@@ -280,10 +280,13 @@ export class TableDocument {
     return { type: "insert-column", index: inserted.index, name: inserted.names[0] ?? name };
   }
 
-  deleteColumns(start, count = 1) {
+  deleteColumns(start, count = 1, { rowInsertionIndexes = null } = {}) {
     const at = clamp(start, 0, Math.max(0, this.columnCount - 1));
     const safeCount = Math.min(Math.max(1, count), this.columnCount - at);
-    const removed = this.rows.map((row) => row.splice(at, safeCount));
+    const removed = this.rows.map((row, rowIndex) => {
+      const rowAt = rowInsertionIndexes?.[rowIndex] ?? at;
+      return row.splice(rowAt, safeCount);
+    });
     const removedWidths = this.columnWidths.splice(at, safeCount);
     this.hiddenColumns = shiftSetForDelete(this.hiddenColumns, at, safeCount);
     markTableContentDirty(this);
@@ -314,8 +317,8 @@ export class TableDocument {
     this.refreshShape();
   }
 
-  removeColumns(index, count) {
-    return this.deleteColumns(index, count);
+  removeColumns(index, count, options) {
+    return this.deleteColumns(index, count, options);
   }
 
   setRowsHidden(rows, hidden) {

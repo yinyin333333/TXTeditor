@@ -316,13 +316,14 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
   const values = Array.from({ length: doc.rowCount }, (_, row) => targets.map((column) => doc.getCell(row, column)));
   const widths = targets.map((column) => doc.columnWidths[column]);
   const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
+  const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
   return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
     empty: targets.length === 0,
     redo(target) {
       target.restoreColumns(at, values, widths);
     },
     undo(target) {
-      target.removeColumns(at, targets.length);
+      target.removeColumns(at, targets.length, { rowInsertionIndexes });
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: targets.length },
