@@ -280,12 +280,13 @@ export function deleteRowsCommand(doc, index, count = 1) {
 export function insertColumnCommand(doc, index, count = 1) {
   const at = clamp(index, 0, doc.columnCount);
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
+  const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
   return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
       target.insertColumns(at, Array.from({ length: safeCount }, () => ""), { sparseAppend: false });
     },
     undo(target) {
-      target.removeColumns(at, safeCount);
+      target.removeColumns(at, safeCount, { rowInsertionIndexes });
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },

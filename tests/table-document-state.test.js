@@ -288,6 +288,22 @@ test("undoing a cloned column at the end restores sparse body rows", () => {
   assert.deepEqual(doc.rows, before);
 });
 
+test("undoing an inserted column restores sparse body rows", () => {
+  const header = Array.from({ length: 10 }, (_, index) => `h${index}`).join("\t");
+  const sparse = "a\tb\tc";
+  const full = Array.from({ length: 10 }, (_, index) => `r${index}`).join("\t");
+  const doc = TableDocument.fromText("x.txt", `${header}\n${sparse}\n${full}`);
+  const before = doc.rows.map((row) => [...row]);
+  const undo = new UndoManager();
+  const command = insertColumnCommand(doc, 8, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
