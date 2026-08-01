@@ -296,7 +296,15 @@ export class TableDocument {
   }
 
   restoreRows(index, rows, rowHeights = []) {
-    spliceMany(this.rows, index, 0, rows.map((row) => [...row]));
+    const copies = rows.map((row) => row.slice());
+    spliceMany(this.rows, index, 0, copies);
+    for (let offset = 0; offset < copies.length; offset++) {
+      const source = copies[offset];
+      const target = this.rows[index + offset];
+      for (let column = 0; column < source.length; column++) {
+        if (!(column in source)) delete target[column];
+      }
+    }
     spliceMany(this.rowHeights, index, 0, rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
     this.hiddenRows = shiftSetForInsert(this.hiddenRows, index, rows.length);
     markTableContentDirty(this);
