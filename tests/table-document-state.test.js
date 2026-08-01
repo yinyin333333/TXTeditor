@@ -364,6 +364,21 @@ test("undoing a row deletion restores sparse row holes", () => {
   assert.deepEqual(doc.rows, before);
 });
 
+test("undoing a column deletion restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const beforeSerializedColumnCount = doc.serializedColumnCount;
+  const undo = new UndoManager();
+  const command = deleteColumnsCommand(doc, 0, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, beforeSerializedColumnCount);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();

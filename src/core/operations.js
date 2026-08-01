@@ -341,14 +341,16 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
 
 export function deleteColumnsCommand(doc, index, count = 1) {
   const at = clamp(index, 0, Math.max(0, doc.columnCount - 1));
+  const serializedColumnCount = doc.serializedColumnCount;
   let deleted = null;
   return makeCustomCommand("Delete Column", {
     redo(target) {
       deleted = target.deleteColumns(at, count);
     },
-    undo(target) {
-      target.restoreColumns(at, deleted.columns, deleted.columnWidths);
-    },
+      undo(target) {
+        target.restoreColumns(at, deleted.columns, deleted.columnWidths);
+        target.serializedColumnCount = serializedColumnCount;
+      },
     contentChanged: true,
     lspChange: { kind: "deleteColumns", index: at, count },
     undoLspChange: { kind: "insertColumns", index: at, count }
