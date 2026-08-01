@@ -309,7 +309,11 @@ export class TableDocument {
 
   restoreColumns(index, columns, widths = []) {
     for (let row = 0; row < this.rows.length; row++) {
-      spliceMany(this.rows[row], index, 0, (columns[row] ?? []).map((value) => value ?? ""));
+      const values = columns[row] ?? [];
+      spliceMany(this.rows[row], index, 0, values.map((value) => value ?? ""));
+      for (let offset = 0; offset < values.length; offset++) {
+        if (!(offset in values)) delete this.rows[row][index + offset];
+      }
     }
     spliceMany(this.columnWidths, index, 0, columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
     this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, index, columns[0]?.length ?? 0);

@@ -334,6 +334,21 @@ test("undoing a cell edit restores holes created by sparse column append", () =>
   assert.deepEqual(doc.rows, before);
 });
 
+test("undoing a column deletion restores sparse cells", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const append = addColumnsCommand(doc, 2);
+  append.redo(doc);
+  const before = doc.rows.map((row) => row.slice());
+  const undo = new UndoManager();
+  const command = deleteColumnsCommand(doc, 4, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
