@@ -321,6 +321,19 @@ test("undoing appended columns restores a short header above sparse body rows", 
   assert.equal(doc.serializedColumnCount, beforeSerializedColumnCount);
 });
 
+test("undoing a cell edit restores holes created by sparse column append", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const append = addColumnsCommand(doc, 2);
+  append.redo(doc);
+  const before = doc.rows.map((row) => row.slice());
+  const edit = makeCellCommand("Edit", doc, [{ row: 0, column: 4, value: "edited" }]);
+
+  edit.redo(doc);
+  edit.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
