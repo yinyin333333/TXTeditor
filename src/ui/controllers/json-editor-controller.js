@@ -1,6 +1,14 @@
 import { lspRangeToJsonOffsets } from "../../core/json-document.js";
 import { loadJsonEditorModule } from "../json-editor-module-loader.js";
 
+function editorTextForDocument(doc, text) {
+  const normalized = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lineEnding = ["\n", "\r\n", "\r"].includes(doc?.lineEnding)
+    ? doc.lineEnding
+    : "\n";
+  return lineEnding === "\n" ? normalized : normalized.replace(/\n/g, lineEnding);
+}
+
 export function createJsonEditorController({
   gridHost,
   jsonHost,
@@ -45,7 +53,9 @@ export function createJsonEditorController({
       lineSeparator: doc.lineEnding,
       onChange: (text, nextState, changeMeta = {}) => {
         doc.editorState = nextState;
-        if (doc.applyEditorText(text)) onDocumentChanged(doc, changeMeta);
+        if (doc.applyEditorText(editorTextForDocument(doc, text))) {
+          onDocumentChanged(doc, changeMeta);
+        }
       }
     });
     view = moduleApi.createJsonEditorView({ parent: jsonHost, state });
@@ -110,7 +120,9 @@ export function createJsonEditorController({
   function commitActive() {
     if (currentDocument && view) {
       currentDocument.editorState = view.state;
-      currentDocument.applyEditorText(view.state.doc.toString());
+      currentDocument.applyEditorText(
+        editorTextForDocument(currentDocument, view.state.doc.toString())
+      );
     }
   }
 

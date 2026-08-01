@@ -12,6 +12,7 @@ import {
 import { documentTextSnapshot, markDocumentSaved } from "../src/core/document-file-state.js";
 import { loadJsonEditorModule, resetJsonEditorModuleLoaderForTests } from "../src/ui/json-editor-module-loader.js";
 import { createJsonEditorController } from "../src/ui/controllers/json-editor-controller.js";
+import { createJsonEditorState as createCodeMirrorJsonEditorState } from "../src/ui/codemirror-json-editor-entry.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { mapLspDiagnosticToDisplay } from "../src/ui/lsp-diagnostic-display-policy.js";
 import { docToUri } from "../src/core/lsp-uri-policy.js";
@@ -550,6 +551,59 @@ test("JSON editor controller retains state and navigates an exact diagnostic ran
   assert.equal(gridHost.classList.contains("hidden"), true);
   controller.showTable();
   assert.equal(jsonHost.classList.contains("hidden"), true);
+});
+
+test("JSON editor preserves the document line ending through commits and edits", async () => {
+  const gridHost = { classList: classList() };
+  const jsonHost = { classList: classList() };
+  let activeView = null;
+  let changeHandler = null;
+  const fakeModule = {
+    createJsonEditorState(options) {
+      changeHandler = options.onChange;
+      return createCodeMirrorJsonEditorState(options);
+    },
+    createJsonEditorView({ state }) {
+      let currentState = state;
+      activeView = {
+        get state() { return currentState; },
+        dispatch(spec) {
+          const transaction = currentState.update(spec);
+          currentState = transaction.state;
+          if (transaction.docChanged) {
+            changeHandler(currentState.doc.toString(), currentState, {});
+          }
+        },
+        destroy() {},
+        focus() {}
+      };
+      return activeView;
+    }
+  };
+  const raw = "\u{feff}[\r\n  {\"id\":1}\r\n]\r\n";
+  const doc = JsonDocument.fromText("data.json", raw, {
+    path: "/mod/data/local/lng/strings/data.json"
+  });
+  const controller = createJsonEditorController({
+    gridHost,
+    jsonHost,
+    loadModule: async () => fakeModule
+  });
+
+  await controller.showDocument(doc, { focus: false });
+  controller.commitActive();
+  assert.equal(doc.text, raw);
+  assert.equal(doc.dirty, false);
+
+  activeView.dispatch({
+    changes: {
+      from: activeView.state.doc.toString().indexOf("1"),
+      to: activeView.state.doc.toString().indexOf("1") + 1,
+      insert: "2"
+    }
+  });
+  assert.equal(doc.text, "\u{feff}[\r\n  {\"id\":2}\r\n]\r\n");
+  assert.equal(doc.lineEnding, "\r\n");
 });
 
 test("unopened JSON Problems use LSP character columns and policy navigation", () => {
