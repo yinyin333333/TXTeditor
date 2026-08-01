@@ -242,13 +242,24 @@ export class TableDocument {
   deleteRows(start, count = 1) {
     const at = clamp(start, 0, Math.max(0, this.rows.length - 1));
     const safeCount = Math.min(Math.max(1, count), this.rows.length - at);
+    const columnWidths = this.columnWidths.slice();
     const removed = this.rows.splice(at, safeCount);
     const removedHeights = this.rowHeights.splice(at, safeCount);
+    const hiddenRows = this.hiddenRows.ranges.map((range) => range.slice());
     this.hiddenRows = shiftSetForDelete(this.hiddenRows, at, safeCount);
-    if (!this.rows.length) this.rows.push([]);
+    const placeholderRowAdded = this.rows.length === 0;
+    if (placeholderRowAdded) this.rows.push([]);
     markTableContentDirty(this);
     this.refreshShape();
-    return { type: "delete-rows", index: at, rows: removed, rowHeights: removedHeights };
+    return {
+      type: "delete-rows",
+      index: at,
+      rows: removed,
+      rowHeights: removedHeights,
+      hiddenRows,
+      columnWidths,
+      placeholderRowAdded
+    };
   }
 
   insertColumns(index, namesOrCount = 1, options = {}) {
@@ -288,14 +299,23 @@ export class TableDocument {
       return row.splice(rowAt, safeCount);
     });
     const removedWidths = this.columnWidths.splice(at, safeCount);
+    const hiddenColumns = this.hiddenColumns.ranges.map((range) => range.slice());
     this.hiddenColumns = shiftSetForDelete(this.hiddenColumns, at, safeCount);
     markTableContentDirty(this);
     this.refreshShape();
     if (this.serializedColumnCount != null) this.serializedColumnCount = Math.min(this.serializedColumnCount, this.columnCount);
-    return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths };
+    return { type: "delete-columns", index: at, columns: removed, columnWidths: removedWidths, hiddenColumns };
   }
 
-  restoreRows(index, rows, rowHeights = []) {
+  restoreRows(index, rows, rowHeights = [], {
+    hiddenRows = null,
+    columnWidths = null,
+    placeholderRowAdded = false
+  } = {}) {
+    if (placeholderRowAdded) {
+      this.rows.splice(index, 1);
+      this.rowHeights.splice(index, 1);
+    }
     const copies = rows.map((row) => row.slice());
     spliceMany(this.rows, index, 0, copies);
     for (let offset = 0; offset < copies.length; offset++) {
@@ -306,7 +326,10 @@ export class TableDocument {
       }
     }
     spliceMany(this.rowHeights, index, 0, rows.map((_, i) => rowHeights[i] ?? this.defaultRowHeight));
-    this.hiddenRows = shiftSetForInsert(this.hiddenRows, index, rows.length);
+    if (columnWidths != null) this.columnWidths = columnWidths.slice();
+    this.hiddenRows = hiddenRows == null
+      ? shiftSetForInsert(this.hiddenRows, index, rows.length)
+      : RangeSet.from(hiddenRows);
     markTableContentDirty(this);
     this.refreshShape();
   }
@@ -315,7 +338,8 @@ export class TableDocument {
     return this.deleteRows(index, count);
   }
 
-  restoreColumns(index, columns, widths = []) {
+  restoreColumns(index, columns, widths = [], { hiddenColumns = null } = {}) {
+    const count = widths.length || columns.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
     for (let row = 0; row < this.rows.length; row++) {
       const values = columns[row] ?? [];
       spliceMany(this.rows[row], index, 0, values.map((value) => value ?? ""));
@@ -323,8 +347,10 @@ export class TableDocument {
         if (!(offset in values)) delete this.rows[row][index + offset];
       }
     }
-    spliceMany(this.columnWidths, index, 0, columns[0].map((_, i) => widths[i] ?? this.defaultColumnWidth));
-    this.hiddenColumns = shiftSetForInsert(this.hiddenColumns, index, columns[0]?.length ?? 0);
+    spliceMany(this.columnWidths, index, 0, Array.from({ length: count }, (_, i) => widths[i] ?? this.defaultColumnWidth));
+    this.hiddenColumns = hiddenColumns == null
+      ? shiftSetForInsert(this.hiddenColumns, index, count)
+      : RangeSet.from(hiddenColumns);
     markTableContentDirty(this);
     this.refreshShape();
   }

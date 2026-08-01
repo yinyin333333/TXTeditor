@@ -585,6 +585,80 @@ test("insert and delete column are grouped undoable commands", () => {
   assert.equal(doc.getCell(0, 0), "a");
 });
 
+test("delete row undo restores hidden row ranges exactly", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\nh0\th1\nh0\th1\nh0\th1");
+  doc.hiddenRows = RangeSet.from([[1, 3]]);
+  doc.columnWidths = [71, 84];
+  const before = doc.hiddenRows.ranges.map((range) => range.slice());
+  const beforeWidths = [...doc.columnWidths];
+  const command = deleteRowsCommand(doc, 1, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.hiddenRows.ranges, before);
+  assert.deepEqual(doc.columnWidths, beforeWidths);
+});
+
+test("delete column undo restores hidden column ranges exactly", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\th3\nh0\th1\th2\th3");
+  doc.hiddenColumns = RangeSet.from([[1, 3]]);
+  const before = doc.hiddenColumns.ranges.map((range) => range.slice());
+  const command = deleteColumnsCommand(doc, 1, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.hiddenColumns.ranges, before);
+});
+
+test("delete column undo restores widths when the header is shorter than the body", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\nbody0\tbody1\tbody2\tbody3", {
+    autoFitInitialColumns: false
+  });
+  doc.columnWidths = [71, 84, 97, 110];
+  const before = [...doc.columnWidths];
+  const command = deleteColumnsCommand(doc, 3, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.columnWidths, before);
+});
+
+test("insert and clone column undo restore widths when the logical shape stays at one column", () => {
+  for (const makeCommand of [
+    (doc) => insertColumnCommand(doc, 0, 1),
+    (doc) => cloneColumnsCommand(doc, [0], 0)
+  ]) {
+    const doc = new TableDocument("x.txt", [[]], {
+      serializedColumnCount: 2,
+      autoFitInitialColumns: false
+    });
+    doc.columnWidths = [120];
+    const before = [...doc.columnWidths];
+    const command = makeCommand(doc);
+
+    command.redo(doc);
+    command.undo(doc);
+
+    assert.deepEqual(doc.columnWidths, before);
+  }
+});
+
+test("delete and undo of the last row does not retain the placeholder row", () => {
+  const doc = new TableDocument("x.txt", [["value"]], { autoFitInitialColumns: false });
+  const before = doc.toText();
+  const command = deleteRowsCommand(doc, 0, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.equal(doc.rowCount, 1);
+  assert.equal(doc.toText(), before);
+  assert.deepEqual(doc.rows, [["value"]]);
+});
+
 test("copy and paste range preserve tabular shape", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\tc\n1\t2\t3\n4\t5\t6");
   const copied = copyRange(doc, { top: 1, left: 1, bottom: 2, right: 2 });

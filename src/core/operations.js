@@ -269,7 +269,11 @@ export function deleteRowsCommand(doc, index, count = 1) {
       deleted = target.deleteRows(at, count);
     },
     undo(target) {
-      target.restoreRows(at, deleted.rows, deleted.rowHeights);
+      target.restoreRows(at, deleted.rows, deleted.rowHeights, {
+        hiddenRows: deleted.hiddenRows,
+        columnWidths: deleted.columnWidths,
+        placeholderRowAdded: deleted.placeholderRowAdded
+      });
     },
     contentChanged: true,
     lspChange: { kind: "deleteRows", index: at, count },
@@ -282,6 +286,7 @@ export function insertColumnCommand(doc, index, count = 1) {
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
   const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
   const rowLengths = doc.rows.map((row) => row.length);
+  const columnWidths = doc.columnWidths.slice();
   const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
@@ -292,6 +297,7 @@ export function insertColumnCommand(doc, index, count = 1) {
       for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
         target.rows[row].length = rowLengths[row];
       }
+      target.columnWidths = columnWidths.slice();
       target.serializedColumnCount = serializedColumnCount;
       target.refreshShape();
     },
@@ -305,6 +311,7 @@ export function addColumnsCommand(doc, count = 1) {
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
   const at = doc.columnCount;
   const rowLengths = doc.rows.map((row) => row.length);
+  const columnWidths = doc.columnWidths.slice();
   const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Add ${safeCount} Column(s)`, {
     redo(target) {
@@ -315,6 +322,7 @@ export function addColumnsCommand(doc, count = 1) {
       for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
         target.rows[row].length = rowLengths[row];
       }
+      target.columnWidths = columnWidths.slice();
       target.serializedColumnCount = serializedColumnCount;
       target.refreshShape();
     },
@@ -332,6 +340,7 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
   const widths = targets.map((column) => doc.columnWidths[column]);
   const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
   const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
+  const columnWidths = doc.columnWidths.slice();
   const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
     empty: targets.length === 0,
@@ -340,6 +349,7 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
     },
     undo(target) {
       target.removeColumns(at, targets.length, { rowInsertionIndexes });
+      target.columnWidths = columnWidths.slice();
       target.serializedColumnCount = serializedColumnCount;
     },
     contentChanged: true,
@@ -357,7 +367,7 @@ export function deleteColumnsCommand(doc, index, count = 1) {
       deleted = target.deleteColumns(at, count);
     },
       undo(target) {
-        target.restoreColumns(at, deleted.columns, deleted.columnWidths);
+        target.restoreColumns(at, deleted.columns, deleted.columnWidths, { hiddenColumns: deleted.hiddenColumns });
         target.serializedColumnCount = serializedColumnCount;
       },
     contentChanged: true,
