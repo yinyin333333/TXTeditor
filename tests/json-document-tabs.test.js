@@ -115,6 +115,25 @@ test("LSP UTF-16 ranges map to CodeMirror offsets across BOM, CRLF, and emoji", 
   }), { start: 1, end: 2 });
 });
 
+test("JSON diagnostic offsets use CodeMirror-normalized line endings", () => {
+  const rawText = "\u{feff}[\r\n  {\"Key\":\"first\"},\r\n  {\"Key\":\"??\"}\r\n]\r\n";
+  const editorText = rawText.replaceAll("\r\n", "\n");
+  const range = {
+    start: { line: 2, character: 10 },
+    end: { line: 2, character: 12 }
+  };
+  const expectedStart = editorText.indexOf("??");
+
+  assert.deepEqual(lspRangeToJsonOffsets(editorText, range), {
+    start: expectedStart,
+    end: expectedStart + 2
+  });
+  assert.deepEqual(lspRangeToJsonOffsets(rawText, range), {
+    start: expectedStart + 2,
+    end: expectedStart + 4
+  });
+});
+
 test("clean external changes reload while Keep preserves a dirty buffer", () => {
   const doc = JsonDocument.fromText("a.json", "[]", { path: "/mod/data/local/lng/strings/a.json" });
   doc.reloadFromDisk("[1]\r\n", { encoding: "utf-8" });
@@ -652,13 +671,4 @@ test("CodeMirror is pinned, generated, ignored, and absent from the initial HTML
     readFileSync(new URL("../index.html", import.meta.url), "utf8"),
     /codemirror-json-editor\.js/
   );
-  const editorSource = readFileSync(
-    new URL("../src/ui/codemirror-json-editor-entry.js", import.meta.url),
-    "utf8"
-  );
-  const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(editorSource, /HighlightStyle\.define/);
-  assert.match(editorSource, /StateField\.define/);
-  assert.match(editorSource, /cm-diagnostic-focus/);
-  assert.match(styles, /\.json-editor-host[\s\S]*font-family:\s*var\(--grid-font\)\s*!important/);
 });

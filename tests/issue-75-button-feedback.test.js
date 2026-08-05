@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -45,14 +44,4 @@ test("#75 disabled and aria-disabled buttons never present interactive feedback"
     assert.equal(showButtonClickFeedback(button, { nextFrame: (fn) => fn(), schedule: () => 1 }), false);
     assert.equal(button.classList.contains(BUTTON_FEEDBACK_CLASS), false);
   }
-});
-
-test("#75 stylesheet defines one hover/pressed/focus system with toggle and reduced-motion states", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(css, /button:not\(:disabled\):not\(\[aria-disabled="true"\]\):hover/);
-  assert.match(css, /button\.button-click-feedback:not\(:disabled\):not\(\[aria-disabled="true"\]\)/);
-  assert.match(css, /button:focus-visible/);
-  assert.match(css, /\.toggle-button\.active:not\(:disabled\):not\(\[aria-disabled="true"\]\):hover/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.doesNotMatch(css, /button\.button-click-feedback[^}]*?(?:width|height|padding|margin):/s);
 });

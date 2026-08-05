@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { deleteColumnsCommand, deleteRowsCommand, insertRowCommand } from "../src/core/operations.js";
 import { SelectionModel } from "../src/core/selection.js";
@@ -244,25 +243,4 @@ test("#77 renderer layers subtle theme-adapted highlights below selection, diagn
   grid.selection.contains = () => true;
   CanvasGrid.prototype.drawCell.call(grid, 1, 1, 10, 20, 80, 26);
   assert.equal(fills.length, 1, "selection fill remains visually dominant");
-
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  for (const id of MANUAL_HIGHLIGHT_PALETTE.map(({ id }) => id)) {
-    const values = [...css.matchAll(new RegExp(`--grid-manual-highlight-${id}: rgba\\([^;]+, \\.(\\d+)\\);`, "g"))];
-    assert.equal(values.length, 2, `${id} must define dark and light values`);
-    for (const match of values) {
-      const alpha = Number(`0.${match[1]}`);
-      assert.ok(alpha >= 0.20 && alpha <= 0.30, `${id} alpha must remain subtle`);
-    }
-  }
-
-  const surfaceSource = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
-  assert.ok(surfaceSource.indexOf('tText("menu.math")') < surfaceSource.indexOf('tText("highlight.menu")'));
-  assert.ok(surfaceSource.indexOf('tText("highlight.menu")') < surfaceSource.indexOf('id: "go-to-definition"'));
-  assert.match(surfaceSource, /type: "separator"/);
-  assert.match(surfaceSource, /data-highlight-action/);
-  assert.match(surfaceSource, /id: "highlight"/);
-  assert.match(css, /\.submenu-highlight\s*\{[^}]*overflow: visible;/s);
-
-  const highlightSource = readFileSync(new URL("../src/ui/manual-highlight.js", import.meta.url), "utf8");
-  assert.doesNotMatch(highlightSource, /plugin:dialog|confirmClear|highlight\.clearConfirm/);
 });

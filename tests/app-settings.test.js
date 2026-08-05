@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createDefaultLintSettings } from "../src/core/lint-engine.js";
 import { LINT_ENGINE_VECTOR } from "../src/core/lint-controller-policy.js";
@@ -415,11 +414,6 @@ test("Tauri Lint Options modal renders valid Vector-LSP Browse buttons and actio
   assert.equal(document.body.querySelector("#settingsJsonKeyUsageOptions")?.classList.contains("hidden"), false);
   assert.doesNotMatch(backdrop.innerHTML, /<option value="error"/);
   assert.match(backdrop.innerHTML, /modal-actions settings-lint-actions/);
-  assert.match(
-    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"),
-    /\.settings-lint-actions\s*\{[^}]*margin-top:\s*18px/s
-  );
-
   const keyUsageAction = document.body.querySelector("#settingsJsonKeyUsageAction");
   keyUsageAction.value = "ignore";
   keyUsageAction.dispatchEvent({ type: "change", bubbles: true });

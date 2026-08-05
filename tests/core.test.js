@@ -11,25 +11,10 @@ import {
 import { centeredTextY } from "../src/ui/grid-render-policy.js";
 import { hoverRequestPolicy } from "../src/ui/hover-policy.js";
 import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-import {
   HOVER_PREWARM_ENABLED,
   hoverPrewarmSchedulePolicy,
   shouldCancelPrewarmForUserHover
 } from "../src/core/vector-hover-prewarm.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
 
 test("shift-style extension preserves the original anchor", () => {
   const selection = new SelectionModel();

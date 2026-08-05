@@ -49,7 +49,6 @@ import {
 import { classifyGridHit } from "../src/ui/grid-geometry.js";
 import {
   createDefaultLintSettings,
-  lintRuleGroupsForProfile,
   runLint
 } from "../src/core/lint-engine.js";
 
@@ -57,10 +56,6 @@ function lintDocs(docs, profile = "RotW") {
   const settings = createDefaultLintSettings();
   settings.profile = profile;
   return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
 }
 
 test("parses and serializes TSV while preserving CRLF and final newline", () => {
