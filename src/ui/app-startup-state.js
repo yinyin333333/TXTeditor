@@ -16,7 +16,7 @@ import {
   panelStateFromStorage
 } from "./panel-state-policy.js";
 import { initialSearchState } from "./search-policy.js";
-import { normaliseGridFont, normaliseZoomLevel } from "./app-settings-policy.js";
+import { normaliseGridFont, normaliseGridScrollMode, normaliseZoomLevel } from "./app-settings-policy.js";
 import { readJsonStorage } from "./app-runtime-utils.js";
 import { loadShortcutBindings } from "./shortcut-policy.js";
 import { freezeStateFromStorage } from "./freeze-state-policy.js";
@@ -25,6 +25,7 @@ import { readLocale } from "../core/i18n.js";
 export function createInitialAppState({ storage = localStorage } = {}) {
   const savedTheme = storage.getItem("txteditor.theme") === "light" ? "light" : "dark";
   const savedGridFont = normaliseGridFont(storage.getItem("txteditor.gridFont"));
+  const savedScrollMode = normaliseGridScrollMode(storage.getItem("txteditor.scrollMode"));
   const savedColorize = storage.getItem("txteditor.colorize") === "on";
   const savedMouseResizeLocked = storage.getItem("txteditor.mouseResizeLocked") === "on";
   const savedAutoResizeToFitOnOpen = storage.getItem("txteditor.autoResizeToFitOnOpen") === "on";
@@ -61,6 +62,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     theme: savedTheme,
     locale: savedLocale,
     gridFont: savedGridFont,
+    scrollMode: savedScrollMode,
     colorizeColumns: savedColorize,
     mouseResizeLocked: savedMouseResizeLocked,
     autoResizeToFitOnOpen: savedAutoResizeToFitOnOpen,

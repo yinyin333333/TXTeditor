@@ -5,7 +5,8 @@ import { GridMetrics } from "./grid-metrics.js";
 import { cellBackground, cellTextColor, createGridRenderStats, initialColumnFitWidth, syncGridThemeFromStyle } from "./grid-render-policy.js";
 import { MANUAL_HIGHLIGHT_IDS } from "./manual-highlight.js";
 import { applyColumnSelection, applyRowSelection, applySelectionForHit, hasFullColumnRange, hasFullRowRange, keyboardSelectionTarget } from "./grid-selection-policy.js";
-import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, clampedGridScrollOffsets, edgeCellScrollState, wheelScrollOffsets } from "./grid-viewport-policy.js";
+import { applyGridScrollBounds, applyResizeDragState, centeredCellScrollState, centeredScrollOffset as centeredScrollOffsetPolicy, clampedGridScrollOffsets, consumeCellGridScrollEcho, edgeCellScrollState, normalizeCellGridScrollOffsets, setCellGridScrollBaseline, wheelScrollOffsets } from "./grid-viewport-policy.js";
+import { GRID_SCROLL_MODE_PIXEL, isCellScrollMode, normalizeGridScrollMode } from "./grid-scroll-mode-policy.js";
 import { drawGrid, drawGridActiveRowHeaderChrome, drawGridCell, drawGridDiagnosticMarker, drawGridRowHeader, fillGridText } from "./grid/grid-renderer.js";
 import {
   isGridHoverAllowed,
@@ -73,6 +74,8 @@ export class CanvasGrid {
     this.editing = false;
     this.editMode = null;
     this.colorizeColumns = false;
+    this.scrollMode = GRID_SCROLL_MODE_PIXEL;
+    this.resetCellScrollNormalizationState();
     this.vectorLspHoverEnabled = true;
     this.hoverSuspended = false;
     this.diagnosticsByCell = new Map();
@@ -84,42 +87,35 @@ export class CanvasGrid {
     this.bind();
     this.layout();
   }
-
   get zoom() {
     return this.doc.zoom ?? 1;
   }
-
   get rowHeight() {
     return Math.round(BASE_ROW_HEIGHT * this.zoom);
   }
-
   get headerHeight() {
     return Math.round(24 * this.zoom);
   }
-
   get rowHeaderWidth() {
     const digits = Math.max(2, String(Math.max(1, this.doc.rowCount)).length);
     return Math.round(Math.max(BASE_ROW_HEADER_MIN, 16 + digits * 7) * this.zoom);
   }
-
   get scrollLeft() {
-    return Math.round(this.host.scrollLeft);
+    return Math.round(isCellScrollMode(this.scrollMode) && this._lastCellScrollOffset ? this._lastCellScrollOffset.scrollLeft : this.host.scrollLeft);
   }
-
   get scrollTop() {
-    return Math.round(this.host.scrollTop);
+    return Math.round(isCellScrollMode(this.scrollMode) && this._lastCellScrollOffset ? this._lastCellScrollOffset.scrollTop : this.host.scrollTop);
   }
-
   font(weight = 400) {
     return `${weight} ${Math.max(10, Math.round(12 * this.zoom))}px ${this.gridFontFamily}`;
   }
-
   setDocument(doc) {
     const scrollLeft = Math.max(0, doc.scrollLeft ?? 0);
     const scrollTop = Math.max(0, doc.scrollTop ?? 0);
     if (this._tooltip && shouldClearHoverForInteraction({ documentChanged: true })) this.clearHoverState();
     else this.hideFirstColumnHoverPreview();
     this.doc = doc;
+    this.resetCellScrollNormalizationState();
     this._cellInputPreview = null;
     this._lspHoverByCell.clear();
     this._hoveredCell = null;
@@ -127,22 +123,29 @@ export class CanvasGrid {
     this.layout();
     this.host.scrollLeft = scrollLeft;
     this.host.scrollTop = scrollTop;
+    if (isCellScrollMode(this.scrollMode)) setCellGridScrollBaseline(this, this.host);
     doc.scrollLeft = this.scrollLeft;
     doc.scrollTop = this.scrollTop;
     this.draw();
   }
-
   setFontFamily(fontFamily) {
     this.gridFontFamily = fontFamily || "Consolas, 'Cascadia Mono', monospace";
     document.documentElement.style.setProperty("--grid-font", this.gridFontFamily);
     this.layout();
   }
-
   setColorizeColumns(enabled) {
     this.colorizeColumns = Boolean(enabled);
     this.draw();
   }
-
+  setScrollMode(mode) {
+    this.scrollMode = normalizeGridScrollMode(mode);
+    this.resetCellScrollNormalizationState();
+    if (isCellScrollMode(this.scrollMode)) setCellGridScrollBaseline(this, this.host);
+    this.draw();
+  }
+  resetCellScrollNormalizationState() {
+    this._lastCellScrollOffset = this._lastRawCellScrollOffset = this._lastObservedCellScrollOffset = this._cellScrollEcho = this._cellScrollThumbDrag = null;
+  }
   setMouseResizeLocked(locked) {
     this.mouseResizeLocked = Boolean(locked);
     if (!this.mouseResizeLocked) return;
@@ -151,18 +154,15 @@ export class CanvasGrid {
     this.host.style.cursor = "default";
     this.draw();
   }
-
   setVectorLspHoverEnabled(enabled) {
     this.vectorLspHoverEnabled = Boolean(enabled);
     if (!this.vectorLspHoverEnabled) this.clearLspHovers();
     this.requestRender("vector-lsp-hover");
   }
-
   setHoverSuspended(suspended) {
     this.hoverSuspended = Boolean(suspended);
     if (this.hoverSuspended) this.clearHoverState();
   }
-
   isHoverAllowed() {
     return isGridHoverAllowed({
       hoverSuspended: this.hoverSuspended,
@@ -170,11 +170,9 @@ export class CanvasGrid {
       dragging: this.dragging
     });
   }
-
   clearHoverState() { return clearGridHoverState(this); }
   clearLspHovers() { return clearGridLspHovers(this); }
   hideVectorTooltip() { return hideGridVectorTooltip(this); }
-
   setDiagnostics(diagnosticsByCell, { redraw = true } = {}) {
     this.diagnosticsByCell = diagnosticsByCell instanceof Map ? diagnosticsByCell : new Map();
     if (redraw) this.draw();
@@ -203,16 +201,7 @@ export class CanvasGrid {
 
   bind() {
     new ResizeObserver(() => this.layout()).observe(this.host);
-    this.host.addEventListener("scroll", () => {
-      applyGridScrollState({
-        doc: this.doc,
-        scrollLeft: this.scrollLeft,
-        scrollTop: this.scrollTop,
-        clearHoverState: () => this.clearHoverState(),
-        requestRender: (reason) => this.requestRender(reason),
-        onViewportChanged: this.onViewportChanged
-      });
-    });
+    this.host.addEventListener("scroll", () => this.onHostScroll());
     this._tooltip = document.createElement("div");
     this._tooltip.className = "cell-tooltip";
     document.body.appendChild(this._tooltip);
@@ -223,9 +212,11 @@ export class CanvasGrid {
     this.host.addEventListener("dblclick", (event) => this.onDblClick(event));
     this.host.addEventListener("keydown", (event) => this.onKeyDown(event));
     this.host.addEventListener("wheel", (event) => {
-      if (!event.ctrlKey) return;
-      event.preventDefault();
-      this.setZoom(this.doc.zoom + (event.deltaY < 0 ? 0.1 : -0.1), { userAction: true });
+      if (event.ctrlKey) {
+        event.preventDefault();
+        this.setZoom(this.doc.zoom + (event.deltaY < 0 ? 0.1 : -0.1), { userAction: true });
+        return;
+      }
     }, { passive: false });
     window.addEventListener("mouseup", () => this.onMouseUp());
     this.editor.addEventListener("keydown", (event) => this.onEditorKeyDown(event));
@@ -239,6 +230,27 @@ export class CanvasGrid {
     }
   }
 
+  onHostScroll() {
+    const sync = () => applyGridScrollState({
+      doc: this.doc, scrollLeft: this.scrollLeft, scrollTop: this.scrollTop,
+      clearHoverState: () => this.clearHoverState(), requestRender: (reason) => this.requestRender(reason), onViewportChanged: this.onViewportChanged
+    });
+    if (consumeCellGridScrollEcho(this)) return;
+    if (!isCellScrollMode(this.scrollMode)) return sync();
+    const before = this._lastCellScrollOffset;
+    const next = normalizeCellGridScrollOffsets(this);
+    const changed = this._cellScrollChangedAxes;
+    const dragging = this._cellScrollThumbDrag ?? {};
+    const writeLeft = changed.scrollLeft && !dragging.horizontal && this.host.scrollLeft !== next.scrollLeft;
+    const writeTop = changed.scrollTop && !dragging.vertical && this.host.scrollTop !== next.scrollTop;
+    if (writeLeft || writeTop) {
+      if (writeLeft) this.host.scrollLeft = next.scrollLeft;
+      if (writeTop) this.host.scrollTop = next.scrollTop;
+      this._cellScrollEcho = { scrollLeft: this.host.scrollLeft, scrollTop: this.host.scrollTop };
+    }
+    if (!before || (changed.scrollLeft && before.scrollLeft !== next.scrollLeft) || (changed.scrollTop && before.scrollTop !== next.scrollTop)) sync();
+  }
+
   layout() {
     this.hideFirstColumnHoverPreview();
     const rect = this.host.getBoundingClientRect();
@@ -250,6 +262,7 @@ export class CanvasGrid {
     this.scrollSurface.style.width = `${this.rowHeaderWidth + frozenColumnWidth + scrollableColumnWidth}px`;
     this.scrollSurface.style.height = `${this.headerHeight + frozenRowHeight + scrollableRowsHeight}px`;
     applyGridScrollBounds({ host: this.host, doc: this.doc, rowHeaderWidth: this.rowHeaderWidth, headerHeight: this.headerHeight, frozenColumnWidth, frozenRowHeight, scrollableColumnWidth, scrollableRowsHeight });
+    if (isCellScrollMode(this.scrollMode) && this._lastCellScrollOffset) Object.assign(this.doc, { scrollLeft: this.scrollLeft, scrollTop: this.scrollTop });
     this.draw();
   }
 
@@ -478,7 +491,11 @@ export class CanvasGrid {
 
   onMouseDown(event) {
     if (event.button !== 0) return;
-    if (this.isScrollbarEvent(event)) return;
+    const scrollbar = this.scrollbarAxesForEvent?.(event);
+    if (scrollbar || this.isScrollbarEvent(event)) {
+      if (isCellScrollMode(this.scrollMode)) { this._cellScrollEcho = null; this._cellScrollThumbDrag = scrollbar; }
+      return;
+    }
     this.hideFirstColumnHoverPreview();
     this.host.focus();
     const hit = this.hitTest(event);
@@ -499,12 +516,17 @@ export class CanvasGrid {
   }
 
   isScrollbarEvent(event) {
+    return Boolean(this.scrollbarAxesForEvent(event));
+  }
+
+  scrollbarAxesForEvent(event) {
     const rect = this.host.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    if (x < 0 || y < 0) return { horizontal: false, vertical: false };
     const onVertical = this.host.scrollHeight > this.host.clientHeight && x >= this.host.clientWidth;
     const onHorizontal = this.host.scrollWidth > this.host.clientWidth && y >= this.host.clientHeight;
-    return onVertical || onHorizontal || x < 0 || y < 0;
+    return onVertical || onHorizontal ? { horizontal: onHorizontal, vertical: onVertical } : null;
   }
 
   onMouseMove(event) {
@@ -548,6 +570,10 @@ export class CanvasGrid {
     this.dragging = false;
     this.resizing = null;
     this.resizeGuide = null;
+    // Keep the browser-owned thumb at its final raw position.  The logical
+    // snapped viewport already reflects the last drag event, so reconciling
+    // here would move the grabbed thumb and flash a different cell.
+    this._cellScrollThumbDrag = null;
     this.draw();
   }
 
@@ -822,8 +848,12 @@ export class CanvasGrid {
       viewportWidth: this.host.clientWidth - this.rowHeaderWidth - this.frozenColumnWidth(),
       viewportHeight: this.host.clientHeight - this.headerHeight - this.frozenRowHeight()
     });
-    if ("scrollLeft" in scrollState && !options.preserveScrollLeft) this.host.scrollLeft = scrollState.scrollLeft;
-    if ("scrollTop" in scrollState && !options.preserveScrollTop) this.host.scrollTop = scrollState.scrollTop;
+    const next = {
+      scrollLeft: "scrollLeft" in scrollState && !options.preserveScrollLeft ? scrollState.scrollLeft : this.host.scrollLeft,
+      scrollTop: "scrollTop" in scrollState && !options.preserveScrollTop ? scrollState.scrollTop : this.host.scrollTop
+    };
+    Object.assign(this.host, next);
+    if (isCellScrollMode(this.scrollMode)) setCellGridScrollBaseline(this, next, { notify: true });
   }
 
   scrollCellToCenter(row, column, options = {}) {
@@ -841,36 +871,23 @@ export class CanvasGrid {
       scrollableWidth: this.scrollableColumnWidth(),
       scrollableHeight: this.scrollableRowsHeight()
     });
-    if ("scrollLeft" in scrollState && !options.preserveScrollLeft) this.host.scrollLeft = scrollState.scrollLeft;
-    if ("scrollTop" in scrollState && !options.preserveScrollTop) this.host.scrollTop = scrollState.scrollTop;
+    const next = {
+      scrollLeft: "scrollLeft" in scrollState && !options.preserveScrollLeft ? scrollState.scrollLeft : this.host.scrollLeft,
+      scrollTop: "scrollTop" in scrollState && !options.preserveScrollTop ? scrollState.scrollTop : this.host.scrollTop
+    };
+    Object.assign(this.host, next);
+    if (isCellScrollMode(this.scrollMode)) setCellGridScrollBaseline(this, next, { notify: true });
   }
 
   scrollByWheel(event = {}) {
     this.scrollToOffsets(wheelScrollOffsets(event, { scrollLeft: this.host.scrollLeft, scrollTop: this.host.scrollTop, lineSize: this.rowHeight, pageWidth: this.host.clientWidth, pageHeight: this.gridPageHeight() }));
   }
-  scrollToTop() {
-    this.scrollToOffsets({ scrollTop: 0 });
-  }
-
-  scrollToBottom() {
-    this.scrollToOffsets({ scrollTop: Number.MAX_SAFE_INTEGER });
-  }
-
-  scrollToLeft() {
-    this.scrollToOffsets({ scrollLeft: 0 });
-  }
-
-  scrollToRight() {
-    this.scrollToOffsets({ scrollLeft: Number.MAX_SAFE_INTEGER });
-  }
-
-  scrollPageUp() {
-    this.scrollToOffsets({ scrollTop: this.host.scrollTop - this.gridPageHeight() });
-  }
-
-  scrollPageDown() {
-    this.scrollToOffsets({ scrollTop: this.host.scrollTop + this.gridPageHeight() });
-  }
+  scrollToTop() { this.scrollToOffsets({ scrollTop: 0 }); }
+  scrollToBottom() { this.scrollToOffsets({ scrollTop: Number.MAX_SAFE_INTEGER }); }
+  scrollToLeft() { this.scrollToOffsets({ scrollLeft: 0 }); }
+  scrollToRight() { this.scrollToOffsets({ scrollLeft: Number.MAX_SAFE_INTEGER }); }
+  scrollPageUp() { this.scrollToOffsets({ scrollTop: this.host.scrollTop - this.gridPageHeight() }); }
+  scrollPageDown() { this.scrollToOffsets({ scrollTop: this.host.scrollTop + this.gridPageHeight() }); }
 
   gridPageHeight() {
     return Math.max(1, this.host.clientHeight - this.headerHeight - this.frozenRowHeight());

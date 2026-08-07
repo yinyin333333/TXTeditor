@@ -1,4 +1,5 @@
 import { tText } from "../core/i18n.js";
+import { GRID_SCROLL_MODE_PIXEL, normalizeGridScrollMode } from "./grid-scroll-mode-policy.js";
 
 export const DEFAULT_GRID_FONT = "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace";
 
@@ -96,6 +97,10 @@ export function normaliseZoomLevel(value) {
   return Math.min(8, Math.max(0.1, Math.round(zoom * 10) / 10));
 }
 
+export function normaliseGridScrollMode(value) {
+  return normalizeGridScrollMode(value);
+}
+
 export function fontLabelFromFamily(fontFamily) {
   return String(fontFamily).split(",")[0].replaceAll("'", "").replaceAll("\"", "").trim() || "Selected Font";
 }
@@ -107,7 +112,8 @@ export function appSettingsVisualControls({
   keepZoomLevel = false,
   excludeWorkspaceSubfolders = false,
   theme = "dark",
-  gridFont = DEFAULT_GRID_FONT
+  gridFont = DEFAULT_GRID_FONT,
+  scrollMode = GRID_SCROLL_MODE_PIXEL
 } = {}) {
   return {
     colorize: { id: "settingsColorizeColumns", label: tText("settings.colorizeColumns"), checked: Boolean(colorizeColumns) },
@@ -136,6 +142,15 @@ export function appSettingsVisualControls({
       label: tText("settings.font"),
       value: normaliseGridFont(gridFont),
       options: FONT_OPTIONS
+    },
+    scrollMode: {
+      id: "settingsScrollMode",
+      label: tText("settings.scrollMode"),
+      value: normalizeGridScrollMode(scrollMode),
+      options: [
+        [GRID_SCROLL_MODE_PIXEL, tText("settings.scrollModePixel")],
+        ["cell", tText("settings.scrollModeCell")]
+      ]
     },
     themes: [
       { theme: "dark", label: tText("theme.dark"), active: theme !== "light" },

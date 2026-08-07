@@ -68,6 +68,7 @@ function makeSettingsController({
     excludeWorkspaceSubfolders: false,
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
+    scrollMode: "pixel",
     dockLayout: DEFAULT_DOCK_LAYOUT,
     workspace,
     lint: {
@@ -103,6 +104,7 @@ function makeSettingsController({
       setColorizeColumns: (enabled) => calls.push(["colorize", enabled]),
       setMouseResizeLocked: (locked) => calls.push(["mouse-resize-locked", locked]),
       setFontFamily: (font) => calls.push(["font", font]),
+      setScrollMode: (mode) => calls.push(["scroll-mode", mode]),
       setVectorLspHoverEnabled: (enabled) => calls.push(["hover", enabled])
     },
     dockForPanel: (panel) => state.dockLayout[panel],
@@ -168,6 +170,7 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("#settingsExcludeWorkspaceSubfolders")?.tagName, "INPUT");
   assert.equal(document.body.querySelector("#settingsVectorLspHover"), null);
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
+  assert.equal(document.body.querySelector("#settingsScrollMode")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("#settingsLocale")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']"), null);
   assert.equal(document.body.querySelector("[data-settings-lint-engine='legacy']"), null);
@@ -175,6 +178,19 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("[data-settings-theme='light']")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-reset-layout]")?.tagName, "BUTTON");
   assert.equal(document.body.querySelector("[data-settings-close]")?.tagName, "BUTTON");
+});
+
+test("scrolling mode applies immediately and persists as a normalized preference", () => {
+  const { controller, document, calls, state } = makeSettingsController();
+  controller.showAppSettings();
+  const scrollMode = document.body.querySelector("#settingsScrollMode");
+  scrollMode.value = "cell";
+  scrollMode.dispatchEvent({ type: "change" });
+  assert.equal(state.scrollMode, "cell");
+  assert.equal(localStorage.getItem("txteditor.scrollMode"), "cell");
+  assert.deepEqual(calls.filter((call) => Array.isArray(call) && call[0] === "scroll-mode"), [["scroll-mode", "cell"]]);
+  localStorage.setItem("txteditor.scrollMode", "broken");
+  assert.equal(createInitialAppState({ storage: localStorage }).state.scrollMode, "pixel");
 });
 
 test("App Settings changes the language immediately", async () => {
