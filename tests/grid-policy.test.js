@@ -59,8 +59,13 @@ import {
   centeredScrollOffset,
   edgeCellScrollState,
   edgeScrollOffset,
-  resizedTrackValue
+  resizedTrackValue,
+  snappedGridScrollOffset,
+  consumeCellGridScrollEcho,
+  normalizeCellGridScrollOffsets,
+  setCellGridScrollBaseline
 } from "../src/ui/grid-viewport-policy.js";
+import { GRID_SCROLL_MODE_CELL, normalizeGridScrollMode } from "../src/ui/grid-scroll-mode-policy.js";
 import { shouldClearHoverForInteraction } from "../src/ui/hover-policy.js";
 import { drawGridCellLayer, drawGridColumnHeader, drawGridCornerHeader } from "../src/ui/grid/grid-renderer.js";
 import {
@@ -463,6 +468,373 @@ test("centered scroll offsets clamp for short and bounded content", () => {
   }), {});
 });
 
+test("cell scrolling snaps variable hidden boundaries without skipping exact forward boundaries", () => {
+  const metrics = new GridMetrics();
+  const doc = new TableDocument("snap", [["a", "b", "c", "d"]]);
+  doc.defaultColumnWidth = 50;
+  doc.columnWidths = [50, 70, 30, 90];
+  doc.hiddenColumns.add(1);
+  metrics.updateColumns({ doc, zoom: 2, scrollStartColumn: 0 });
+  assert.equal(snappedGridScrollOffset({ metrics: metrics.columns, offset: 83, maxScroll: 250, direction: 1 }), 100);
+  assert.equal(snappedGridScrollOffset({ metrics: metrics.columns, offset: 100, maxScroll: 250, direction: 1 }), 100);
+  assert.equal(snappedGridScrollOffset({ metrics: metrics.columns, offset: 100, maxScroll: 250, direction: -1 }), 100);
+  assert.equal(snappedGridScrollOffset({ metrics: metrics.columns, offset: 250, maxScroll: 250, direction: 1 }), 250);
+  assert.equal(normalizeGridScrollMode("invalid"), "pixel");
+  assert.equal(normalizeGridScrollMode(GRID_SCROLL_MODE_CELL), GRID_SCROLL_MODE_CELL);
+});
+
+test("cell scrolling normalizes partial offsets in both axes", () => {
+  const grid = {
+    host: { scrollLeft: 30, scrollTop: 13, clientWidth: 200, clientHeight: 150 },
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 0,
+    frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400,
+    scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: 80, prefix: null },
+      rows: { total: 400, simpleSize: 25, prefix: null }
+    })
+  };
+  assert.deepEqual(normalizeCellGridScrollOffsets(grid), { scrollLeft: 0, scrollTop: 25 });
+  CanvasGrid.prototype.scrollToOffsets.call(grid, { scrollLeft: 113, scrollTop: 63 });
+  assert.deepEqual([grid.host.scrollLeft, grid.host.scrollTop], [113, 63]);
+});
+
+test("cell scrolling preserves non-boundary maxima and returns to prior column and row boundaries", () => {
+  const grid = {
+    host: { scrollLeft: 0, scrollTop: 0, clientWidth: 200, clientHeight: 150 },
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 0,
+    frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 500,
+    scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 500, simpleSize: null, prefix: [0, 75, 175, 300, 500] },
+      rows: { total: 400, simpleSize: 25, prefix: null }
+    })
+  };
+  // Native maxima: 40 + 500 - 200 = 340, and 24 + 400 - 150 = 274.
+  grid.host.scrollLeft = 340;
+  grid.host.scrollTop = 274;
+  assert.deepEqual(normalizeCellGridScrollOffsets(grid), { scrollLeft: 340, scrollTop: 274 });
+  grid.host.scrollLeft = 339;
+  grid.host.scrollTop = 273;
+  assert.deepEqual(normalizeCellGridScrollOffsets(grid), { scrollLeft: 300, scrollTop: 250 });
+});
+
+test("cell normalization keeps monotonic variable-width and variable-height thumb drags monotonic", () => {
+  const grid = {
+    host: { scrollLeft: 0, scrollTop: 0, clientWidth: 100, clientHeight: 100 },
+    rowHeaderWidth: 0, headerHeight: 0,
+    frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 240, 400] },
+      rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 190, 400] }
+    })
+  };
+  const normalizeAndApply = () => {
+    const next = normalizeCellGridScrollOffsets(grid);
+    Object.assign(grid.host, next);
+    return next;
+  };
+  const horizontal = [], vertical = [];
+  for (const raw of [20, 60, 70, 90, 110]) {
+    grid.host.scrollLeft = raw;
+    horizontal.push(normalizeAndApply().scrollLeft);
+  }
+  for (const raw of [12, 40, 55, 75, 95]) {
+    grid.host.scrollTop = raw;
+    vertical.push(normalizeAndApply().scrollTop);
+  }
+  assert.deepEqual(horizontal, [0, 130, 130, 130, 130]);
+  assert.deepEqual(vertical, [30, 100, 100, 100, 100]);
+  grid.host.scrollLeft = 90;
+  grid.host.scrollTop = 75;
+  assert.deepEqual(normalizeAndApply(), { scrollLeft: 50, scrollTop: 30 });
+});
+
+test("cell normalization keeps raw direction history independent for each axis", () => {
+  const grid = {
+    host: { scrollLeft: 0, scrollTop: 0, clientWidth: 100, clientHeight: 100 },
+    rowHeaderWidth: 0, headerHeight: 0,
+    frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 240, 400] },
+      rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 190, 400] }
+    })
+  };
+  const normalizeAndApply = () => {
+    const next = normalizeCellGridScrollOffsets(grid);
+    Object.assign(grid.host, next);
+    return next;
+  };
+
+  normalizeAndApply();
+  grid.host.scrollTop = 40;
+  assert.equal(normalizeAndApply().scrollTop, 100);
+  assert.equal(grid._lastRawCellScrollOffset.scrollTop, 40);
+  grid.host.scrollLeft = 60;
+  assert.equal(normalizeAndApply().scrollLeft, 130);
+  assert.equal(grid._lastRawCellScrollOffset.scrollTop, 40);
+  grid.host.scrollTop = 55;
+  assert.equal(normalizeAndApply().scrollTop, 100);
+
+  const horizontalGrid = { ...grid, host: { scrollLeft: 0, scrollTop: 0, clientWidth: 100, clientHeight: 100 } };
+  const normalizeHorizontal = () => {
+    const next = normalizeCellGridScrollOffsets(horizontalGrid);
+    Object.assign(horizontalGrid.host, next);
+    return next;
+  };
+  normalizeHorizontal();
+  horizontalGrid.host.scrollLeft = 40;
+  assert.equal(normalizeHorizontal().scrollLeft, 50);
+  horizontalGrid.host.scrollTop = 40;
+  assert.equal(normalizeHorizontal().scrollTop, 100);
+  horizontalGrid.host.scrollLeft = 55;
+  assert.equal(normalizeHorizontal().scrollLeft, 130);
+
+  const diagonalGrid = {
+    ...grid,
+    host: { scrollLeft: 0, scrollTop: 0, clientWidth: 100, clientHeight: 100 },
+    _lastRawCellScrollOffset: null,
+    _lastCellScrollOffset: null
+  };
+  const normalizeDiagonal = () => {
+    const next = normalizeCellGridScrollOffsets(diagonalGrid);
+    Object.assign(diagonalGrid.host, next);
+    return next;
+  };
+  normalizeDiagonal();
+  const diagonal = [];
+  for (const [left, top] of [[20, 12], [60, 40], [90, 75]]) {
+    diagonalGrid.host.scrollLeft = left;
+    diagonalGrid.host.scrollTop = top;
+    diagonal.push(normalizeDiagonal());
+  }
+  assert.deepEqual(diagonal, [
+    { scrollLeft: 50, scrollTop: 30 },
+    { scrollLeft: 130, scrollTop: 100 },
+    { scrollLeft: 130, scrollTop: 100 }
+  ]);
+  diagonalGrid.host.scrollLeft = 70;
+  assert.deepEqual(normalizeDiagonal(), { scrollLeft: 50, scrollTop: 100 });
+
+  const rawBeforeEcho = { ...diagonalGrid._lastRawCellScrollOffset };
+  diagonalGrid._cellScrollEcho = { scrollLeft: diagonalGrid.host.scrollLeft, scrollTop: diagonalGrid.host.scrollTop };
+  assert.equal(consumeCellGridScrollEcho(diagonalGrid), true);
+  assert.deepEqual(diagonalGrid._lastRawCellScrollOffset, rawBeforeEcho);
+});
+
+test("active scrollbar thumb drags retain physical offsets while the grid uses snapped logical offsets", () => {
+  const makeGrid = () => {
+    const writes = [], notifications = [];
+    const host = {
+      _left: 0, _top: 0, clientWidth: 100, clientHeight: 100, scrollWidth: 400, scrollHeight: 400,
+      get scrollLeft() { return this._left; },
+      set scrollLeft(value) { writes.push(["left", value]); this._left = value; },
+      get scrollTop() { return this._top; },
+      set scrollTop(value) { writes.push(["top", value]); this._top = value; },
+      getBoundingClientRect: () => ({ left: 0, top: 0 })
+    };
+    const grid = {
+      host, doc: {}, scrollMode: GRID_SCROLL_MODE_CELL,
+      rowHeaderWidth: 0, headerHeight: 0,
+      frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+      scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+      gridMetrics: () => ({
+        columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 240, 400] },
+        rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 190, 400] }
+      }),
+      clearHoverState() {},
+      requestRender: () => { notifications.push("render"); },
+      onViewportChanged: () => { notifications.push("viewport"); },
+      draw: () => { notifications.push("draw"); },
+      scrollbarAxesForEvent: CanvasGrid.prototype.scrollbarAxesForEvent,
+      isScrollbarEvent: CanvasGrid.prototype.isScrollbarEvent
+    };
+    Object.defineProperties(grid, {
+      scrollLeft: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollLeft").call(grid) },
+      scrollTop: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollTop").call(grid) }
+    });
+    return { grid, host, writes, notifications };
+  };
+
+  const { grid, host, writes, notifications } = makeGrid();
+  CanvasGrid.prototype.onMouseDown.call(grid, { button: 0, clientX: 50, clientY: 100 });
+  assert.deepEqual(grid._cellScrollThumbDrag, { horizontal: true, vertical: false });
+  const logical = [];
+  for (const raw of [20, 60, 90, 300, 299, 70]) {
+    host._left = raw;
+    CanvasGrid.prototype.onHostScroll.call(grid);
+    logical.push(grid.scrollLeft);
+  }
+  assert.deepEqual(logical, [0, 130, 130, 300, 240, 50]);
+  assert.equal(host.scrollLeft, 70);
+  assert.deepEqual(writes, []);
+  assert.equal(grid.doc.scrollLeft, 50);
+  assert.equal(grid.doc.scrollTop, 0);
+  assert.equal(grid._lastRawCellScrollOffset.scrollTop, 0);
+  assert.equal(notifications.filter((value) => value === "viewport").length, 5);
+
+  const physicalBeforeRelease = host.scrollLeft;
+  CanvasGrid.prototype.onMouseUp.call(grid);
+  assert.equal(physicalBeforeRelease, host.scrollLeft);
+  assert.equal(grid._cellScrollThumbDrag, null);
+  assert.equal(notifications.filter((value) => value === "draw").length, 1);
+});
+
+test("changing thumb axes after release preserves the retained physical/logical divergence", () => {
+  const makeGrid = () => {
+    const writes = [];
+    const host = {
+      _left: 0, _top: 0, clientWidth: 100, clientHeight: 100,
+      get scrollLeft() { return this._left; }, set scrollLeft(value) { writes.push(["left", value]); this._left = value; },
+      get scrollTop() { return this._top; }, set scrollTop(value) { writes.push(["top", value]); this._top = value; }
+    };
+    const grid = {
+      host, doc: {}, scrollMode: GRID_SCROLL_MODE_CELL, resizing: null,
+      rowHeaderWidth: 0, headerHeight: 0, frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+      scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+      gridMetrics: () => ({
+        columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 240, 400] },
+        rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 190, 400] }
+      }),
+      clearHoverState() {}, requestRender() {}, onViewportChanged() {}, draw() {}
+    };
+    Object.defineProperties(grid, {
+      scrollLeft: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollLeft").call(grid) },
+      scrollTop: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollTop").call(grid) }
+    });
+    setCellGridScrollBaseline(grid, host);
+    return { grid, host, writes };
+  };
+
+  const { grid, host, writes } = makeGrid();
+  grid._cellScrollThumbDrag = { horizontal: true, vertical: false };
+  host._left = 60;
+  CanvasGrid.prototype.onHostScroll.call(grid);
+  assert.deepEqual([host.scrollLeft, grid.scrollLeft, grid.doc.scrollLeft], [60, 130, 130]);
+  CanvasGrid.prototype.onMouseUp.call(grid);
+  writes.length = 0;
+  grid._cellScrollThumbDrag = { horizontal: false, vertical: true };
+  host._top = 40;
+  CanvasGrid.prototype.onHostScroll.call(grid);
+  assert.deepEqual([host.scrollLeft, grid.scrollLeft, grid.doc.scrollLeft], [60, 130, 130]);
+  assert.deepEqual(grid._cellScrollChangedAxes, { scrollLeft: false, scrollTop: true });
+  assert.equal(writes.some(([axis]) => axis === "left"), false);
+  host._top = 55;
+  CanvasGrid.prototype.onHostScroll.call(grid);
+  assert.equal(grid.scrollTop, 100);
+
+  const reverse = makeGrid();
+  reverse.grid._cellScrollThumbDrag = { horizontal: false, vertical: true };
+  reverse.host._top = 40;
+  CanvasGrid.prototype.onHostScroll.call(reverse.grid);
+  CanvasGrid.prototype.onMouseUp.call(reverse.grid);
+  reverse.writes.length = 0;
+  reverse.grid._cellScrollThumbDrag = { horizontal: true, vertical: false };
+  reverse.host._left = 60;
+  CanvasGrid.prototype.onHostScroll.call(reverse.grid);
+  assert.deepEqual([reverse.host.scrollTop, reverse.grid.scrollTop, reverse.grid.doc.scrollTop], [40, 100, 100]);
+  assert.deepEqual(reverse.grid._cellScrollChangedAxes, { scrollLeft: true, scrollTop: false });
+  assert.equal(reverse.writes.some(([axis]) => axis === "top"), false);
+
+  const diagonal = makeGrid();
+  diagonal.host._left = 60;
+  diagonal.host._top = 40;
+  CanvasGrid.prototype.onHostScroll.call(diagonal.grid);
+  assert.deepEqual(diagonal.grid._cellScrollChangedAxes, { scrollLeft: true, scrollTop: true });
+});
+
+test("vertical thumb drags are independent and non-thumb cell scrolling still writes snapped positions", () => {
+  const host = {
+    _left: 0, _top: 0, clientWidth: 100, clientHeight: 100,
+    get scrollLeft() { return this._left; }, set scrollLeft(value) { this._left = value; },
+    get scrollTop() { return this._top; }, set scrollTop(value) { this._top = value; }
+  };
+  const grid = {
+    host, doc: {}, scrollMode: GRID_SCROLL_MODE_CELL,
+    rowHeaderWidth: 0, headerHeight: 0,
+    frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 240, 400] },
+      rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 190, 400] }
+    }),
+    clearHoverState() {}, requestRender() {}, onViewportChanged() {}
+  };
+  Object.defineProperties(grid, {
+    scrollLeft: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollLeft").call(grid) },
+    scrollTop: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollTop").call(grid) }
+  });
+  grid._cellScrollThumbDrag = { horizontal: false, vertical: true };
+  const vertical = [];
+  for (const raw of [12, 40, 75, 300, 299, 55]) {
+    host._top = raw;
+    CanvasGrid.prototype.onHostScroll.call(grid);
+    vertical.push(grid.scrollTop);
+  }
+  assert.deepEqual(vertical, [0, 100, 100, 300, 190, 30]);
+  assert.equal(host.scrollTop, 55);
+  assert.equal(host.scrollLeft, 0);
+  assert.equal(grid._lastRawCellScrollOffset.scrollLeft, 0);
+
+  grid._cellScrollThumbDrag = null;
+  host._left = 40;
+  CanvasGrid.prototype.onHostScroll.call(grid);
+  assert.equal(host.scrollLeft, 50);
+  assert.equal(grid.scrollLeft, 50);
+});
+
+test("manual single-axis scrolling preserves the other logical viewport after programmatic navigation", () => {
+  const writes = [];
+  const host = {
+    _left: 217, _top: 145, clientWidth: 100, clientHeight: 100,
+    get scrollLeft() { return this._left; }, set scrollLeft(value) { writes.push(["left", value]); this._left = value; },
+    get scrollTop() { return this._top; }, set scrollTop(value) { writes.push(["top", value]); this._top = value; }
+  };
+  const grid = {
+    host, doc: { scrollLeft: 217, scrollTop: 145 }, scrollMode: GRID_SCROLL_MODE_CELL,
+    rowHeaderWidth: 0, headerHeight: 0, selection: { focus: { row: 686, column: 107 } },
+    frozenColumnWidth: () => 0, frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400, scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: null, prefix: [0, 80, 180, 280, 400] },
+      rows: { total: 400, simpleSize: null, prefix: [0, 50, 140, 250, 400] }
+    }),
+    clearHoverState() {}, requestRender() {}, onViewportChanged() {}
+  };
+  Object.defineProperties(grid, {
+    scrollLeft: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollLeft").call(grid) },
+    scrollTop: { get: () => CanvasGrid.prototype.__lookupGetter__("scrollTop").call(grid) }
+  });
+  setCellGridScrollBaseline(grid, host);
+  for (const raw of [230, 260]) {
+    host._left = raw;
+    CanvasGrid.prototype.onHostScroll.call(grid);
+    assert.equal(host.scrollTop, 145);
+    assert.equal(grid.scrollTop, 145);
+    assert.equal(grid.doc.scrollTop, 145);
+    assert.deepEqual(grid.selection.focus, { row: 686, column: 107 });
+  }
+  assert.equal(writes.some(([axis]) => axis === "top"), false);
+
+  writes.length = 0;
+  setCellGridScrollBaseline(grid, host);
+  for (const raw of [160, 190]) {
+    host._top = raw;
+    CanvasGrid.prototype.onHostScroll.call(grid);
+    assert.equal(host.scrollLeft, grid._lastCellScrollOffset.scrollLeft);
+    assert.equal(grid.doc.scrollLeft, grid.scrollLeft);
+  }
+  assert.equal(writes.some(([axis]) => axis === "left"), false);
+});
+
 test("grid explicit scroll shortcuts clamp to table bounds", () => {
   const grid = {
     host: {
@@ -562,6 +934,33 @@ test("grid wheel scrolling supports pixel, line, and shifted horizontal input", 
   grid.scrollByWheel({ deltaY: 10, shiftKey: true });
   assert.equal(grid.host.scrollLeft, 55);
   assert.equal(grid.host.scrollTop, 372);
+});
+
+test("cell-mode programmatic wheel helper keeps raw offsets until the scroll event normalizes them", () => {
+  const grid = {
+    scrollMode: GRID_SCROLL_MODE_CELL,
+    host: { scrollLeft: 30, scrollTop: 10, clientWidth: 300, clientHeight: 200 },
+    rowHeight: 26,
+    rowHeaderWidth: 40,
+    headerHeight: 24,
+    frozenColumnWidth: () => 10,
+    frozenRowHeight: () => 20,
+    scrollableColumnWidth: () => 900,
+    scrollableRowsHeight: () => 800,
+    gridMetrics: () => ({
+      columns: { total: 900, simpleSize: 80, prefix: null },
+      rows: { total: 800, simpleSize: 25, prefix: null }
+    }),
+    scrollToOffsets: CanvasGrid.prototype.scrollToOffsets,
+    gridPageHeight: CanvasGrid.prototype.gridPageHeight,
+    scrollByWheel: CanvasGrid.prototype.scrollByWheel
+  };
+  grid.scrollByWheel({ deltaY: 2, deltaMode: 1 });
+  assert.equal(grid.host.scrollTop, 62);
+  grid.scrollByWheel({ deltaY: -1, deltaMode: 1, shiftKey: true });
+  assert.equal(grid.host.scrollLeft, 4);
+  grid.scrollByWheel({ deltaY: 7 });
+  assert.equal(grid.host.scrollTop, 69);
 });
 
 test("centered cell scrolling can preserve the unrelated search axis", () => {
@@ -1676,6 +2075,7 @@ test("freeze state layout changes redraw the grid immediately", () => {
     rowHeaderWidth: 48,
     headerHeight: 24,
     hideFirstColumnHoverPreview() {},
+    resetCellScrollNormalizationState: CanvasGrid.prototype.resetCellScrollNormalizationState,
     syncTheme() {},
     layoutCanvas() {},
     positionCanvases() {},
@@ -1752,6 +2152,7 @@ test("document switch restores scroll after rebuilding the target scroll surface
       return Math.round(this.host.scrollTop);
     },
     hideFirstColumnHoverPreview() {},
+    resetCellScrollNormalizationState: CanvasGrid.prototype.resetCellScrollNormalizationState,
     layout() {
       this.host._maxScrollLeft = 100;
       this.host._maxScrollTop = 1000;
@@ -1766,6 +2167,72 @@ test("document switch restores scroll after rebuilding the target scroll surface
   assert.equal(targetDoc.scrollLeft, 40);
   assert.equal(targetDoc.scrollTop, 500);
   assert.deepEqual(restores, [{ row: 2, column: 0 }]);
+});
+
+test("document switching clears cell scroll history before restoring target offsets", () => {
+  const targetDoc = TableDocument.fromText("target.txt", "a\n1");
+  targetDoc.scrollLeft = 40;
+  targetDoc.scrollTop = 55;
+  targetDoc.selectionState = { focus: { row: 0, column: 0 }, anchor: { row: 0, column: 0 }, ranges: [] };
+  const grid = {
+    _tooltip: null,
+    _lspHoverByCell: new Map(),
+    _lastRawCellScrollOffset: { scrollLeft: 220, scrollTop: 180 },
+    _lastObservedCellScrollOffset: { scrollLeft: 240, scrollTop: 190 },
+    _lastCellScrollOffset: { scrollLeft: 240, scrollTop: 190 },
+    _cellScrollEcho: { scrollLeft: 240, scrollTop: 190 },
+    _cellScrollThumbDrag: { horizontal: true, vertical: false },
+    host: { scrollLeft: 0, scrollTop: 0, clientWidth: 100, clientHeight: 100 },
+    selection: { restore() {} },
+    get scrollLeft() { return this.host.scrollLeft; },
+    get scrollTop() { return this.host.scrollTop; },
+    hideFirstColumnHoverPreview() {},
+    resetCellScrollNormalizationState: CanvasGrid.prototype.resetCellScrollNormalizationState,
+    layout() {},
+    draw() {}
+  };
+
+  CanvasGrid.prototype.setDocument.call(grid, targetDoc);
+
+  assert.equal(grid._lastRawCellScrollOffset, null);
+  assert.equal(grid._lastObservedCellScrollOffset, null);
+  assert.equal(grid._lastCellScrollOffset, null);
+  assert.equal(grid._cellScrollEcho, null);
+  assert.equal(grid._cellScrollThumbDrag, null);
+  assert.deepEqual([grid.host.scrollLeft, grid.host.scrollTop], [40, 55]);
+  Object.assign(grid, {
+    rowHeaderWidth: 0,
+    headerHeight: 0,
+    frozenColumnWidth: () => 0,
+    frozenRowHeight: () => 0,
+    scrollableColumnWidth: () => 400,
+    scrollableRowsHeight: () => 400,
+    gridMetrics: () => ({
+      columns: { total: 400, simpleSize: null, prefix: [0, 50, 130, 400] },
+      rows: { total: 400, simpleSize: null, prefix: [0, 30, 100, 400] }
+    })
+  });
+  assert.deepEqual(normalizeCellGridScrollOffsets(grid), { scrollLeft: 50, scrollTop: 30 });
+});
+
+test("scroll mode changes clear active physical and logical cell-scroll state", () => {
+  const grid = {
+    scrollMode: GRID_SCROLL_MODE_CELL,
+    _lastRawCellScrollOffset: { scrollLeft: 40, scrollTop: 55 },
+    _lastObservedCellScrollOffset: { scrollLeft: 50, scrollTop: 100 },
+    _lastCellScrollOffset: { scrollLeft: 50, scrollTop: 100 },
+    _cellScrollEcho: { scrollLeft: 50, scrollTop: 100 },
+    _cellScrollThumbDrag: { horizontal: true, vertical: false },
+    resetCellScrollNormalizationState: CanvasGrid.prototype.resetCellScrollNormalizationState,
+    draw() {}
+  };
+  CanvasGrid.prototype.setScrollMode.call(grid, "pixel");
+  assert.equal(grid.scrollMode, "pixel");
+  assert.equal(grid._lastRawCellScrollOffset, null);
+  assert.equal(grid._lastObservedCellScrollOffset, null);
+  assert.equal(grid._lastCellScrollOffset, null);
+  assert.equal(grid._cellScrollEcho, null);
+  assert.equal(grid._cellScrollThumbDrag, null);
 });
 
 test("initial canvas column fit is header-only and compact", () => {

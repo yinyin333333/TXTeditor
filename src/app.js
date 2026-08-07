@@ -187,6 +187,7 @@ documentEditorController = createDocumentEditorController({
   applyFreezeToDoc
 });
 grid.setFontFamily(state.gridFont);
+grid.setScrollMode(state.scrollMode);
 grid.setColorizeColumns(state.colorizeColumns);
 grid.setMouseResizeLocked(state.mouseResizeLocked);
 grid.setVectorLspHoverEnabled(effectiveVectorLspHoverEnabled());
