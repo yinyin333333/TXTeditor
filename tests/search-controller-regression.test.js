@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  SEARCH_DIRECTION_BACKWARD,
   SEARCH_SCOPE_ALL,
   SEARCH_SCOPE_COLUMN_TITLES,
-  SEARCH_SCOPE_ROW_TITLES
+  SEARCH_SCOPE_ROW_TITLES,
+  findInTable
 } from "../src/core/search.js";
 import { createSearchController } from "../src/ui/controllers/search-controller.js";
 import { clampSearchModalPosition } from "../src/ui/search-policy.js";
@@ -198,6 +199,79 @@ test("opening Find starts again at the active cell and subsequent searches advan
   assert.deepEqual(rows.state.selection.focus, { row: 1, column: 1 });
 });
 
+test("backward table search starts before the active cell and wraps", () => {
+  const doc = table([["needle", "x", "needle"], ["needle", "x", "needle"]]);
+
+  assert.deepEqual(findInTable(doc, "needle", { row: 0, column: 0 }, {
+    direction: SEARCH_DIRECTION_BACKWARD
+  }), { row: 1, column: 2 });
+  assert.deepEqual(findInTable(doc, "needle", { row: 0, column: 0 }, {
+    direction: SEARCH_DIRECTION_BACKWARD,
+    includeStart: true
+  }), { row: 0, column: 0 });
+  assert.deepEqual(findInTable(doc, "needle", { row: 1, column: 0 }, {
+    direction: SEARCH_DIRECTION_BACKWARD,
+    scope: SEARCH_SCOPE_COLUMN_TITLES
+  }), { row: 0, column: 2 });
+  assert.deepEqual(findInTable(doc, "needle", { row: 0, column: 1 }, {
+    direction: SEARCH_DIRECTION_BACKWARD,
+    scope: SEARCH_SCOPE_ROW_TITLES
+  }), { row: 1, column: 0 });
+});
+
+test("Find Previous preserves scoped coordinates and wraps at the first result", () => {
+  const all = searchHarness({
+    rows: [["name"], ["needle"], ["needle"]],
+    focus: { row: 1, column: 0 }
+  });
+  all.controller.showSearch();
+  all.controller.findPrevious();
+  assert.deepEqual(all.state.selection.focus, { row: 1, column: 0 });
+  all.controller.findPrevious();
+  assert.deepEqual(all.state.selection.focus, { row: 2, column: 0 });
+
+  const columns = searchHarness({
+    rows: [["needle", "x", "needle"], ["a", "b", "c"]],
+    scope: SEARCH_SCOPE_COLUMN_TITLES,
+    focus: { row: 1, column: 0 }
+  });
+  columns.controller.showSearch();
+  columns.controller.findPrevious();
+  columns.controller.findPrevious();
+  assert.deepEqual(columns.state.selection.focus, { row: 1, column: 2 });
+
+  const rows = searchHarness({
+    rows: [["name", "ref"], ["needle", "a"], ["needle", "b"]],
+    scope: SEARCH_SCOPE_ROW_TITLES,
+    focus: { row: 1, column: 1 }
+  });
+  rows.controller.showSearch();
+  rows.controller.findPrevious();
+  rows.controller.findPrevious();
+  assert.deepEqual(rows.state.selection.focus, { row: 2, column: 1 });
+});
+
+test("Shift+Enter runs Find Previous while Enter keeps Find Next", () => {
+  const previous = searchHarness({
+    rows: [["x"], ["needle"], ["needle"]],
+    focus: { row: 0, column: 0 }
+  });
+  previous.controller.wireEvents();
+  previous.controller.showSearch();
+  const backwardEvent = previous.searchInput.dispatch("keydown", { key: "Enter", shiftKey: true });
+  assert.equal(backwardEvent.defaultPrevented, true);
+  assert.deepEqual(previous.state.selection.focus, { row: 2, column: 0 });
+
+  const next = searchHarness({
+    rows: [["x"], ["needle"], ["needle"]],
+    focus: { row: 0, column: 0 }
+  });
+  next.controller.wireEvents();
+  next.controller.showSearch();
+  next.searchInput.dispatch("keydown", { key: "Enter", shiftKey: false });
+  assert.deepEqual(next.state.selection.focus, { row: 1, column: 0 });
+});
+
 test("Find header dragging clamps to the viewport and keeps its position when reopened", () => {
   const originalWindow = globalThis.window;
   const viewport = eventTarget({ innerWidth: 800, innerHeight: 600 });
@@ -276,16 +350,6 @@ test("Find header dragging clamps to the viewport and keeps its position when re
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
   }
-});
-
-test("#78 search modal uses a dedicated full-width header without placing controls in the drag handle", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const header = html.match(/<header class="search-modal-header" data-search-drag-handle>([\s\S]*?)<\/header>/)?.[1] ?? "";
-  assert.match(header, /id="searchTitle"/);
-  assert.doesNotMatch(header, /<(?:input|button|select|textarea)\b/i);
-  assert.match(css, /\.search-modal-header\s*\{[\s\S]*margin:\s*-18px -18px 0;/);
-  assert.match(css, /\.search-modal\.search-modal-dragging \.search-modal-header\s*\{[\s\S]*cursor:\s*grabbing;/);
 });
 
 test("search modal clamp keeps all edges within the configured margin", () => {

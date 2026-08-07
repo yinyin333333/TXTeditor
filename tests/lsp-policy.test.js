@@ -13,8 +13,7 @@ import {
   lspHoverReady,
   lspOpenDocumentPolicy,
   lspUpdateDocumentPolicy,
-  lspWorkspaceSessionPolicy,
-  normalizeLspDocumentChange
+  lspWorkspaceSessionPolicy
 } from "../src/core/lsp-session-policy.js";
 import {
   docToUri,
@@ -97,11 +96,6 @@ import { createDocumentController } from "../src/ui/controllers/document-control
 import { appSettingsVisualControls } from "../src/ui/app-settings-policy.js";
 import { lintEnginePanelActive } from "../src/ui/problems-policy.js";
 import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-import {
   HOVER_NO_CONTENT_TTL_MS,
   hoverCacheHitState,
   hoverCacheStoredState,
@@ -124,16 +118,6 @@ import {
   planUserHoverEnqueue,
   takeLatestQueuedHover
 } from "../src/core/vector-hover-queue.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
 
 test("JS LSP URI policy encodes and decodes path edge cases", () => {
   const lintPathKey = (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase();

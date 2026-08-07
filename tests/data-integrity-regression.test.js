@@ -149,6 +149,18 @@ test("V-TXT-03 in-bounds paste undo keeps row-level LSP synchronization", () => 
   assert.deepEqual(command.undoLspChange, { kind: "replaceRows", rows: [1] });
 });
 
+test("bare carriage-return table documents preserve their line ending", () => {
+  const raw = "id\r1\r";
+  const doc = TableDocument.fromText("cr.txt", raw, { dirty: false });
+
+  assert.equal(doc.lineEnding, "\r");
+  assert.equal(doc.finalNewline, true);
+  assert.equal(doc.toText(), raw);
+
+  doc.setCell(1, 0, "2");
+  assert.equal(doc.toText(), "id\r2\r");
+});
+
 test("V-TXT-04 CP1252 special bytes decode correctly and re-encode byte-for-byte", () => {
   const source = Uint8Array.from([0x80, 0x91, 0x92, 0x96, 0xE9]);
 

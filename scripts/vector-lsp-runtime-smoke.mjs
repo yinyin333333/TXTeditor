@@ -1039,6 +1039,59 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     if (unrelatedOpenPublishes.length) {
       throw new Error(`equivalent didOpen republished unrelated diagnostics: ${JSON.stringify(unrelatedOpenPublishes.map((message) => message.params))}`);
     }
+    const monpetEditedText = "monster\tconsumestat1\tconsumestat2\nrow\tstrength\tstrength\n";
+    const monpetEditStart = client.messages.length;
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: monpetUri, version: 2 },
+      contentChanges: [{ text: monpetEditedText }]
+    });
+    const monpetEdited = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === monpetUri
+      && message.params?.version === 2
+      && Array.isArray(message.params?.diagnostics)
+      && message.params.diagnostics.length === 0
+    ), monpetEditStart), timeoutMs, "MonPet edited diagnostics");
+    fs.writeFileSync(monpetPath, monpetEditedText, "utf8");
+    const monpetSaveBurstStart = client.messages.length;
+    client.notify("textDocument/didSave", {
+      textDocument: { uri: monpetUri },
+      text: monpetEditedText
+    });
+    for (let index = 0; index < 3; index += 1) {
+      client.notify("workspace/didChangeWatchedFiles", {
+        changes: [{ uri: monpetUri, type: 2 }]
+      });
+    }
+    client.notify("textDocument/didClose", { textDocument: { uri: monpetUri } });
+    const monpetClosed = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === monpetUri
+      && message.params?.version == null
+      && Array.isArray(message.params?.diagnostics)
+      && message.params.diagnostics.length === 0
+    ), monpetSaveBurstStart), timeoutMs, "MonPet save/burst close diagnostics");
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri: monpetUri, languageId: "plaintext", version: 3, text: monpetEditedText }
+    });
+    const monpetReopened = await withTimeout(client.waitForNext((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === monpetUri
+      && message.params?.version === 3
+      && Array.isArray(message.params?.diagnostics)
+      && message.params.diagnostics.length === 0
+    ), monpetSaveBurstStart), timeoutMs, "MonPet save/burst reopen diagnostics");
+    const monpetSaveBurstPublishes = client.messages.slice(monpetSaveBurstStart).filter((message) => (
+      message.method === "textDocument/publishDiagnostics"
+      && message.params?.uri === monpetUri
+    ));
+    if (monpetSaveBurstPublishes.some((message) => (
+      message.params?.version !== 3
+      && message.params?.version !== null
+      && message.params?.version !== undefined
+    ))) {
+      throw new Error(`stale MonPet save/burst publication won: ${JSON.stringify(monpetSaveBurstPublishes.map((message) => message.params))}`);
+    }
     const hover = await withTimeout(client.request("textDocument/hover", {
       textDocument: { uri: skillsUri },
       position: { line: 0, character: "skill\ts".length }
@@ -1160,6 +1213,10 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       monpetDiagnosticsVersion: 1,
       monpetProblem: monpetDiagnostics[0].message,
       monpetHover: "pass",
+      monpetSaveDiagnostics: monpetEdited.params.diagnostics.length,
+      monpetSaveCloseDiagnostics: monpetClosed.params.diagnostics.length,
+      monpetSaveReopenDiagnostics: monpetReopened.params.diagnostics.length,
+      monpetSaveBurstPublishes: monpetSaveBurstPublishes.length,
       hitSummonDiagnostics: missilesDiagnostics.length,
       hitSummonProblem: missilesDiagnostics[0].message,
       hitSummonTooltip: "pass",
@@ -1178,6 +1235,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     };
   } finally {
     fs.rmSync(jsonPath, { force: true });
+    fs.writeFileSync(monpetPath, monpetText, "utf8");
     await client.stop();
   }
 }

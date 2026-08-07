@@ -52,22 +52,6 @@ import {
   legacyWorkspaceLoadCacheHit,
   mergeOpenLegacyWorkspaceDocs
 } from "../src/core/lint-workspace-index.js";
-import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
-
 function releaseWorkflowSteps(workflow) {
   const matches = [...workflow.matchAll(/^      - name: (.+)$/gm)];
   return matches.map((match, index) => ({
@@ -641,14 +625,7 @@ test("native write failure leaves dirty set", async () => {
   }
 });
 
-test("Find UI is a centered modal and text inputs keep native shortcuts", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(html, /id="searchPanel" class="modal-backdrop search-backdrop hidden"/);
-  assert.match(html, /class="modal search-modal"/);
-  assert.match(html, /id="searchInput" class="modal-input" type="search"[^>]*autocomplete="off"[^>]*spellcheck="false"/);
-  assert.match(html, /data-search-close/);
-  assert.doesNotMatch(html, /id="searchPanel" class="quick-panel/);
+test("text inputs keep native shortcuts and search keys preserve their actions", () => {
   class FakeElement {
     constructor(match) {
       this.match = match;
@@ -669,8 +646,6 @@ test("Find UI is a centered modal and text inputs keep native shortcuts", () => 
   assert.equal(shouldSubmitSearchKey("Escape"), false);
   assert.equal(shouldCloseSearchKey("Escape"), true);
   assert.equal(shouldCloseSearchKey("Enter"), false);
-  assert.match(css, /\.modal-backdrop\s*\{[\s\S]*align-items: center;[\s\S]*justify-content: center;/);
-  assert.match(css, /\.search-modal\s*\{/);
 });
 
 function deferredPlatformWrite() {

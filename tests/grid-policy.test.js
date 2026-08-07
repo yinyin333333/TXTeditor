@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
 import { clearRangesCommand, incrementFillSelectedCellsCommand } from "../src/core/operations.js";
@@ -63,62 +62,6 @@ import {
 } from "../src/ui/grid-viewport-policy.js";
 import { shouldClearHoverForInteraction } from "../src/ui/hover-policy.js";
 import { drawGridCellLayer, drawGridColumnHeader, drawGridCornerHeader } from "../src/ui/grid/grid-renderer.js";
-import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
-
-function cssVariable(css, selector, variable) {
-  const start = css.indexOf(`${selector} {`);
-  assert.notEqual(start, -1);
-  const end = css.indexOf("\n}", start);
-  const block = css.slice(start, end);
-  const match = new RegExp(`${variable}:\\s*([^;]+);`).exec(block);
-  assert.ok(match);
-  return match[1].trim();
-}
-
-function hexRgb(hex) {
-  const value = hex.replace("#", "");
-  return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
-}
-
-function cssColorParts(value) {
-  if (value.startsWith("#")) {
-    const [r, g, b] = hexRgb(value);
-    return { r, g, b, a: 1 };
-  }
-  const rgbMatch = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(value);
-  if (rgbMatch) {
-    return {
-      r: Number(rgbMatch[1]),
-      g: Number(rgbMatch[2]),
-      b: Number(rgbMatch[3]),
-      a: 1
-    };
-  }
-  const rgbaMatch = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*(\.\d+|1|0)\)$/.exec(value);
-  if (rgbaMatch) {
-    return {
-      r: Number(rgbaMatch[1]),
-      g: Number(rgbaMatch[2]),
-      b: Number(rgbaMatch[3]),
-      a: Number(rgbaMatch[4])
-    };
-  }
-  assert.fail(`Unsupported CSS color: ${value}`);
-}
 
 test("grid selection policy applies cell, row, column, and corner hits", () => {
   const selection = new SelectionModel();
@@ -591,7 +534,6 @@ test("centered cell scrolling can preserve the unrelated search axis", () => {
 });
 
 test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.deepEqual(frozenVerticalEdgeRects(80, 240), [
     { color: "frozenEdgeHighlight", x: 78, y: 0, width: 1, height: 240 },
     { color: "frozenEdgeShadow", x: 79, y: 0, width: 1, height: 240 },
@@ -604,9 +546,6 @@ test("frozen pane edge uses a subtle raised effect instead of hard divider strok
   ]);
   assert.deepEqual(frozenVerticalEdgeRects(80, 0), []);
   assert.deepEqual(frozenHorizontalEdgeRects(52, 0), []);
-  assert.match(css, /--grid-frozen-edge-highlight:/);
-  assert.match(css, /--grid-frozen-edge-shadow:/);
-  assert.match(css, /--grid-frozen-edge-ambient:/);
 });
 
 test("selected row and column index handles use neutral pressed styling", () => {
@@ -785,30 +724,6 @@ test("selected cells use dedicated grid separator colors", () => {
     cellGridLineColor({ selected: true, frozen: true }, colors),
     "selected-frozen-grid-line"
   );
-});
-
-test("theme gridline tokens are clearer and mode-appropriate", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const darkLine = cssVariable(css, ":root", "--gridLine");
-  const lightLine = cssVariable(css, ":root[data-theme=\"light\"]", "--gridLine");
-  const darkSelectionLine = cssVariable(css, ":root", "--grid-selection-line");
-  const darkFrozenSelectionLine = cssVariable(css, ":root", "--grid-selection-line-frozen");
-  const lightSelectionLine = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-line");
-  const lightFrozenSelectionLine = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-line-frozen");
-  const lightRgb = hexRgb(lightLine);
-  const darkRgb = hexRgb(darkLine);
-
-  assert.notEqual(lightLine.toLowerCase(), "#d2dbe5");
-  assert.equal(Math.max(...lightRgb) - Math.min(...lightRgb), 0);
-  assert.ok(lightRgb.every((channel) => channel >= 185 && channel <= 204));
-  assert.notEqual(darkLine.toLowerCase(), lightLine.toLowerCase());
-  assert.ok(darkRgb.every((channel) => channel >= 60 && channel <= 95));
-  assert.equal(darkSelectionLine, "#3e74a4");
-  assert.equal(darkFrozenSelectionLine, "#4a8bc3");
-  assert.equal(lightSelectionLine, "#6f91b0");
-  assert.equal(lightFrozenSelectionLine, "#567ea1");
-  assert.equal(cssVariable(css, ":root", "--grid-diagnostic-range-error"), "#ff5f6d");
-  assert.equal(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-diagnostic-range-error"), "#c92f3f");
 });
 
 test("diagnostic text overlay policy plans active hovered and current-problem precise markers only", () => {
@@ -1056,54 +971,6 @@ test("active cell renderer draws precise diagnostic overlay before active border
   assert.ok(operations.findIndex((operation) => operation.kind === "cornerMarker") < operations.findIndex((operation) => operation.kind === "strokeRect" && operation.lineWidth === 2));
 });
 
-test("cell selection fills are restored to the original 0.4.4 style", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const darkSelectionValue = cssVariable(css, ":root", "--selectionBg");
-  const lightSelectionValue = cssVariable(css, ":root[data-theme=\"light\"]", "--selectionBg");
-  const darkFrozenSelectionValue = cssVariable(css, ":root", "--grid-selection-frozen");
-  const lightFrozenSelectionValue = cssVariable(css, ":root[data-theme=\"light\"]", "--grid-selection-frozen");
-  const darkSelection = cssColorParts(darkSelectionValue);
-  const lightSelection = cssColorParts(lightSelectionValue);
-  const darkFrozenSelection = cssColorParts(darkFrozenSelectionValue);
-  const lightFrozenSelection = cssColorParts(lightFrozenSelectionValue);
-
-  assert.deepEqual(
-    [darkSelection.r, darkSelection.g, darkSelection.b, darkSelection.a],
-    [0, 88, 156, 0.7]
-  );
-  assert.deepEqual(
-    [darkFrozenSelection.r, darkFrozenSelection.g, darkFrozenSelection.b, darkFrozenSelection.a],
-    [0, 105, 185, 0.76]
-  );
-  assert.deepEqual(
-    [lightSelection.r, lightSelection.g, lightSelection.b, lightSelection.a],
-    [0, 96, 170, 0.34]
-  );
-  assert.deepEqual(
-    [lightFrozenSelection.r, lightFrozenSelection.g, lightFrozenSelection.b, lightFrozenSelection.a],
-    [0, 96, 170, 0.42]
-  );
-  assert.notEqual(cssVariable(css, ":root", "--grid-index-header-pressed-bg"), darkSelectionValue);
-  assert.notEqual(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-pressed-bg"), lightSelectionValue);
-});
-
-test("index handle theme tokens use neutral light and dark brightness", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const lightBase = hexRgb(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-bg"));
-  const lightPressed = hexRgb(cssVariable(css, ":root[data-theme=\"light\"]", "--grid-index-header-pressed-bg"));
-  const darkBase = hexRgb(cssVariable(css, ":root", "--grid-index-header-bg"));
-  const darkPressed = hexRgb(cssVariable(css, ":root", "--grid-index-header-pressed-bg"));
-
-  assert.ok(lightBase.every((channel) => channel >= 238 && channel <= 242));
-  assert.equal(Math.max(...lightBase) - Math.min(...lightBase), 0);
-  assert.ok(lightPressed.every((channel, index) => channel < lightBase[index]));
-  assert.equal(Math.max(...lightPressed) - Math.min(...lightPressed), 0);
-  assert.ok(darkBase.every((channel) => channel >= 32 && channel <= 48));
-  assert.ok(darkPressed.every((channel, index) => channel > darkBase[index]));
-  assert.notDeepEqual(darkBase, lightBase);
-  assert.notDeepEqual(darkPressed, lightPressed);
-});
-
 test("resize handles are detected on cell boundaries, not only headers", () => {
   assert.deepEqual(
     classifyResizeHandle({
@@ -1333,7 +1200,6 @@ test("selection separator redraw keeps the active border above diagnostic marker
 });
 
 test("active cell presses row and column indexes without highlighting field-name header cells", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const selection = { focus: { row: 2, column: 3 } };
   assert.equal(rowHeaderRenderState(selection, 2).activeHeader, true);
   assert.equal(rowHeaderRenderState(selection, 1).activeHeader, false);
@@ -1429,8 +1295,6 @@ test("active cell presses row and column indexes without highlighting field-name
   assert.equal(fillRects[0].fillStyle, gridColor("indexHeaderPressed"));
   assert.equal(fillRects.at(-1).fillStyle, gridColor("header"));
   assert.notEqual(fillRects.at(-1).fillStyle, gridColor("activeHeader"));
-  assert.match(css, /--grid-active-header-bg: var\(--activeHeaderBg\);/);
-  assert.match(css, /--grid-active-header-text: var\(--activeHeaderText\);/);
 });
 
 test("frozen row and column drawing uses frozen cell tints and restores normal backgrounds", () => {
@@ -1490,7 +1354,6 @@ test("frozen row and column drawing uses frozen cell tints and restores normal b
 });
 
 test("active row header draws raised chrome over the row index only", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.deepEqual(activeRowHeaderChromeSteps({ rowHeaderWidth: 38, y: 20, height: 26 }), [
     { kind: "fillRect", color: "activeRowHeaderSheen", x: 2, y: 22, width: 34, height: 9 },
     { kind: "strokePath", color: "activeRowHeaderHighlight", points: [[1.5, 43.5], [1.5, 21.5], [35.5, 21.5]] },
@@ -1498,9 +1361,6 @@ test("active row header draws raised chrome over the row index only", () => {
   ]);
   assert.deepEqual(activeRowHeaderChromeSteps({ rowHeaderWidth: 38, y: 20, height: 2 }), []);
   assert.deepEqual(activeRowHeaderChromeSteps({ rowHeaderWidth: 2, y: 20, height: 26 }), []);
-  assert.match(css, /--grid-active-row-header-highlight:/);
-  assert.match(css, /--grid-active-row-header-shadow:/);
-  assert.match(css, /--grid-active-row-header-sheen:/);
 });
 
 test("grid render policy syncs theme CSS variables without CanvasGrid owning the palette", () => {

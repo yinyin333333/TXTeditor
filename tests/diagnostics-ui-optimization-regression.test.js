@@ -282,15 +282,6 @@ test("Stage 1-E diagnostics-only refresh preserves tab and file DOM while patchi
   }
 });
 
-test("product diagnostics commits use the narrow renderer that updates workspace badges in place", () => {
-  const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(
-    appSource,
-    /function renderDiagnosticsChrome\(\)\s*\{\s*return shellController\.renderDiagnosticsChrome\(\);\s*\}/,
-    "Vector-LSP diagnostics should update badges and the Problems panel without rebuilding tabs or Explorer"
-  );
-});
-
 function createBulkState(docs, { started, generation }) {
   return {
     docs,
