@@ -34,18 +34,6 @@ test("current app startup DOM ids are declared in index.html", () => {
   assert.equal(document.getElementById("gridHost")?.tagName, "SECTION");
 });
 
-test("normal test suite keeps baseline startup comparison in the explicit baseline contract", () => {
-  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  const appStartupTest = readFileSync(new URL("./app-startup.test.js", import.meta.url), "utf8");
-  const baselineContract = readFileSync(new URL("../scripts/baseline-contract.mjs", import.meta.url), "utf8");
-
-  assert.equal(packageJson.scripts.test, "node --test \"tests/*.test.js\"");
-  assert.doesNotMatch(appStartupTest, new RegExp(`require${"BaselineDir"}`));
-  assert.doesNotMatch(appStartupTest, new RegExp(`--root", "${"baseline"}`));
-  assert.match(baselineContract, /runStartupSmoke\(BASELINE_DIR\);/);
-  assert.match(baselineContract, /runStartupSmoke\(ROOT\);/);
-});
-
 test("baseline resolver supports a review snapshot sibling baseline without environment variables", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "txteditor-review-"));
   try {

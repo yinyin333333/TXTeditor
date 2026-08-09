@@ -20,8 +20,13 @@ import {
 } from "../../core/lint-controller-policy.js";
 import {
   appSettingsVisualControls,
+  jsonRuleActionOptions,
   normaliseGridFont,
-  normaliseZoomLevel
+  normaliseGridScrollMode,
+  normaliseZoomLevel,
+  normalizeJsonDiagnosticRules,
+  normalizeJsonRuleAction,
+  parseJsonKeyUsageIdStart
 } from "../app-settings-policy.js";
 import { dockSettingsControls } from "../dock-layout-policy.js";
 import { lintControlsModel } from "../lint-controls-policy.js";
@@ -35,43 +40,6 @@ import {
 
 export function shouldCloseSettingsKey(key) {
   return key === "Escape";
-}
-
-const JSON_RULE_ACTIONS = [
-  ["ignore", "settings.jsonActionOff"],
-  ["warn", "settings.jsonActionWarning"]
-];
-const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
-
-function normalizeJsonRuleAction(value, fallback = "warn") {
-  if (value === "error") return "warn";
-  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
-}
-
-function normalizeJsonDiagnosticRules(value) {
-  return {
-    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
-    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
-    keyUsage: {
-      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
-      idStart: Number.isFinite(value?.keyUsage?.idStart)
-        ? value.keyUsage.idStart
-        : DEFAULT_JSON_KEY_USAGE_ID_START
-    }
-  };
-}
-
-function jsonRuleActionOptions(selected, translate = tText) {
-  return JSON_RULE_ACTIONS.map(([value, labelKey]) =>
-    `<option value="${value}"${selected === value ? " selected" : ""}>${translate(labelKey)}</option>`
-  ).join("");
-}
-
-function parseJsonKeyUsageIdStart(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const parsed = Number(text);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function bindEscapeToClose(close) {
@@ -168,6 +136,13 @@ export function createSettingsController({
     state.colorizeColumns = Boolean(enabled);
     localStorage.setItem("txteditor.colorize", state.colorizeColumns ? "on" : "off");
     grid.setColorizeColumns(state.colorizeColumns);
+    renderChrome();
+  }
+
+  function setScrollMode(mode) {
+    state.scrollMode = normaliseGridScrollMode(mode);
+    localStorage.setItem("txteditor.scrollMode", state.scrollMode);
+    grid.setScrollMode(state.scrollMode);
     renderChrome();
   }
 
@@ -413,10 +388,14 @@ export function createSettingsController({
       keepZoomLevel: state.keepZoomLevel,
       excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       theme: state.theme,
-      gridFont: state.gridFont
+      gridFont: state.gridFont,
+      scrollMode: state.scrollMode
     });
     const fontOptions = visualControls.font.options.map(([label, value]) =>
       `<option value="${escapeHtml(value)}"${visualControls.font.value === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
+    const scrollModeOptions = visualControls.scrollMode.options.map(([value, label]) =>
+      `<option value="${escapeHtml(value)}"${visualControls.scrollMode.value === value ? " selected" : ""}>${escapeHtml(label)}</option>`
     ).join("");
     const themeControls = visualControls.themes.map((option) =>
       `<button class="${option.active ? "active" : ""}" data-settings-theme="${option.theme}">${option.label}</button>`
@@ -460,6 +439,8 @@ export function createSettingsController({
           </label>
           <label class="settings-label" for="${visualControls.font.id}">${visualControls.font.label}</label>
           <select class="modal-input settings-font-select" id="${visualControls.font.id}">${fontOptions}</select>
+          <label class="settings-label" for="${visualControls.scrollMode.id}">${visualControls.scrollMode.label}</label>
+          <select class="modal-input settings-font-select" id="${visualControls.scrollMode.id}">${scrollModeOptions}</select>
           <div class="settings-label" data-settings-i18n="settings.theme">${translate("settings.theme")}</div>
           <div class="settings-segmented" role="group" aria-label="${translate("settings.theme")}">
             ${themeControls}
@@ -483,6 +464,7 @@ export function createSettingsController({
     const keepZoomLevelInput = backdrop.querySelector("#settingsKeepZoomLevel");
     const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const fontInput = backdrop.querySelector("#settingsGridFont");
+    const scrollModeInput = backdrop.querySelector("#settingsScrollMode");
     const localeInput = backdrop.querySelector("#settingsLocale");
     const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
@@ -493,6 +475,7 @@ export function createSettingsController({
       keepZoomLevelInput.checked = state.keepZoomLevel;
       workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       fontInput.value = state.gridFont;
+      scrollModeInput.value = state.scrollMode;
       localeInput.value = state.locale;
       for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
@@ -523,6 +506,7 @@ export function createSettingsController({
         });
     });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
+    scrollModeInput.addEventListener("change", () => { setScrollMode(scrollModeInput.value); refresh(); });
     localeInput.addEventListener("change", () => {
       setLocale(localeInput.value).then(() => {
         refresh();
@@ -932,6 +916,7 @@ export function createSettingsController({
     saveLegacyLintSettings,
     saveLintSettings,
     setColorizeColumns,
+    setScrollMode,
     setMouseResizeLocked,
     setAutoResizeToFitOnOpen,
     setKeepZoomLevel,

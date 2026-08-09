@@ -72,6 +72,7 @@ test("new commands are registered with their intended handlers", () => {
   assert.deepEqual(commandActionForId("next-tab"), { type: "handler", name: "nextTab" });
   assert.deepEqual(commandActionForId("previous-tab"), { type: "handler", name: "previousTab" });
   assert.deepEqual(commandActionForId("clone-column"), { type: "handler", name: "cloneColumns" });
+  assert.deepEqual(columnCommandItems().find(({ id }) => id === "insert-column"), { id: "insert-column", label: "Insert Columns..." });
   assert.deepEqual(columnCommandItems().at(-1), { id: "clone-column", label: "Clone Column(s)", disabled: false });
 });
 

@@ -49,7 +49,6 @@ import {
 import { classifyGridHit } from "../src/ui/grid-geometry.js";
 import {
   createDefaultLintSettings,
-  lintRuleGroupsForProfile,
   runLint
 } from "../src/core/lint-engine.js";
 
@@ -57,10 +56,6 @@ function lintDocs(docs, profile = "RotW") {
   const settings = createDefaultLintSettings();
   settings.profile = profile;
   return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
 }
 
 test("parses and serializes TSV while preserving CRLF and final newline", () => {
@@ -272,6 +267,154 @@ test("clone columns copies headers, body values, and widths as one undoable comm
   assert.deepEqual(doc.rows[2], ["4", "5", "6", "4", "6"]);
 });
 
+test("undoing a cloned column at the end restores sparse body rows", () => {
+  const header = Array.from({ length: 10 }, (_, index) => `h${index}`).join("\t");
+  const sparse = "a\tb\tc\tSOURCE\te\tf\tg";
+  const full = Array.from({ length: 10 }, (_, index) => `r${index}`).join("\t");
+  const doc = TableDocument.fromText("x.txt", `${header}\n${sparse}\n${full}`);
+  const before = doc.rows.map((row) => [...row]);
+  const undo = new UndoManager();
+  const command = cloneColumnsCommand(doc, [3], 10);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing an inserted column restores sparse body rows", () => {
+  const header = Array.from({ length: 10 }, (_, index) => `h${index}`).join("\t");
+  const sparse = "a\tb\tc";
+  const full = Array.from({ length: 10 }, (_, index) => `r${index}`).join("\t");
+  const doc = TableDocument.fromText("x.txt", `${header}\n${sparse}\n${full}`);
+  const before = doc.rows.map((row) => [...row]);
+  const undo = new UndoManager();
+  const command = insertColumnCommand(doc, 8, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing appended columns restores a short header above sparse body rows", () => {
+  const header = ["h0", "h1", "h2"].join("\t");
+  const sparseBody = ["a", "b", "c", "d", "e"].join("\t");
+  const doc = TableDocument.fromText("x.txt", `${header}\n${sparseBody}`);
+  const before = doc.rows.map((row) => [...row]);
+  const beforeSerializedColumnCount = doc.serializedColumnCount;
+  const undo = new UndoManager();
+  const command = addColumnsCommand(doc, 2);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+  assert.equal(doc.serializedColumnCount, beforeSerializedColumnCount);
+});
+
+test("undoing a cell edit restores holes created by sparse column append", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const append = addColumnsCommand(doc, 2);
+  append.redo(doc);
+  const before = doc.rows.map((row) => row.slice());
+  const edit = makeCellCommand("Edit", doc, [{ row: 0, column: 4, value: "edited" }]);
+
+  edit.redo(doc);
+  edit.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing a column deletion restores sparse cells", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const append = addColumnsCommand(doc, 2);
+  append.redo(doc);
+  const before = doc.rows.map((row) => row.slice());
+  const undo = new UndoManager();
+  const command = deleteColumnsCommand(doc, 4, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing a row deletion restores sparse row holes", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const append = addColumnsCommand(doc, 2);
+  append.redo(doc);
+  const before = doc.rows.map((row) => row.slice());
+  const undo = new UndoManager();
+  const command = deleteRowsCommand(doc, 0, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing a column deletion restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const beforeSerializedColumnCount = doc.serializedColumnCount;
+  const undo = new UndoManager();
+  const command = deleteColumnsCommand(doc, 0, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, beforeSerializedColumnCount);
+});
+
+test("undoing an inserted column restores a short header at a global index", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\na\tb\tc\td\te");
+  const before = doc.rows.map((row) => row.slice());
+  const undo = new UndoManager();
+  const command = insertColumnCommand(doc, 4, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.deepEqual(doc.rows, before);
+});
+
+test("undoing a cloned column restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const undo = new UndoManager();
+  const command = cloneColumnsCommand(doc, [0], 2);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, 6);
+});
+
+test("undoing an inserted column restores serialized column count", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\na\tb", { serializedColumnCount: 6 });
+  const before = doc.toText();
+  const undo = new UndoManager();
+  const command = insertColumnCommand(doc, 1, 1);
+
+  command.redo(doc);
+  undo.push(command);
+  undo.undo(doc);
+
+  assert.equal(doc.toText(), before);
+  assert.equal(doc.serializedColumnCount, 6);
+});
+
 test("add row and add column append grouped undoable changes", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\t2");
   const undo = new UndoManager();
@@ -435,6 +578,80 @@ test("insert and delete column are grouped undoable commands", () => {
   assert.equal(doc.getCell(0, 0), "b");
   undo.undo(doc);
   assert.equal(doc.getCell(0, 0), "a");
+});
+
+test("delete row undo restores hidden row ranges exactly", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\nh0\th1\nh0\th1\nh0\th1");
+  doc.hiddenRows = RangeSet.from([[1, 3]]);
+  doc.columnWidths = [71, 84];
+  const before = doc.hiddenRows.ranges.map((range) => range.slice());
+  const beforeWidths = [...doc.columnWidths];
+  const command = deleteRowsCommand(doc, 1, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.hiddenRows.ranges, before);
+  assert.deepEqual(doc.columnWidths, beforeWidths);
+});
+
+test("delete column undo restores hidden column ranges exactly", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\th2\th3\nh0\th1\th2\th3");
+  doc.hiddenColumns = RangeSet.from([[1, 3]]);
+  const before = doc.hiddenColumns.ranges.map((range) => range.slice());
+  const command = deleteColumnsCommand(doc, 1, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.hiddenColumns.ranges, before);
+});
+
+test("delete column undo restores widths when the header is shorter than the body", () => {
+  const doc = TableDocument.fromText("x.txt", "h0\th1\nbody0\tbody1\tbody2\tbody3", {
+    autoFitInitialColumns: false
+  });
+  doc.columnWidths = [71, 84, 97, 110];
+  const before = [...doc.columnWidths];
+  const command = deleteColumnsCommand(doc, 3, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.deepEqual(doc.columnWidths, before);
+});
+
+test("insert and clone column undo restore widths when the logical shape stays at one column", () => {
+  for (const makeCommand of [
+    (doc) => insertColumnCommand(doc, 0, 1),
+    (doc) => cloneColumnsCommand(doc, [0], 0)
+  ]) {
+    const doc = new TableDocument("x.txt", [[]], {
+      serializedColumnCount: 2,
+      autoFitInitialColumns: false
+    });
+    doc.columnWidths = [120];
+    const before = [...doc.columnWidths];
+    const command = makeCommand(doc);
+
+    command.redo(doc);
+    command.undo(doc);
+
+    assert.deepEqual(doc.columnWidths, before);
+  }
+});
+
+test("delete and undo of the last row does not retain the placeholder row", () => {
+  const doc = new TableDocument("x.txt", [["value"]], { autoFitInitialColumns: false });
+  const before = doc.toText();
+  const command = deleteRowsCommand(doc, 0, 1);
+
+  command.redo(doc);
+  command.undo(doc);
+
+  assert.equal(doc.rowCount, 1);
+  assert.equal(doc.toText(), before);
+  assert.deepEqual(doc.rows, [["value"]]);
 });
 
 test("copy and paste range preserve tabular shape", () => {

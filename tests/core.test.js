@@ -11,25 +11,10 @@ import {
 import { centeredTextY } from "../src/ui/grid-render-policy.js";
 import { hoverRequestPolicy } from "../src/ui/hover-policy.js";
 import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-import {
   HOVER_PREWARM_ENABLED,
   hoverPrewarmSchedulePolicy,
   shouldCancelPrewarmForUserHover
 } from "../src/core/vector-hover-prewarm.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
 
 test("shift-style extension preserves the original anchor", () => {
   const selection = new SelectionModel();
@@ -181,21 +166,21 @@ test("prewarm is disabled so background hover cannot block user hover", () => {
   assert.equal(shouldCancelPrewarmForUserHover(), true);
 });
 
-test("release metadata remains 0.4.9 while the README introduction stays version-independent", () => {
+test("release metadata remains 0.5.0 while the README introduction stays version-independent", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const cargoToml = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const cargoLock = readFileSync(new URL("../src-tauri/Cargo.lock", import.meta.url), "utf8");
   const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.equal(pkg.version, "0.4.9");
-  assert.equal(lock.version, "0.4.9");
-  assert.equal(lock.packages[""].version, "0.4.9");
-  assert.match(pkg.description, /TXTeditor 0\.4\.9/);
-  assert.match(cargoToml, /version = "0\.4\.9"/);
-  assert.match(cargoToml, /description = "TXTeditor 0\.4\.9/);
-  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.4\.9"/);
-  assert.equal(tauri.version, "0.4.9");
+  assert.equal(pkg.version, "0.5.0");
+  assert.equal(lock.version, "0.5.0");
+  assert.equal(lock.packages[""].version, "0.5.0");
+  assert.match(pkg.description, /TXTeditor 0\.5\.0/);
+  assert.match(cargoToml, /version = "0\.5\.0"/);
+  assert.match(cargoToml, /description = "TXTeditor 0\.5\.0/);
+  assert.match(cargoLock, /name = "txteditor"\r?\nversion = "0\.5\.0"/);
+  assert.equal(tauri.version, "0.5.0");
   assert.match(readme, /^# TXTeditor\r?\n\r?\nTXTeditor is a Windows-focused desktop editor/);
-  assert.doesNotMatch(readme, /TXTeditor 0\.4\.9 is/);
+  assert.doesNotMatch(readme, /TXTeditor 0\.5\.0 is/);
 });

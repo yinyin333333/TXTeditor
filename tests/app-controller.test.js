@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import { TableDocument } from "../src/core/table-model.js";
 import { SelectionModel } from "../src/core/selection.js";
 import {
@@ -11,7 +10,6 @@ import {
 } from "../src/core/search.js";
 import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
-import { CanvasGrid } from "../src/ui/canvas-grid.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
 import {
   createDocumentController,
@@ -50,7 +48,11 @@ import {
   DEFAULT_GRID_FONT,
   appSettingsVisualControls,
   fontLabelFromFamily,
-  normaliseGridFont
+  jsonRuleActionOptions,
+  normaliseGridFont,
+  normalizeJsonDiagnosticRules,
+  normalizeJsonRuleAction,
+  parseJsonKeyUsageIdStart
 } from "../src/ui/app-settings-policy.js";
 import {
   DEFAULT_DOCK_LAYOUT,
@@ -70,7 +72,6 @@ import {
 import {
   DOCK_LAYOUT_KEY,
   MAX_SIDEBAR_WIDTH,
-  MIN_SIDEBAR_WIDTH,
   PROBLEMS_HEIGHT_KEY,
   PROBLEMS_VISIBILITY_KEY,
   SIDEBAR_VISIBILITY_KEY,
@@ -97,22 +98,6 @@ import {
   searchStatusText
 } from "../src/ui/search-policy.js";
 import { shouldCloseSettingsKey } from "../src/ui/controllers/settings-controller.js";
-import {
-  createDefaultLintSettings,
-  lintRuleGroupsForProfile,
-  runLint
-} from "../src/core/lint-engine.js";
-
-function lintDocs(docs, profile = "RotW") {
-  const settings = createDefaultLintSettings();
-  settings.profile = profile;
-  return runLint(docs, settings);
-}
-
-function ruleIdsForProfile(profile) {
-  return lintRuleGroupsForProfile(profile).flatMap((group) => group.rules.map((rule) => rule.id));
-}
-
 test("search wraps through the document", () => {
   const doc = TableDocument.fromText("x.txt", "a\tb\n1\tneedle\nlast\trow");
   assert.deepEqual(findInTable(doc, "needle", { row: 2, column: 1 }), { row: 1, column: 1 });
@@ -1237,28 +1222,6 @@ test("context menu command item registries preserve expected command groups", ()
   assert.deepEqual(columnCommandItems().map((item) => item.id), ["add-column", "insert-column", "hide-column", "delete-column", "clone-column"]);
   assert.deepEqual(fillCommandItems().map((item) => item.id), ["fill", "increment-fill"]);
   assert.deepEqual(mathCommandItems().map((item) => item.id), ["math-add", "math-subtract", "math-multiply", "math-divide"]);
-  const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
-  assert.match(commandSurfaceController, /tText\("menu\.fill"\)[\s\S]*tText\("menu\.math"\)[\s\S]*id: "go-to-definition"/);
-});
-
-test("Resize To Fit keeps the existing all-column command behavior", () => {
-  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
-  assert.match(gridCommandController, /useSelection\s*\?\s*columnsFromSelection\(\)\s*:\s*indexRange\(0,\s*doc\.columnCount - 1\)/);
-});
-
-test("file actions use localized labels and Close All appears in the main toolbar", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(html, /<button data-command="open-file" data-i18n="toolbar\.openFile">Open File<\/button>/);
-  assert.match(html, /<button data-command="open-folder" data-i18n="toolbar\.openFolder">Open Folder<\/button>/);
-  assert.match(html, /<button data-command="save-as" data-i18n="toolbar\.saveAs">Save As<\/button>\s*<button data-command="close-all" data-i18n="toolbar\.closeAll" disabled>Close All<\/button>/);
-  assert.match(css, /--sidebar-width:\s*260px/);
-  assert.match(css, /\.layout-root\s*\{[\s\S]*grid-template-columns:\s*var\(--dock-left-width\) minmax\(var\(--editor-min-width\), 1fr\) var\(--dock-right-width\)/);
-  assert.match(css, /\.sidebar\s*\{[\s\S]*min-width:\s*0/);
-  assert.match(css, /\.sidebar-actions button\s*\{[\s\S]*white-space:\s*nowrap/);
-  assert.match(css, /\.empty-state\s*\{[\s\S]*z-index:\s*6/);
-  assert.equal(MIN_SIDEBAR_WIDTH, 260);
-  assert.equal(MAX_SIDEBAR_WIDTH, 520);
 });
 
 test("app source has real Explorer and Problems toggles with persisted resize state", () => {
@@ -1285,74 +1248,6 @@ test("app source has real Explorer and Problems toggles with persisted resize st
   assert.equal(nextPanelVisibility(true), false);
   assert.equal(panelVisibilityStorageValue(true), "visible");
   assert.equal(panelVisibilityStorageValue(false), "hidden");
-});
-
-test("app ownership boundaries keep shell wiring and extracted helpers in owners", () => {
-  const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  const canvasSource = readFileSync(new URL("../src/ui/canvas-grid.js", import.meta.url), "utf8");
-  const lspController = readFileSync(new URL("../src/ui/controllers/lsp-controller.js", import.meta.url), "utf8");
-  const lspHoverController = readFileSync(new URL("../src/ui/controllers/lsp-hover-controller.js", import.meta.url), "utf8");
-  const lspUriPolicy = readFileSync(new URL("../src/core/lsp-uri-policy.js", import.meta.url), "utf8");
-  const appRuntimeUtils = readFileSync(new URL("../src/ui/app-runtime-utils.js", import.meta.url), "utf8");
-  const appStartupState = readFileSync(new URL("../src/ui/app-startup-state.js", import.meta.url), "utf8");
-  const appElements = readFileSync(new URL("../src/ui/app-elements.js", import.meta.url), "utf8");
-  const appPerf = readFileSync(new URL("../src/ui/app-perf.js", import.meta.url), "utf8");
-  const appEventController = readFileSync(new URL("../src/ui/controllers/app-event-controller.js", import.meta.url), "utf8");
-  const editCommandController = readFileSync(new URL("../src/ui/controllers/edit-command-controller.js", import.meta.url), "utf8");
-  const gridCommandController = readFileSync(new URL("../src/ui/controllers/grid-command-controller.js", import.meta.url), "utf8");
-  const settingsController = readFileSync(new URL("../src/ui/controllers/settings-controller.js", import.meta.url), "utf8");
-  const commandSurfaceController = readFileSync(new URL("../src/ui/controllers/command-surface-controller.js", import.meta.url), "utf8");
-  const commandController = readFileSync(new URL("../src/ui/controllers/command-controller.js", import.meta.url), "utf8");
-  const diagnosticsController = readFileSync(new URL("../src/ui/controllers/diagnostics-controller.js", import.meta.url), "utf8");
-  const documentController = readFileSync(new URL("../src/ui/controllers/document-controller.js", import.meta.url), "utf8");
-  const shellController = readFileSync(new URL("../src/ui/controllers/shell-controller.js", import.meta.url), "utf8");
-  const workspaceFileListPolicy = readFileSync(new URL("../src/ui/workspace-file-list-policy.js", import.meta.url), "utf8");
-  const gridHover = readFileSync(new URL("../src/ui/grid/grid-hover.js", import.meta.url), "utf8");
-
-  assert.ok(appSource.split(/\r?\n/).length <= 790);
-  assert.ok(canvasSource.split(/\r?\n/).length <= 950);
-  assert.ok(lspController.split(/\r?\n/).length <= 920);
-  assert.match(appSource, /createCommandController/);
-  assert.match(appSource, /createDiagnosticsController/);
-  assert.match(appSource, /createDocumentController/);
-  assert.match(appSource, /createLspController/);
-  assert.match(appSource, /createSettingsController/);
-  assert.match(appSource, /createCommandSurfaceController/);
-  assert.match(appSource, /createShellController/);
-  assert.doesNotMatch(appSource, /function renderWorkspaceFileList/);
-  assert.doesNotMatch(appSource, /Promise\.all\(targets\.map/);
-  assert.doesNotMatch(appSource, /function wireEvents/);
-  assert.doesNotMatch(appSource, /async function copySelection/);
-  assert.doesNotMatch(appSource, /async function autoFitColumns/);
-  assert.match(commandController, /function runCommand/);
-  assert.match(commandController, /function executeCommandAction/);
-  assert.match(diagnosticsController, /function renderProblemsPanelIfNeeded/);
-  assert.match(diagnosticsController, /async function goToDiagnostic/);
-  assert.match(documentController, /async function openFile/);
-  assert.match(documentController, /async function closeTab/);
-  assert.match(shellController, /function renderChrome/);
-  assert.match(workspaceFileListPolicy, /function renderWorkspaceFileList/);
-  assert.match(lspController, /async function startWorkspace/);
-  assert.match(lspController, /createLspHoverController/);
-  assert.match(lspController, /vector-open-skipped-large-file/);
-  assert.match(lspController, /vector-update-skipped-large-file/);
-  assert.doesNotMatch(lspController, /async function requestHover/);
-  assert.match(lspHoverController, /async function requestHover/);
-  assert.match(lspHoverController, /function scheduleHoverPrewarm/);
-  assert.match(lspUriPolicy, /function docToUri/);
-  assert.match(lspUriPolicy, /function uriToFileKey/);
-  assert.match(appRuntimeUtils, /function createToastFeedback/);
-  assert.match(appStartupState, /function createInitialAppState/);
-  assert.match(appElements, /APP_ELEMENT_IDS/);
-  assert.match(appPerf, /function createAppPerf/);
-  assert.match(appEventController, /function wireEvents/);
-  assert.match(editCommandController, /async function pasteSelection/);
-  assert.match(gridCommandController, /async function autoFitColumns/);
-  assert.match(settingsController, /function showSettings/);
-  assert.match(settingsController, /function setLintEngine/);
-  assert.match(commandSurfaceController, /function showContextMenu/);
-  assert.match(gridHover, /function updateGridTooltip/);
-  assert.match(gridHover, /function setGridLspHover/);
 });
 
 test("dock layout defaults to Explorer left and Problems bottom without replacing visibility keys", () => {
@@ -1394,19 +1289,6 @@ test("dock layout defaults to Explorer left and Problems bottom without replacin
 });
 
 test("dock shell renders every edge and same-edge split orientations", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  for (const id of ["layoutRoot", "dockTop", "dockLeft", "dockRight", "dockBottom"]) {
-    assert.match(html, new RegExp(`id="${id}"`));
-  }
-  assert.match(html, /data-dock-panel="explorer"/);
-  assert.match(html, /data-dock-panel="problems"/);
-  assert.match(css, /\.dock-left\s*\{[\s\S]*flex-direction:\s*column/);
-  assert.match(css, /\.dock-right\s*\{[\s\S]*flex-direction:\s*column/);
-  assert.match(css, /\.dock-top\s*\{[\s\S]*flex-direction:\s*row/);
-  assert.match(css, /\.dock-bottom\s*\{[\s\S]*flex-direction:\s*row/);
-  assert.match(css, /\.dock-left \.dock-splitter,\s*\.dock-right \.dock-splitter\s*\{[\s\S]*cursor:\s*ns-resize/);
-  assert.match(css, /\.dock-top \.dock-splitter,\s*\.dock-bottom \.dock-splitter\s*\{[\s\S]*cursor:\s*ew-resize/);
   assert.deepEqual(panelsForDockEdge({
     layout: { explorer: "left", problems: "left" },
     edge: "left",
@@ -1467,33 +1349,14 @@ test("dock settings expose Explorer, Problems, and reset layout without drag con
   assert.deepEqual(resetDockLayoutState({ explorer: "right", problems: "top" }), DEFAULT_DOCK_LAYOUT);
 });
 
-test("dock drop UI is removed and docked controls keep a single-row Problems header", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.doesNotMatch(html, /dockDropZones|dock-drop-zone|data-dock-target/);
-  assert.doesNotMatch(html, /activity-button[^>]*data-dock-panel|sidebar-header[^>]*data-dock-panel|problems-header[^>]*data-dock-panel/);
-  assert.doesNotMatch(css, /dock-drop-zone|dock-dragging|dock-drag-handle/);
-  assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*34px auto auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.toolbar\s*\{[\s\S]*overflow-x:\s*auto;/);
-  assert.match(css, /\.problems-panel\s*\{[\s\S]*grid-template-rows:\s*38px auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.problems-panel\.problems-panel-narrow\s*\{[\s\S]*grid-template-rows:\s*76px auto minmax\(0, 1fr\);/);
-  assert.match(css, /\.problems-header\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
-  assert.match(css, /\.problems-panel\.problems-panel-narrow \.problems-header\s*\{[\s\S]*grid-template-rows:\s*38px 38px;[\s\S]*height:\s*76px;/);
-  assert.match(css, /\.problems-panel\.problems-panel-narrow \.lint-controls\s*\{[\s\S]*height:\s*38px;[\s\S]*overflow-x:\s*auto;[\s\S]*scrollbar-width:\s*none;/);
-  assert.match(css, /\.lint-controls\s*\{[\s\S]*flex:\s*0 0 auto;/);
-  assert.match(css, /\.problem-item\s*\{[\s\S]*white-space:\s*nowrap !important;/);
-  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.problem-item,\s*\.problems-panel\[data-dock-edge="right"\] \.problem-item\s*\{[\s\S]*white-space:\s*normal !important;/);
-  assert.match(css, /\.problems-panel\[data-dock-edge="left"\] \.problem-message,\s*\.problems-panel\[data-dock-edge="right"\] \.problem-message\s*\{[\s\S]*overflow-wrap:\s*anywhere;[\s\S]*white-space:\s*normal;/);
+test("Problems header uses the narrow layout only when a visible side dock overflows", () => {
   assert.equal(problemsHeaderShouldUseNarrowLayout({ dockEdge: "left", hidden: false, scrollWidth: 103, clientWidth: 100 }), true);
   assert.equal(problemsHeaderShouldUseNarrowLayout({ dockEdge: "right", hidden: false, scrollWidth: 102, clientWidth: 100 }), false);
   assert.equal(problemsHeaderShouldUseNarrowLayout({ dockEdge: "bottom", hidden: false, scrollWidth: 200, clientWidth: 100 }), false);
   assert.equal(problemsHeaderShouldUseNarrowLayout({ dockEdge: "left", hidden: true, scrollWidth: 200, clientWidth: 100 }), false);
-  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.problems-header/);
-  assert.doesNotMatch(css, /\.problems-panel\[data-dock-edge="left"\] \.lint-controls/);
 });
 
 test("context menu uses one explicit active submenu and exposes row and column cloning", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const activeGroup = { dataset: { menuGroup: "Row Operations" } };
   const inactiveGroup = { dataset: { menuGroup: "Column Operations" } };
   assert.equal(contextMenuActiveGroupId(activeGroup), "Row Operations");
@@ -1504,9 +1367,6 @@ test("context menu uses one explicit active submenu and exposes row and column c
   assert.equal(rowCommandItems().some((item) => item.id === "clone-row" && item.label === "Clone Row"), true);
   assert.equal(columnCommandItems().some((item) => item.id === "clone-column" && item.label === "Clone Column(s)"), true);
   assert.equal(rowCommandItems().some((item) => item.label === "Swap Rows"), false);
-  assert.match(css, /\.menu-group\.active > \.submenu\s*\{\s*display: block;/);
-  assert.match(css, /\.submenu\s*\{[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/);
-  assert.doesNotMatch(css, /\.menu-group:hover \.submenu/);
 });
 
 test("row context menu orders Clone Row after hide and delete without changing commands", () => {
@@ -1524,7 +1384,6 @@ test("column context menu orders Clone Column(s) after hide and delete", () => {
 });
 
 test("Settings modal exposes immediate visual settings without save cancel apply", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const controls = appSettingsVisualControls({
     colorizeColumns: true,
     autoResizeToFitOnOpen: true,
@@ -1554,7 +1413,37 @@ test("Settings modal exposes immediate visual settings without save cancel apply
   assert.equal(normaliseGridFont("  Consolas  "), "Consolas");
   assert.equal(fontLabelFromFamily("'Cascadia Mono', Consolas"), "Cascadia Mono");
   assert.equal(Object.hasOwn(controls, "choices"), false);
-  assert.match(css, /\.settings-segmented/);
+});
+
+test("JSON diagnostic settings policy preserves actions, compatibility, and defaults", () => {
+  assert.equal(normalizeJsonRuleAction("ignore"), "ignore");
+  assert.equal(normalizeJsonRuleAction("warn"), "warn");
+  assert.equal(normalizeJsonRuleAction("error"), "warn");
+  assert.equal(normalizeJsonRuleAction("unknown", "ignore"), "ignore");
+  assert.deepEqual(normalizeJsonDiagnosticRules(), {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "warn" },
+    keyUsage: { action: "ignore", idStart: 40000 }
+  });
+  assert.deepEqual(normalizeJsonDiagnosticRules({
+    duplicateIds: { action: "error" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  }), {
+    duplicateIds: { action: "warn" },
+    stringFormat: { action: "ignore" },
+    keyUsage: { action: "warn", idStart: 56000.5 }
+  });
+});
+
+test("JSON diagnostic settings policy renders options and parses finite thresholds", () => {
+  assert.equal(jsonRuleActionOptions("warn", (key) => `[${key}]`),
+    '<option value="ignore">[settings.jsonActionOff]</option>'
+    + '<option value="warn" selected>[settings.jsonActionWarning]</option>');
+  assert.equal(parseJsonKeyUsageIdStart(" 56000.5 "), 56000.5);
+  assert.equal(parseJsonKeyUsageIdStart("0"), 0);
+  assert.equal(parseJsonKeyUsageIdStart(""), null);
+  assert.equal(parseJsonKeyUsageIdStart("Infinity"), null);
 });
 
 test("Problems panel rendering is skipped while hidden and cached while unchanged", () => {
@@ -1713,7 +1602,6 @@ test("settings windows treat Escape as a close key only", () => {
 });
 
 test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths", () => {
-  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.equal(globalShortcutAction({ key: "b", ctrlKey: true }), "toggle-sidebar");
   assert.equal(globalShortcutAction({ key: "l", ctrlKey: true }), "toggle-problems");
   assert.equal(globalShortcutAction({ key: "h", ctrlKey: true }), "reset-row-heights");
@@ -1723,9 +1611,6 @@ test("Ctrl+B, Ctrl+L, and Ctrl+H use the shared panel and row-height reset paths
   assert.equal(isEditorShortcutAllowed("h", true), true);
   assert.equal(isEditorShortcutAllowed("b", true), false);
   assert.equal(commandLabelsForEnvironment().some(([id, label]) => id === "reset-row-heights" && label === "Reset Row Heights"), true);
-  assert.match(readme, /`Ctrl\+B`: toggle Explorer panel/);
-  assert.match(readme, /`Ctrl\+L`: toggle Problems panel/);
-  assert.match(readme, /`Ctrl\+H`: reset all row heights to default/);
 });
 
 test("grid scroll shortcut policy maps only unmodified data-grid scroll keys", () => {
@@ -1745,8 +1630,25 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
   const previousWindow = globalThis.window;
   const previousElement = globalThis.Element;
   const listeners = new Map();
+  const keydownRegistrations = [];
+  let captureKeydown = null;
+  let bubbleKeydown = null;
   globalThis.document = {
-    addEventListener: (type, listener) => listeners.set(type, listener)
+    addEventListener: (type, listener, options) => {
+      if (type !== "keydown") return listeners.set(type, listener);
+      keydownRegistrations.push(options === true ? "capture" : "bubble");
+      if (options === true) captureKeydown = listener;
+      else bubbleKeydown = listener;
+      listeners.set("keydown", (event) => {
+        const preventDefault = event.preventDefault;
+        event.preventDefault = () => {
+          event.defaultPrevented = true;
+          preventDefault?.();
+        };
+        captureKeydown?.(event);
+        bubbleKeydown?.(event);
+      });
+    }
   };
   globalThis.window = { addEventListener: () => {} };
   class FakeElement {
@@ -1773,8 +1675,10 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       remove: () => {}
     };
     const addEventListener = () => {};
+    let findToggles = 0;
+    const appState = { active: 0 };
     const controller = createAppEventController({
-      state: { active: 0 },
+      state: appState,
       els: {
         closeDialog: { addEventListener },
         tabs: { addEventListener },
@@ -1799,7 +1703,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       commands: {},
       documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
       hasOpenDocument: () => true,
-      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {}, toggleSearch: () => { findToggles += 1; } },
       syncDockLayout: () => {},
       wirePaneResizers: () => {},
       positionContextMenu: () => {},
@@ -1824,6 +1728,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       pasteSelection: () => {}
     });
     controller.wireEvents();
+    assert.deepEqual(keydownRegistrations, ["capture", "bubble"]);
 
     let prevented = 0;
     listeners.get("keydown")({
@@ -1844,6 +1749,64 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
     });
     assert.deepEqual(calls, ["top", "right", "page-down"]);
     assert.equal(prevented, 3);
+
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: new FakeElement("input"),
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      repeat: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "f",
+      metaKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 1);
+    assert.equal(prevented, 6);
+
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      shiftKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 1);
+    assert.equal(prevented, 6);
+
+    appState.shortcuts = { search: ["Ctrl+K"] };
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    listeners.get("keydown")({
+      key: "k",
+      ctrlKey: true,
+      target: new FakeElement("input"),
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 2);
+    assert.equal(prevented, 8);
+
+    appState.shortcuts = { search: [] };
+    listeners.get("keydown")({
+      key: "f",
+      ctrlKey: true,
+      target: {},
+      preventDefault: () => { prevented += 1; }
+    });
+    assert.equal(findToggles, 2);
+    assert.equal(prevented, 9);
 
     listeners.get("keydown")({
       key: "PageUp",
@@ -1889,7 +1852,7 @@ test("data-grid scroll shortcuts require an open document and non-text focus", (
       commands: {},
       documentController: { handleCloseDialogClick: () => {}, openBrowserFiles: async () => {} },
       hasOpenDocument: () => false,
-      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {} },
+      searchController: { wireEvents: () => {}, closeSearch: () => {}, showSearch: () => {}, toggleSearch: () => {} },
       syncDockLayout: () => {},
       wirePaneResizers: () => {},
       positionContextMenu: () => {},

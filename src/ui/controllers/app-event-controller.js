@@ -59,6 +59,7 @@ export function createAppEventController({
       const tab = event.target.closest("[data-tab]");
       if (tab) closeTab(Number(tab.dataset.tab)).catch(showError);
     });
+    document.addEventListener("keydown", handleFindKeydown, true);
     document.addEventListener("keydown", handleGlobalKeydown);
     window.addEventListener("resize", () => {
       syncDockLayout();
@@ -87,6 +88,14 @@ export function createAppEventController({
       }
       if (event.key === "Escape") els.palette.classList.add("hidden");
     });
+  }
+
+  function handleFindKeydown(event) {
+    const configuredSearch = globalShortcutAction(event, { shortcuts: state.shortcuts }) === "search";
+    if (configuredSearch || isNativeFindShortcut(event)) {
+      event.preventDefault();
+      if (configuredSearch && !event.repeat) searchController.toggleSearch();
+    }
   }
 
   function handleGlobalKeydown(event) {
@@ -129,6 +138,13 @@ export function createAppEventController({
     if (shortcutAction) return runGlobalShortcutAction(event, shortcutAction);
   }
 
+  function isNativeFindShortcut(event) {
+    return (event.ctrlKey || event.metaKey)
+      && !event.altKey
+      && !event.shiftKey
+      && String(event.key).toLowerCase() === "f";
+  }
+
   function isGridScrollShortcutBlocked(target) {
     if (isTextInputTarget(target)) return true;
     const ElementCtor = globalThis.Element;
@@ -156,7 +172,7 @@ export function createAppEventController({
     if (action === "reset-row-heights") return prevent(event, resetRowHeights);
     if (action === "save-as") return prevent(event, saveAs);
     if (action === "save-file") return prevent(event, saveFile);
-    if (action === "search") return prevent(event, searchController.showSearch);
+    if (action === "search") return prevent(event, searchController.toggleSearch);
     if (action === "find-next") return prevent(event, () => runEditorNavigationCommand("find-next"));
     if (action === "find-previous") return prevent(event, () => runEditorNavigationCommand("find-previous"));
     if (action === "replace") return prevent(event, () => runEditorNavigationCommand("replace"));

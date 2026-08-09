@@ -1,4 +1,5 @@
 import { tText } from "../core/i18n.js";
+import { GRID_SCROLL_MODE_PIXEL, normalizeGridScrollMode } from "./grid-scroll-mode-policy.js";
 
 export const DEFAULT_GRID_FONT = "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace";
 
@@ -47,6 +48,43 @@ export const FONT_OPTIONS = [
   ["MS Mincho", "'MS Mincho', serif"]
 ];
 
+const JSON_RULE_ACTIONS = [
+  ["ignore", "settings.jsonActionOff"],
+  ["warn", "settings.jsonActionWarning"]
+];
+const DEFAULT_JSON_KEY_USAGE_ID_START = 40000;
+
+export function normalizeJsonRuleAction(value, fallback = "warn") {
+  if (value === "error") return "warn";
+  return JSON_RULE_ACTIONS.some(([action]) => action === value) ? value : fallback;
+}
+
+export function normalizeJsonDiagnosticRules(value) {
+  return {
+    duplicateIds: { action: normalizeJsonRuleAction(value?.duplicateIds?.action) },
+    stringFormat: { action: normalizeJsonRuleAction(value?.stringFormat?.action) },
+    keyUsage: {
+      action: normalizeJsonRuleAction(value?.keyUsage?.action, "ignore"),
+      idStart: Number.isFinite(value?.keyUsage?.idStart)
+        ? value.keyUsage.idStart
+        : DEFAULT_JSON_KEY_USAGE_ID_START
+    }
+  };
+}
+
+export function jsonRuleActionOptions(selected, translate = tText) {
+  return JSON_RULE_ACTIONS.map(([value, labelKey]) =>
+    `<option value="${value}"${selected === value ? " selected" : ""}>${translate(labelKey)}</option>`
+  ).join("");
+}
+
+export function parseJsonKeyUsageIdStart(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function normaliseGridFont(value) {
   if (!value || value === "custom") return DEFAULT_GRID_FONT;
   return String(value).trim() || DEFAULT_GRID_FONT;
@@ -57,6 +95,10 @@ export function normaliseZoomLevel(value) {
   const zoom = Number(value);
   if (!Number.isFinite(zoom)) return 1;
   return Math.min(8, Math.max(0.1, Math.round(zoom * 10) / 10));
+}
+
+export function normaliseGridScrollMode(value) {
+  return normalizeGridScrollMode(value);
 }
 
 export function fontLabelFromFamily(fontFamily) {
@@ -70,7 +112,8 @@ export function appSettingsVisualControls({
   keepZoomLevel = false,
   excludeWorkspaceSubfolders = false,
   theme = "dark",
-  gridFont = DEFAULT_GRID_FONT
+  gridFont = DEFAULT_GRID_FONT,
+  scrollMode = GRID_SCROLL_MODE_PIXEL
 } = {}) {
   return {
     colorize: { id: "settingsColorizeColumns", label: tText("settings.colorizeColumns"), checked: Boolean(colorizeColumns) },
@@ -99,6 +142,15 @@ export function appSettingsVisualControls({
       label: tText("settings.font"),
       value: normaliseGridFont(gridFont),
       options: FONT_OPTIONS
+    },
+    scrollMode: {
+      id: "settingsScrollMode",
+      label: tText("settings.scrollMode"),
+      value: normalizeGridScrollMode(scrollMode),
+      options: [
+        [GRID_SCROLL_MODE_PIXEL, tText("settings.scrollModePixel")],
+        ["cell", tText("settings.scrollModeCell")]
+      ]
     },
     themes: [
       { theme: "dark", label: tText("theme.dark"), active: theme !== "light" },

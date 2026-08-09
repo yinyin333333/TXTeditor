@@ -5,7 +5,7 @@ use crate::lsp_file_watcher::{
 };
 use crate::lsp_protocol::{
     apply_line_change, diagnostics_from_lsp_publish, path_to_uri, read_lsp_msg, send_lsp_msg,
-    strip_markdown_for_tooltip, uri_to_path, LspContentChange, LspDiagnostic,
+    strip_markdown_for_tooltip, text_lines, uri_to_path, LspContentChange, LspDiagnostic,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -822,11 +822,8 @@ fn lines_for_diagnostics(
         uri_to_path(uri)
             .ok()
             .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| decode_text(bytes).ok().map(|(text, _)| text))
-            .unwrap_or_default()
-            .lines()
-            .map(String::from)
-            .collect(),
+            .and_then(|bytes| decode_text(bytes).ok().map(|(text, _)| text_lines(&text)))
+            .unwrap_or_default(),
     ))
 }
 
@@ -1089,6 +1086,10 @@ pub(crate) async fn lsp_reserve_generation(
         .map_err(|error| format!("LSP generation reservation task failed: {error}"))?
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "named Tauri IPC parameters plus injected state preserve the frontend contract and LSP generation/session ordering"
+)]
 #[tauri::command]
 pub(crate) async fn lsp_start(
     workspace_path: String,
@@ -1374,7 +1375,7 @@ pub(crate) async fn lsp_open_file(
             uri.clone(),
             DocumentMirror {
                 version,
-                lines: Arc::new(text.lines().map(String::from).collect()),
+                lines: Arc::new(text_lines(&text)),
             },
         );
         if let Err(error) = queue_lsp_msg(
@@ -1419,7 +1420,7 @@ pub(crate) async fn lsp_update_file(
             uri.clone(),
             DocumentMirror {
                 version,
-                lines: Arc::new(text.lines().map(String::from).collect()),
+                lines: Arc::new(text_lines(&text)),
             },
         );
         if let Err(error) = queue_lsp_msg(

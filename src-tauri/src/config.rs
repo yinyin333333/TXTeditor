@@ -86,8 +86,7 @@ where
         // Older TXTEditor builds exposed Error even though it ran the same
         // JSON check as Warning. Preserve the enabled rule while migrating
         // that persisted value to the two-state Off/Warning contract.
-        Some("error") => JsonDiagnosticAction::Warn,
-        Some("warn") => JsonDiagnosticAction::Warn,
+        Some("error") | Some("warn") => JsonDiagnosticAction::Warn,
         // Persisted editor config is migrated field-by-field. An unknown
         // future value must not disable a rule or reset unrelated settings.
         _ => JsonDiagnosticAction::Warn,
@@ -242,8 +241,8 @@ mod tests {
             load_app_config_from(&missing).schema_version.as_deref(),
             Some("3.2")
         );
-        assert_eq!(load_app_config_from(&missing).debug_logging, false);
-        assert_eq!(load_app_config_from(&missing).json_diagnostics, false);
+        assert!(!load_app_config_from(&missing).debug_logging);
+        assert!(!load_app_config_from(&missing).json_diagnostics);
         assert_eq!(
             load_app_config_from(&missing).json_diagnostic_rules,
             JsonDiagnosticRules::default()
@@ -253,8 +252,8 @@ mod tests {
             load_app_config_from(&invalid).schema_version.as_deref(),
             Some("3.2")
         );
-        assert_eq!(load_app_config_from(&invalid).debug_logging, false);
-        assert_eq!(load_app_config_from(&invalid).json_diagnostics, false);
+        assert!(!load_app_config_from(&invalid).debug_logging);
+        assert!(!load_app_config_from(&invalid).json_diagnostics);
         assert_eq!(
             load_app_config_from(&invalid).json_diagnostic_rules,
             JsonDiagnosticRules::default()
@@ -322,8 +321,8 @@ mod tests {
             Some("E:\\Tools\\vector-lsp.exe")
         );
         assert_eq!(config.lint_mode.as_deref(), Some("basic"));
-        assert_eq!(config.debug_logging, true);
-        assert_eq!(config.json_diagnostics, true);
+        assert!(config.debug_logging);
+        assert!(config.json_diagnostics);
         assert_eq!(
             config.json_diagnostic_rules,
             JsonDiagnosticRules::default(),

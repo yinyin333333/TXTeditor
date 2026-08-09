@@ -269,7 +269,11 @@ export function deleteRowsCommand(doc, index, count = 1) {
       deleted = target.deleteRows(at, count);
     },
     undo(target) {
-      target.restoreRows(at, deleted.rows, deleted.rowHeights);
+      target.restoreRows(at, deleted.rows, deleted.rowHeights, {
+        hiddenRows: deleted.hiddenRows,
+        columnWidths: deleted.columnWidths,
+        placeholderRowAdded: deleted.placeholderRowAdded
+      });
     },
     contentChanged: true,
     lspChange: { kind: "deleteRows", index: at, count },
@@ -280,12 +284,22 @@ export function deleteRowsCommand(doc, index, count = 1) {
 export function insertColumnCommand(doc, index, count = 1) {
   const at = clamp(index, 0, doc.columnCount);
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
+  const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
+  const rowLengths = doc.rows.map((row) => row.length);
+  const columnWidths = doc.columnWidths.slice();
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(safeCount === 1 ? "Insert Column" : `Insert ${safeCount} Column(s)`, {
     redo(target) {
       target.insertColumns(at, Array.from({ length: safeCount }, () => ""), { sparseAppend: false });
     },
     undo(target) {
-      target.removeColumns(at, safeCount);
+      target.removeColumns(at, safeCount, { rowInsertionIndexes });
+      for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
+        target.rows[row].length = rowLengths[row];
+      }
+      target.columnWidths = columnWidths.slice();
+      target.serializedColumnCount = serializedColumnCount;
+      target.refreshShape();
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
@@ -296,12 +310,21 @@ export function insertColumnCommand(doc, index, count = 1) {
 export function addColumnsCommand(doc, count = 1) {
   const safeCount = Math.max(1, Math.floor(Number(count) || 1));
   const at = doc.columnCount;
+  const rowLengths = doc.rows.map((row) => row.length);
+  const columnWidths = doc.columnWidths.slice();
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Add ${safeCount} Column(s)`, {
     redo(target) {
       target.insertColumns(at, Array.from({ length: safeCount }, () => ""));
     },
     undo(target) {
       target.removeColumns(at, safeCount);
+      for (let row = 0; row < target.rows.length && row < rowLengths.length; row++) {
+        target.rows[row].length = rowLengths[row];
+      }
+      target.columnWidths = columnWidths.slice();
+      target.serializedColumnCount = serializedColumnCount;
+      target.refreshShape();
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: safeCount },
@@ -316,13 +339,18 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
   const values = Array.from({ length: doc.rowCount }, (_, row) => targets.map((column) => doc.getCell(row, column)));
   const widths = targets.map((column) => doc.columnWidths[column]);
   const at = clamp(insertAt ?? doc.columnCount, 0, doc.columnCount);
+  const rowInsertionIndexes = doc.rows.map((row) => Math.min(at, row.length));
+  const columnWidths = doc.columnWidths.slice();
+  const serializedColumnCount = doc.serializedColumnCount;
   return makeCustomCommand(`Clone ${targets.length} Column(s)`, {
     empty: targets.length === 0,
     redo(target) {
       target.restoreColumns(at, values, widths);
     },
     undo(target) {
-      target.removeColumns(at, targets.length);
+      target.removeColumns(at, targets.length, { rowInsertionIndexes });
+      target.columnWidths = columnWidths.slice();
+      target.serializedColumnCount = serializedColumnCount;
     },
     contentChanged: true,
     lspChange: { kind: "insertColumns", index: at, count: targets.length },
@@ -332,13 +360,15 @@ export function cloneColumnsCommand(doc, columns, insertAt = null) {
 
 export function deleteColumnsCommand(doc, index, count = 1) {
   const at = clamp(index, 0, Math.max(0, doc.columnCount - 1));
+  const serializedColumnCount = doc.serializedColumnCount;
   let deleted = null;
   return makeCustomCommand("Delete Column", {
     redo(target) {
       deleted = target.deleteColumns(at, count);
     },
     undo(target) {
-      target.restoreColumns(at, deleted.columns, deleted.columnWidths);
+      target.restoreColumns(at, deleted.columns, deleted.columnWidths, { hiddenColumns: deleted.hiddenColumns });
+      target.serializedColumnCount = serializedColumnCount;
     },
     contentChanged: true,
     lspChange: { kind: "deleteColumns", index: at, count },

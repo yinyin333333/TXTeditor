@@ -134,9 +134,7 @@ export function lintExcelColumns(index, ctx) {
           const evidence = requiredColumnEvidence(table.fileName, columnName);
           const message = evidence === "editor-policy"
             ? legacyMessage("basic.columnMissingEditor", { column: columnName })
-            : evidence === "runtime-semantic"
-              ? legacyMessage("basic.columnMissingRuntime", { column: columnName })
-              : legacyMessage("basic.columnMissingRuntime", { column: columnName });
+            : legacyMessage("basic.columnMissingRuntime", { column: columnName });
           ctx.add(table, 0, 0, message, {
             severity: "warning",
             d2rMessage: `${table.displayName} - ${message}`
@@ -421,21 +419,13 @@ export function lintBooleanFields(index, ctx) {
     for (const columnName of fields) {
       if (!table.hasColumn(columnName)) continue;
       table.eachRow((row) => {
-        if (type29Fields.has(columnName)) {
+        const numericMessageKey = type29Fields.has(columnName)
+          ? "basic.booleanType29"
+          : rawByteFields.has(columnName) ? "basic.booleanRawByte" : "";
+        if (numericMessageKey) {
           const rawValue = String(row.get(columnName) ?? "");
           if (rawValue.trim() && !isSignedDecimalText(rawValue)) {
-            const message = legacyMessage("basic.booleanType29", { value: rawValue, column: columnName });
-            ctx.add(table, row.rowIndex, columnName, message, {
-              severity: "warning",
-              d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`
-            });
-          }
-          return;
-        }
-        if (rawByteFields.has(columnName)) {
-          const rawValue = String(row.get(columnName) ?? "");
-          if (rawValue.trim() && !isSignedDecimalText(rawValue)) {
-            const message = legacyMessage("basic.booleanRawByte", { value: rawValue, column: columnName });
+            const message = legacyMessage(numericMessageKey, { value: rawValue, column: columnName });
             ctx.add(table, row.rowIndex, columnName, message, {
               severity: "warning",
               d2rMessage: `${table.displayName}, line ${row.rowIndex + 1}: ${message}`

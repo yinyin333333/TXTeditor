@@ -48,6 +48,7 @@ export function makeCellCommand(label, doc, edits) {
     }
   }
   const rows = [...new Set(changes.map((change) => change.row))];
+  const rowSnapshots = captureCellRows(doc, rows);
   const afterSerializedColumnCount = beforeShape.serializedColumnCount == null
     ? null
     : Math.max(beforeShape.serializedColumnCount, ...changes.map((change) => change.column + 1));
@@ -66,7 +67,7 @@ export function makeCellCommand(label, doc, edits) {
     },
     undo(target) {
       target.applyCells(changes, "before");
-      restoreCellShape(target, beforeShape);
+      restoreCellShape(target, beforeShape, rowSnapshots);
     },
     redo(target) {
       target.serializedColumnCount = afterSerializedColumnCount;
@@ -83,10 +84,25 @@ function captureCellShape(doc) {
   };
 }
 
-function restoreCellShape(doc, shape) {
+function captureCellRows(doc, rows) {
+  return new Map(rows
+    .filter((row) => row >= 0 && row < doc.rows.length)
+    .map((row) => [row, doc.rows[row].slice()]));
+}
+
+function restoreCellShape(doc, shape, rowSnapshots = new Map()) {
   doc.rows.length = shape.rowCount;
   for (let row = 0; row < shape.rowLengths.length; row++) {
     doc.rows[row].length = shape.rowLengths[row];
+  }
+  for (const [row, before] of rowSnapshots) {
+    const targetRow = doc.rows[row];
+    if (!targetRow) continue;
+    targetRow.length = before.length;
+    for (let column = 0; column < before.length; column++) {
+      if (column in before) targetRow[column] = before[column];
+      else delete targetRow[column];
+    }
   }
   doc.serializedColumnCount = shape.serializedColumnCount;
   doc.refreshShape();

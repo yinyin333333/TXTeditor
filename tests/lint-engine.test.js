@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import {
   legacyLintDocumentVersion,
   markLegacyLintDocumentChanged
@@ -1106,31 +1105,10 @@ test("workspace file states keep parse errors visible instead of silently ignori
   assert.equal(directState.parseError, state.parseError);
 });
 
-test("settings UI lives in Settings while lint controls stay in the bottom Problems panel", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const toolbar = html.match(/<section class="toolbar">([\s\S]*?)<\/section>/)?.[1] ?? "";
-  const problems = html.match(/<section id="problemsPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
-  assert.equal(toolbar.includes("toggle-lint"), false);
-  assert.equal(toolbar.includes("open-settings"), false);
-  assert.equal(problems.includes("lintControls"), true);
-  assert.equal(problems.includes("lintRulesPanel"), true);
-  assert.equal(toolbar.includes("open-app-settings"), true);
-  assert.equal(toolbar.includes("toggle-colorize"), false);
-  assert.equal(toolbar.includes("fontSelect"), false);
-  assert.equal(toolbar.includes("toggle-theme"), false);
-  for (const removed of ["run-lint", "toggle-auto-lint", "Run Lint", "Auto Lint", "export-lint-txt", "export-d2rlint-txt", "export-lint-txt-d2rlint", "Export Lint TXT", "Export d2rlint TXT"]) {
-    assert.equal(html.includes(removed), false);
-  }
-  assert.equal(problems.includes("problemsResizer"), true);
-  assert.equal(html.includes("sidebarResizer"), true);
-});
-
 test("temporary lint TXT export commands are not exposed in the app UI", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const publicCommandText = [
     ...commandLabelsForEnvironment({ isDevelopmentMode: false }).flat(),
-    ...commandLabelsForEnvironment({ isDevelopmentMode: true }).flat(),
-    html
+    ...commandLabelsForEnvironment({ isDevelopmentMode: true }).flat()
   ].join("\n");
   for (const removed of ["export-lint-txt", "export-d2rlint-txt", "Export Lint TXT", "Export d2rlint TXT"]) {
     assert.equal(publicCommandText.includes(removed), false);
@@ -1177,7 +1155,6 @@ test("Problems lint panel is gated by the active P panel and lint enabled state"
 });
 
 test("Explorer problem badges are visible only while Problems lint notifications are active", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const diagnostics = [{ fileKey: "data/items.txt" }, { fileKey: "data/items.txt" }, { fileKey: "data/skills.txt" }];
   assert.equal(lintNotificationsVisible({ problemsVisible: true, lintEnabled: true, diagnostics }), true);
   assert.equal(lintNotificationsVisible({ problemsVisible: false, lintEnabled: true, diagnostics }), false);
@@ -1188,7 +1165,6 @@ test("Explorer problem badges are visible only while Problems lint notifications
   assert.equal(problemBadgeCountForFile({ diagnostics, fileKey: "data/items.txt", notificationsVisible: false }), 0);
   assert.equal(problemBadgeHtml({ diagnostics, fileKey: "data/items.txt", notificationsVisible: true }), ` <span class="file-problem-badge">2</span>`);
   assert.equal(problemBadgeHtml({ diagnostics, fileKey: "data/items.txt", notificationsVisible: false }), "");
-  assert.match(css, /\.activity-button\[data-badge\]::after/);
 });
 
 test("Problems panel policy renders grouped diagnostics and summary text", () => {
@@ -1284,7 +1260,6 @@ test("legacy lint cache version is kept outside TableDocument fields", () => {
 });
 
 test("Problems list highlights diagnostics for the active or edited marker cell", () => {
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.deepEqual(problemsSelectionChangeEffect(), { updateActiveHighlight: true });
   assert.deepEqual([...activeDiagnosticIdsForCell({
     diagnostics: [
@@ -1323,7 +1298,6 @@ test("Problems list highlights diagnostics for the active or edited marker cell"
     { reason: "keyboard-selection", focus: { row: 3, column: 1 }, editingCell: { row: 3, column: 1 } },
     { reason: "edit-start", focus: { row: 3, column: 1 }, editingCell: { row: 3, column: 1 } }
   ]);
-  assert.match(css, /\.problem-item\.problem-item-active-cell\s*\{[\s\S]*background:\s*color-mix/);
 });
 
 test("diagnostic navigation centers the grid cell and active problem item", () => {

@@ -2,7 +2,14 @@ export function parseTableText(text) {
   const source = String(text ?? "");
   const crlf = (source.match(/\r\n/g) ?? []).length;
   const lf = (source.match(/(?<!\r)\n/g) ?? []).length;
-  const lineEnding = crlf >= lf && crlf > 0 ? "\r\n" : "\n";
+  const cr = (source.match(/\r(?!\n)/g) ?? []).length;
+  const lineEnding = crlf >= lf && crlf >= cr && crlf > 0
+    ? "\r\n"
+    : lf >= cr && lf > 0
+      ? "\n"
+      : cr > 0
+        ? "\r"
+        : "\n";
   const finalNewline = source.endsWith("\n") || source.endsWith("\r");
   const normalized = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n");

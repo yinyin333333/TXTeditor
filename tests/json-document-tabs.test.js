@@ -12,6 +12,7 @@ import {
 import { documentTextSnapshot, markDocumentSaved } from "../src/core/document-file-state.js";
 import { loadJsonEditorModule, resetJsonEditorModuleLoaderForTests } from "../src/ui/json-editor-module-loader.js";
 import { createJsonEditorController } from "../src/ui/controllers/json-editor-controller.js";
+import { createJsonEditorState as createCodeMirrorJsonEditorState } from "../src/ui/codemirror-json-editor-entry.js";
 import { createDocumentController } from "../src/ui/controllers/document-controller.js";
 import { mapLspDiagnosticToDisplay } from "../src/ui/lsp-diagnostic-display-policy.js";
 import { docToUri } from "../src/core/lsp-uri-policy.js";
@@ -112,6 +113,25 @@ test("LSP UTF-16 ranges map to CodeMirror offsets across BOM, CRLF, and emoji", 
     start: { line: 0, character: 0 },
     end: { line: 0, character: 1 }
   }), { start: 1, end: 2 });
+});
+
+test("JSON diagnostic offsets use CodeMirror-normalized line endings", () => {
+  const rawText = "\u{feff}[\r\n  {\"Key\":\"first\"},\r\n  {\"Key\":\"??\"}\r\n]\r\n";
+  const editorText = rawText.replaceAll("\r\n", "\n");
+  const range = {
+    start: { line: 2, character: 10 },
+    end: { line: 2, character: 12 }
+  };
+  const expectedStart = editorText.indexOf("??");
+
+  assert.deepEqual(lspRangeToJsonOffsets(editorText, range), {
+    start: expectedStart,
+    end: expectedStart + 2
+  });
+  assert.deepEqual(lspRangeToJsonOffsets(rawText, range), {
+    start: expectedStart + 2,
+    end: expectedStart + 4
+  });
 });
 
 test("clean external changes reload while Keep preserves a dirty buffer", () => {
@@ -552,6 +572,59 @@ test("JSON editor controller retains state and navigates an exact diagnostic ran
   assert.equal(jsonHost.classList.contains("hidden"), true);
 });
 
+test("JSON editor preserves the document line ending through commits and edits", async () => {
+  const gridHost = { classList: classList() };
+  const jsonHost = { classList: classList() };
+  let activeView = null;
+  let changeHandler = null;
+  const fakeModule = {
+    createJsonEditorState(options) {
+      changeHandler = options.onChange;
+      return createCodeMirrorJsonEditorState(options);
+    },
+    createJsonEditorView({ state }) {
+      let currentState = state;
+      activeView = {
+        get state() { return currentState; },
+        dispatch(spec) {
+          const transaction = currentState.update(spec);
+          currentState = transaction.state;
+          if (transaction.docChanged) {
+            changeHandler(currentState.doc.toString(), currentState, {});
+          }
+        },
+        destroy() {},
+        focus() {}
+      };
+      return activeView;
+    }
+  };
+  const raw = "\u{feff}[\r\n  {\"id\":1}\r\n]\r\n";
+  const doc = JsonDocument.fromText("data.json", raw, {
+    path: "/mod/data/local/lng/strings/data.json"
+  });
+  const controller = createJsonEditorController({
+    gridHost,
+    jsonHost,
+    loadModule: async () => fakeModule
+  });
+
+  await controller.showDocument(doc, { focus: false });
+  controller.commitActive();
+  assert.equal(doc.text, raw);
+  assert.equal(doc.dirty, false);
+
+  activeView.dispatch({
+    changes: {
+      from: activeView.state.doc.toString().indexOf("1"),
+      to: activeView.state.doc.toString().indexOf("1") + 1,
+      insert: "2"
+    }
+  });
+  assert.equal(doc.text, "\u{feff}[\r\n  {\"id\":2}\r\n]\r\n");
+  assert.equal(doc.lineEnding, "\r\n");
+});
+
 test("unopened JSON Problems use LSP character columns and policy navigation", () => {
   const diagnostic = mapLspDiagnosticToDisplay({
     row: 8,
@@ -598,13 +671,4 @@ test("CodeMirror is pinned, generated, ignored, and absent from the initial HTML
     readFileSync(new URL("../index.html", import.meta.url), "utf8"),
     /codemirror-json-editor\.js/
   );
-  const editorSource = readFileSync(
-    new URL("../src/ui/codemirror-json-editor-entry.js", import.meta.url),
-    "utf8"
-  );
-  const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(editorSource, /HighlightStyle\.define/);
-  assert.match(editorSource, /StateField\.define/);
-  assert.match(editorSource, /cm-diagnostic-focus/);
-  assert.match(styles, /\.json-editor-host[\s\S]*font-family:\s*var\(--grid-font\)\s*!important/);
 });

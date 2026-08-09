@@ -37,6 +37,14 @@ pub(crate) fn read_lsp_msg<R: BufRead>(reader: &mut R) -> Option<Value> {
     serde_json::from_slice(&body).ok()
 }
 
+pub(crate) fn text_lines(text: &str) -> Vec<String> {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
 pub(crate) fn path_to_uri(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     if let Some(unc_path) = normalized.strip_prefix("//") {
@@ -572,6 +580,14 @@ mod tests {
     }
 
     #[test]
+    fn text_lines_accepts_bare_carriage_return_line_endings() {
+        assert_eq!(
+            text_lines("header\rvalue\rnext\r"),
+            vec!["header", "value", "next"]
+        );
+    }
+
+    #[test]
     fn diagnostics_from_lsp_publish_preserves_payload_shape_and_tab_columns() {
         let lines = vec!["code\tname\tvalue".to_string(), "plain".to_string()];
         let raw = vec![
@@ -704,7 +720,7 @@ mod tests {
             "code": "calcCheck"
         })];
 
-        let diagnostics = diagnostics_from_lsp_publish(&raw, &[line.clone()]);
+        let diagnostics = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line));
 
         assert_eq!(
             diagnostics,
@@ -770,7 +786,7 @@ mod tests {
             "data": data
         })];
 
-        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+        let diagnostic = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line)).remove(0);
 
         assert_eq!(diagnostic.col, 1);
         assert_eq!(diagnostic.start_character, insertion);
@@ -805,7 +821,7 @@ mod tests {
             "message": "unicode range"
         })];
 
-        let diagnostic = diagnostics_from_lsp_publish(&raw, &[line.clone()]).remove(0);
+        let diagnostic = diagnostics_from_lsp_publish(&raw, std::slice::from_ref(&line)).remove(0);
 
         assert_eq!(diagnostic.col, 2);
         assert_eq!(diagnostic.start_character, 11);
