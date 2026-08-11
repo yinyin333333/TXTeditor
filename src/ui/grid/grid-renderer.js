@@ -11,8 +11,6 @@ import {
   columnIndexRenderState,
   diagnosticTextOverlayPlan,
   diagnosticMarkerState,
-  frozenHorizontalEdgeRects,
-  frozenVerticalEdgeRects,
   indexHandleChromeSteps,
   indexHandleRenderState,
   rowHeaderRenderState,
@@ -373,31 +371,7 @@ function drawFrozenDividers(grid, frozenColWidth, frozenRowHeight) {
   if (frozenColWidth && frozenRowHeight) {
     drawFrozenBorderRect(grid, grid.rowHeaderWidth, headerHeight, frozenColWidth, frozenRowHeight);
   }
-  if (frozenColWidth) {
-    const x = grid.rowHeaderWidth + frozenColWidth;
-    drawFrozenVerticalEdge(grid, x, tableHeight);
-  }
-  if (frozenRowHeight) {
-    const y = headerHeight + frozenRowHeight;
-    drawFrozenHorizontalEdge(grid, y, tableWidth);
-  }
   ctx.restore();
-}
-
-function drawFrozenVerticalEdge(grid, x, height) {
-  const ctx = grid.ctx;
-  for (const rect of frozenVerticalEdgeRects(x, height)) {
-    ctx.fillStyle = GRID_COLORS[rect.color];
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  }
-}
-
-function drawFrozenHorizontalEdge(grid, y, width) {
-  const ctx = grid.ctx;
-  for (const rect of frozenHorizontalEdgeRects(y, width)) {
-    ctx.fillStyle = GRID_COLORS[rect.color];
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  }
 }
 
 function drawFrozenBorderRect(grid, x, y, width, height) {
