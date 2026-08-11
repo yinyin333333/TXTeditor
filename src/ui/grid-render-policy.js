@@ -247,24 +247,6 @@ export function initialColumnFitWidth({
   return Math.max(min, Math.min(max, Math.ceil(scaledWidth / zoom)));
 }
 
-export function frozenVerticalEdgeRects(x, height) {
-  if (height <= 0) return [];
-  return [
-    { color: "frozenEdgeHighlight", x: x - 2, y: 0, width: 1, height },
-    { color: "frozenEdgeShadow", x: x - 1, y: 0, width: 1, height },
-    { color: "frozenEdgeAmbient", x, y: 0, width: 3, height }
-  ];
-}
-
-export function frozenHorizontalEdgeRects(y, width) {
-  if (width <= 0) return [];
-  return [
-    { color: "frozenEdgeHighlight", x: 0, y: y - 2, width, height: 1 },
-    { color: "frozenEdgeShadow", x: 0, y: y - 1, width, height: 1 },
-    { color: "frozenEdgeAmbient", x: 0, y, width, height: 3 }
-  ];
-}
-
 export function activeRowHeaderChromeSteps({ rowHeaderWidth, y, height }) {
   if (height <= 2 || rowHeaderWidth <= 2) return [];
   const right = rowHeaderWidth - 1.5;
