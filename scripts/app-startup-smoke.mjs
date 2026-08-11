@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { requireBaselineDir } from "./baseline-paths.mjs";
 import { installFakeAppStartupDom } from "../tests/helpers/fake-dom-app-startup.mjs";
 
 function optionValue(name, fallback) {
@@ -11,7 +10,6 @@ function optionValue(name, fallback) {
 
 function resolveRoot(value) {
   if (!value || value === "current") return process.cwd();
-  if (value === "baseline") return requireBaselineDir({ currentRoot: process.cwd() }).path;
   return value;
 }
 

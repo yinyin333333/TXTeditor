@@ -17,7 +17,6 @@
     "fixture:20k": "node scripts/generate-fixture.js 20000",
     "fixture:200k": "node scripts/generate-fixture.js 200000",
     "test": "node --test \"tests/*.test.js\"",
-    "test:baseline-contract": "node scripts/baseline-contract.mjs",
     "test:vector-lsp-smoke": "node scripts/vector-lsp-runtime-smoke.mjs",
     "test:vector-lsp-smoke:required": "node scripts/vector-lsp-runtime-smoke.mjs --require-real",
     "lint:compare": "node scripts/lint-compare.js",
