@@ -6,11 +6,12 @@ const REFERENCE_VERSION_ALIASES = new Map([
   ["1.13c", "1.13c"],
   ["2.4", "2.4"],
   ["3.1", "3.1"],
+  ["3.3", "3.3"],
   ["3.2", "3.2"]
 ]);
 
 const PROFILE_REFERENCE_VERSIONS = new Map([
-  ["rotw", "3.2"],
+  ["rotw", "3.3"],
   ["2.4", "2.4"],
   ["1.13c", "1.13c"]
 ]);

@@ -37,12 +37,13 @@ function bundled(version, files, digest = `${version}-verified-digest`) {
 
 test("Legacy reference version selection is explicit, profile-aware, and never guesses", () => {
   assert.equal(normalizeLintReferenceVersion("1.13"), "1.13c");
+  assert.equal(normalizeLintReferenceVersion("3.3"), "3.3");
   assert.equal(resolveLegacyLintReferenceVersion({ referenceVersion: "3.1", schemaVersion: "3.2" }, "RotW"), "3.1");
-  assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "2.4" }, "RotW"), "3.2");
+  assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "2.4" }, "RotW"), "3.3");
   assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "3.1" }, ""), "3.1");
   assert.equal(resolveLegacyLintReferenceVersion({}, "2.4"), "2.4");
   assert.equal(resolveLegacyLintReferenceVersion({}, "1.13c"), "1.13c");
-  assert.equal(resolveLegacyLintReferenceVersion({}, "RotW"), "3.2");
+  assert.equal(resolveLegacyLintReferenceVersion({}, "RotW"), "3.3");
   assert.equal(resolveLegacyLintReferenceVersion({ referenceVersion: "latest", schemaVersion: "3.2" }, "RotW"), null);
   assert.equal(resolveLegacyLintReferenceVersion({ schemaVersion: "3.2" }, "unknown-profile"), null);
 });

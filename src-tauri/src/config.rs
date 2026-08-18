@@ -171,7 +171,7 @@ impl Default for AppConfig {
             vector_lsp_path: None,
             schema_path: None,
             lint_mode: Some("basic".to_string()),
-            schema_version: Some("3.2".to_string()),
+            schema_version: Some("3.3".to_string()),
             reference_version: None,
             plugin_path: None,
             debug_logging: false,
@@ -239,7 +239,7 @@ mod tests {
         assert!(load_app_config_from(&missing).vector_lsp_path.is_none());
         assert_eq!(
             load_app_config_from(&missing).schema_version.as_deref(),
-            Some("3.2")
+            Some("3.3")
         );
         assert!(!load_app_config_from(&missing).debug_logging);
         assert!(!load_app_config_from(&missing).json_diagnostics);
@@ -250,7 +250,7 @@ mod tests {
         assert!(load_app_config_from(&invalid).schema_path.is_none());
         assert_eq!(
             load_app_config_from(&invalid).schema_version.as_deref(),
-            Some("3.2")
+            Some("3.3")
         );
         assert!(!load_app_config_from(&invalid).debug_logging);
         assert!(!load_app_config_from(&invalid).json_diagnostics);

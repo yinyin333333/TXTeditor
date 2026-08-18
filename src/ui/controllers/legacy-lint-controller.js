@@ -342,7 +342,7 @@ export function createLegacyLintController({
     if (!selectedVersion) {
       state.lint.legacy.referenceDataset = emptyReferenceDataset({
         status: "unavailable",
-        error: "Select a supported bundled reference version (1.13c, 2.4, 3.1, or 3.2)."
+        error: "Select a supported bundled reference version (1.13c, 2.4, 3.1, 3.2, or 3.3)."
       });
       return { referenceVersion: "", referenceFileCount: 0, usedReferenceCache: false };
     }

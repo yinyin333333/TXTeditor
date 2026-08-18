@@ -1793,6 +1793,7 @@ test("Settings and Problems controls switch between Vector-LSP and Legacy Lint",
   assert.equal(legacyControls.referenceSelect, undefined);
   assert.equal(legacyControls.versionSelect.id, "lintGameVersionSelect");
   assert.deepEqual(legacyControls.versionSelect.options, [
+    { value: "3.3", label: "3.3", selected: false },
     { value: "3.2", label: "3.2", selected: false },
     { value: "3.1", label: "3.1", selected: true },
     { value: "2.4", label: "2.4", selected: false },

@@ -230,7 +230,7 @@ impl EditorLaunchSpec {
                         .as_deref()
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
-                        .unwrap_or("3.2")
+                        .unwrap_or("3.3")
                         .to_string(),
                 ),
                 None,
@@ -2426,8 +2426,8 @@ mod tests {
 
         assert!(spec.binary.is_absolute());
         assert_eq!(spec.lint_mode, "basic");
-        assert_eq!(spec.schema_version.as_deref(), Some("3.2"));
-        assert_eq!(spec.reference_version.as_deref(), Some("3.2"));
+        assert_eq!(spec.schema_version.as_deref(), Some("3.3"));
+        assert_eq!(spec.reference_version.as_deref(), Some("3.3"));
         assert!(spec.schema_path.is_none());
         assert!(spec.plugin_path.is_none());
         assert!(canonical_existing_path(".", "cwd").unwrap().is_absolute());
