@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 const EXPECTED_ROOT_SHA256: &str =
-    "6930d9c39b5380fd4c242bae4df24a9b0115386bdc074cb8482007e2a033cab0";
+    "71f25ac353cb02053a3e7326b530fb599b77dde4ef2b24e03fc78304c60e69f4";
 const EXPECTED_DATASETS: &[(&str, &str, &str, usize, u64, &str)] = &[
     (
         "1.13",
@@ -40,6 +40,14 @@ const EXPECTED_DATASETS: &[(&str, &str, &str, usize, u64, &str)] = &[
         91,
         5_144_477,
         "7149352429c5d5ff3e641adb75ce6ff683ce4db6c390651c928f336f8dcddc75",
+    ),
+    (
+        "3.3",
+        "3.3",
+        "d2r_3_3casc",
+        91,
+        5_147_443,
+        "5e80a3e35ef95949ed5f5550965d357fc2bc064b700353589f53866fa0931bd6",
     ),
 ];
 
@@ -144,8 +152,8 @@ fn load_from_contrib(
     let manifest: ReferenceManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("Invalid '{}': {error}", manifest_path.display()))?;
     if manifest.format_version != 1
-        || manifest.total_file_count != 331
-        || manifest.total_bytes != 17_726_566
+        || manifest.total_file_count != 422
+        || manifest.total_bytes != 22_874_009
         || !manifest
             .canonical_sha256
             .eq_ignore_ascii_case(EXPECTED_ROOT_SHA256)
@@ -315,8 +323,9 @@ fn normalize_variant(value: &str) -> Result<&'static str, String> {
         "2.4" => Ok("2.4"),
         "3.1" => Ok("3.1"),
         "3.2" => Ok("3.2"),
+        "3.3" => Ok("3.3"),
         _ => Err(format!(
-            "Unsupported reference version '{value}'; choose 1.13c, 2.4, 3.1, or 3.2."
+            "Unsupported reference version '{value}'; choose 1.13c, 2.4, 3.1, 3.2, or 3.3."
         )),
     }
 }
@@ -348,6 +357,7 @@ mod tests {
     fn version_mapping_is_explicit_and_does_not_guess() {
         assert_eq!(normalize_variant("1.13c").unwrap(), "1.13");
         assert_eq!(normalize_variant("3.2").unwrap(), "3.2");
+        assert_eq!(normalize_variant("3.3").unwrap(), "3.3");
         assert!(normalize_variant("").is_err());
         assert!(normalize_variant("latest").is_err());
     }

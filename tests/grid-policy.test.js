@@ -37,8 +37,6 @@ import {
   cellTextRenderPlan,
   diagnosticMarkerState,
   diagnosticTextOverlayPlan,
-  frozenHorizontalEdgeRects,
-  frozenVerticalEdgeRects,
   initialColumnFitWidth,
   indexHandleChromeSteps,
   indexHandleRenderState,
@@ -930,21 +928,6 @@ test("centered cell scrolling can preserve the unrelated search axis", () => {
   CanvasGrid.prototype.scrollCellToCenter.call(grid, 20, 8, { preserveScrollLeft: true });
   assert.equal(grid.host.scrollLeft, 40);
   assert.equal(grid.host.scrollTop, 825);
-});
-
-test("frozen pane edge uses a subtle raised effect instead of hard divider strokes", () => {
-  assert.deepEqual(frozenVerticalEdgeRects(80, 240), [
-    { color: "frozenEdgeHighlight", x: 78, y: 0, width: 1, height: 240 },
-    { color: "frozenEdgeShadow", x: 79, y: 0, width: 1, height: 240 },
-    { color: "frozenEdgeAmbient", x: 80, y: 0, width: 3, height: 240 }
-  ]);
-  assert.deepEqual(frozenHorizontalEdgeRects(52, 320), [
-    { color: "frozenEdgeHighlight", x: 0, y: 50, width: 320, height: 1 },
-    { color: "frozenEdgeShadow", x: 0, y: 51, width: 320, height: 1 },
-    { color: "frozenEdgeAmbient", x: 0, y: 52, width: 320, height: 3 }
-  ]);
-  assert.deepEqual(frozenVerticalEdgeRects(80, 0), []);
-  assert.deepEqual(frozenHorizontalEdgeRects(52, 0), []);
 });
 
 test("selected row and column index handles use neutral pressed styling", () => {

@@ -37,7 +37,7 @@ Windows builds are available from the [GitHub Releases page](https://github.com/
 ### Linting and Diagnostics
 
 - Select either Vector-LSP or Legacy Lint directly from the Problems toolbar.
-- Choose one game version for the complete lint session: `3.2`, `3.1`, `2.4`, or `1.13c`.
+- Choose one game version for the complete lint session: `3.3`, `3.2`, `3.1`, `2.4`, or `1.13c`.
 - Run cross-file rules against the active workspace or the sibling files of an individually opened table, with bundled reference data filling in files that are absent from the mod.
 - View live errors, warnings, cell markers, precise expression ranges, and overview-ruler markers.
 - Click a diagnostic to open its table cell or JSON range, or copy diagnostic details for bug reports.
@@ -79,6 +79,7 @@ TXTeditor exposes one game-version selector for both lint engines. Selecting a v
 
 | Game version | Vector-LSP | Legacy Lint | Bundled reference data |
 | --- | --- | --- | --- |
+| 3.3 | Supported | RotW rules | 3.3 |
 | 3.2 | Supported | RotW rules | 3.2 |
 | 3.1 | Supported | RotW rules | 3.1 |
 | 2.4 | Supported | 2.4 rules | 2.4 |

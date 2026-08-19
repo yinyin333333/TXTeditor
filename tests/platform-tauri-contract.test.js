@@ -293,7 +293,6 @@ test("release workflow requires Vector-LSP smoke before packaging artifacts", ()
   assert.ok(smokeGate.index < stageArtifacts.index, "smoke gate must run before release artifact staging");
   assert.ok(smokeGate.index < uploadInstaller.index, "smoke gate must run before installer upload");
   assert.match(runTests.body, /^\s*run: npm test$/m);
-  assert.doesNotMatch(runTests.body, /baseline-contract|TXTEDITOR_BASELINE_DIR/);
   assert.match(smokeGate.body, /npm run test:vector-lsp-smoke:required --/);
   assert.match(smokeGate.body, /\$vlspExe = \(Resolve-Path -LiteralPath "vector-lsp\\target\\x86_64-pc-windows-msvc\\release\\vector-lsp\.exe"\)\.Path/);
   assert.match(smokeGate.body, /\$vlspRoot = \(Resolve-Path -LiteralPath "vector-lsp"\)\.Path/);

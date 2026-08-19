@@ -47,7 +47,7 @@ test("ValidStatParameters excludes MonProp from saved-item ranges for every publ
     TableDocument.fromText("skills.txt", "skill\nAttack"),
     TableDocument.fromText("monprop.txt", "id\tprop1\tmin1\tmax1\ndruidhawk\tstupidity\t-1\t-1")
   ];
-  for (const [profile, referenceVersion] of [["RotW", "3.2"], ["RotW", "3.1"], ["2.4", "2.4"], ["1.13c", "1.13c"]]) {
+  for (const [profile, referenceVersion] of [["RotW", "3.3"], ["RotW", "3.2"], ["RotW", "3.1"], ["2.4", "2.4"], ["1.13c", "1.13c"]]) {
     const index = buildWorkspaceIndex(documents, profile, { referenceVersion });
     const settings = { ...createDefaultLintSettings(), profile };
     const results = runLintWithWorkspaceIndex(index, settings)

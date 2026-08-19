@@ -37,7 +37,7 @@ export function exactOuterUnquote(value) {
 export function propertyGroupsEnabled(index) {
   const version = String(index?.referenceVersion ?? "").trim().toLowerCase();
   if (version === "1.13" || version === "1.13c" || version === "2.4") return false;
-  if (version === "3.1" || version === "3.2") return true;
+  if (version === "3.1" || version === "3.2" || version === "3.3") return true;
   return index?.profile === "RotW";
 }
 
