@@ -244,6 +244,6 @@ function applyReferenceTier(referenceTablesByName, referenceSourceByName, {
 function normalizeReferenceVersion(value) {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "1.13" || normalized === "1.13c") return "1.13c";
-  if (["2.4", "3.1", "3.2"].includes(normalized)) return normalized;
+  if (["2.4", "3.1", "3.2", "3.3"].includes(normalized)) return normalized;
   return null;
 }

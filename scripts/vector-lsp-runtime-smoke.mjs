@@ -5,12 +5,13 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { diagnosticTooltipText } from "../src/ui/hover-policy.js";
 
-const REFERENCE_ROOT_SHA256 = "6930d9c39b5380fd4c242bae4df24a9b0115386bdc074cb8482007e2a033cab0";
+const REFERENCE_ROOT_SHA256 = "71f25ac353cb02053a3e7326b530fb599b77dde4ef2b24e03fc78304c60e69f4";
 const REFERENCE_DATASETS = [
   ["1.13", "1.13c", "113c", 64, 2_920_000, "80ae8704937825906ec456c2d843fa173b5e940300a38eb9ab67ea615b2aa71f"],
   ["2.4", "2.4", "69270", 85, 4_585_088, "1e3e03fa3138debd1b87c6eec0a68d68fc76069842ccf6abffefa7be0d42c008"],
   ["3.1", "3.1", "92198", 91, 5_077_001, "8479a35241ad05196fc99c2219d8bd934ee3fc7820e0c0f5553fed07847d0152"],
-  ["3.2", "3.2", "92777a", 91, 5_144_477, "7149352429c5d5ff3e641adb75ce6ff683ce4db6c390651c928f336f8dcddc75"]
+  ["3.2", "3.2", "92777a", 91, 5_144_477, "7149352429c5d5ff3e641adb75ce6ff683ce4db6c390651c928f336f8dcddc75"],
+  ["3.3", "3.3", "d2r_3_3casc", 91, 5_147_443, "5e80a3e35ef95949ed5f5550965d357fc2bc064b700353589f53866fa0931bd6"]
 ];
 const JSON_STRING_LOCALES = [
   "enUS", "zhTW", "deDE", "esES", "frFR", "itIT", "koKR", "plPL", "esMX", "jaJP",
@@ -124,8 +125,8 @@ export function verifyReferenceBundle(contribRoot) {
   const manifestPath = path.join(root, "reference-manifest.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.formatVersion !== 1
-      || manifest.totalFileCount !== 331
-      || manifest.totalBytes !== 17_726_566
+      || manifest.totalFileCount !== 422
+      || manifest.totalBytes !== 22_874_009
       || String(manifest.canonicalSha256).toLowerCase() !== REFERENCE_ROOT_SHA256
       || manifest.datasets?.length !== REFERENCE_DATASETS.length) {
     throw new Error("Bundled reference manifest inventory/digest mismatch");
@@ -174,7 +175,7 @@ export function verifyReferenceBundle(contribRoot) {
   if (sha256(rootCanonical) !== REFERENCE_ROOT_SHA256) {
     throw new Error("Bundled reference root canonical digest mismatch");
   }
-  return { fileCount: 331, totalBytes: 17_726_566, canonicalSha256: REFERENCE_ROOT_SHA256 };
+  return { fileCount: 422, totalBytes: 22_874_009, canonicalSha256: REFERENCE_ROOT_SHA256 };
 }
 
 export function prepareStaging({
@@ -359,7 +360,7 @@ class LspClient {
   constructor({
     exePath,
     workspaceDir,
-    schemaVariant = "3.2",
+    schemaVariant = "3.3",
     jsonDiagnostics = false,
     jsonDiagnosticRules = {}
   }) {
@@ -1584,7 +1585,7 @@ export async function runVectorLspRuntimeSmoke({
   repoRoot = process.cwd(),
   vectorRoot = defaultVectorRoot(repoRoot),
   vectorLspExe = "",
-  schemaVariant = "3.2",
+  schemaVariant = "3.3",
   timeoutMs = 10000,
   requireReal = false,
   platform = process.platform
@@ -1668,7 +1669,7 @@ async function main() {
     repoRoot,
     vectorRoot: configuredVectorRoot ? path.resolve(configuredVectorRoot) : defaultVectorRoot(repoRoot),
     vectorLspExe: optionValue("--vector-lsp-exe", ""),
-    schemaVariant: optionValue("--schema-variant", "3.2"),
+    schemaVariant: optionValue("--schema-variant", "3.3"),
     timeoutMs: Number(optionValue("--timeout-ms", "10000")),
     requireReal: hasFlag("--require-real")
   });

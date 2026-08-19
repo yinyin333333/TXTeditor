@@ -12,7 +12,7 @@ export function lintControlsModel({
   engine = "vector-lsp",
   lintEnabled = false,
   vectorLspHover = true,
-  activeGameVersion = "3.2",
+  activeGameVersion = "3.3",
   rulesOpen = false
 } = {}) {
   const lintButton = lintToggleControl(lintEnabled);
@@ -29,7 +29,7 @@ export function lintControlsModel({
     id: "lintGameVersionSelect",
     className: "profile-select",
     title: tText("lint.profileTitle"),
-    options: ["3.2", "3.1", "2.4", "1.13c"].map((version) => ({
+    options: ["3.3", "3.2", "3.1", "2.4", "1.13c"].map((version) => ({
       value: version,
       label: version,
       selected: version === activeGameVersion
