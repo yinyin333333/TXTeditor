@@ -59,10 +59,14 @@ export function createCommandSurfaceController({
     state.contextHit = hit;
     state.contextMenuActiveGroup = "";
     setContextMenuOpen(true);
-    const canUnhide = activeDoc().hiddenRows.size > 0 || activeDoc().hiddenColumns.size > 0;
+    const mergePreview = activeDoc()?.kind === "merge";
+    const canUnhide = !mergePreview && (activeDoc().hiddenRows.size > 0 || activeDoc().hiddenColumns.size > 0);
     const focusRow = hit?.row ?? state.selection.focus.row;
     const focusCol = hit?.column ?? state.selection.focus.column;
-    const entries = [
+    const entries = mergePreview ? [
+      { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
+      { id: "select-all", label: tText("command.select-all"), shortcut: shortcutDisplayForAction("select-all", state.shortcuts) }
+    ] : [
       { type: "submenu", label: tText("menu.columnOperations"), items: columnItems() },
       { type: "submenu", label: tText("menu.rowOperations"), items: rowItems() },
       { id: "resize-fit", label: tText("menu.resizeToFit") },
@@ -72,6 +76,7 @@ export function createCommandSurfaceController({
       { type: "submenu", label: tText("menu.math"), items: mathCommandItems() },
       { type: "submenu", id: "highlight", label: tText("highlight.menu"), items: highlightItems() },
       { id: "go-to-definition", label: tText("menu.goToDefinition"), disabled: !cellHasReference(focusRow, focusCol) },
+      { id: "merge-with-current", label: tText("command.mergeWithFile") },
       { id: "cut", label: tText("command.cut"), shortcut: shortcutDisplayForAction("cut", state.shortcuts) },
       { id: "copy", label: tText("command.copy"), shortcut: shortcutDisplayForAction("copy", state.shortcuts) },
       { id: "paste", label: tText("command.paste"), shortcut: shortcutDisplayForAction("paste", state.shortcuts) }

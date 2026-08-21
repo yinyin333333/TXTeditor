@@ -19,6 +19,12 @@ export const DEVELOPMENT_COMMAND_LABELS = [
   ["load-fixture-200k", "Load 200k Fixture"]
 ];
 
+export const MERGE_COMMAND_LABELS = [
+  ["show-merge", "activity.merge"],
+  ["merge-with-current", "command.mergeWithFile"],
+  ["merge-with-folder", "command.mergeWithFolder"]
+];
+
 export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
   "open-file",
   "open-folder",
@@ -34,6 +40,9 @@ export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
   "toggle-lint-rules",
   "show-explorer",
   "show-problems",
+  "show-merge",
+  "merge-with-current",
+  "merge-with-folder",
   "zoom-in",
   "zoom-out",
   "zoom-reset",
@@ -88,6 +97,9 @@ const COMMAND_ACTIONS = new Map([
   ["toggle-lint-rules", { type: "handler", name: "toggleLintRules" }],
   ["show-explorer", { type: "handler", name: "toggleExplorerPane" }],
   ["show-problems", { type: "handler", name: "toggleProblemsPanel" }],
+  ["show-merge", { type: "handler", name: "showMerge" }],
+  ["merge-with-current", { type: "handler", name: "mergeWithCurrent" }],
+  ["merge-with-folder", { type: "handler", name: "mergeWithFolder" }],
   ["zoom-in", { type: "zoom", delta: 0.1 }],
   ["zoom-out", { type: "zoom", delta: -0.1 }],
   ["zoom-reset", { type: "zoom-reset" }],
@@ -104,9 +116,10 @@ const COMMAND_ACTIONS = new Map([
 
 export function commandLabelsForEnvironment({ isDevelopmentMode = false } = {}) {
   return [
-    ...COMMAND_LABELS_BASE,
+    ...COMMAND_LABELS_BASE.map(([id, key]) => [id, tText(key)]),
+    ...MERGE_COMMAND_LABELS.map(([id, key]) => [id, tText(key)]),
     ...(isDevelopmentMode ? DEVELOPMENT_COMMAND_LABELS : [])
-  ].map(([id, key]) => [id, tText(key)]);
+  ];
 }
 
 export function createCommandRunners(commandLabels, runCommand) {
@@ -164,9 +177,17 @@ const JSON_DOCUMENT_COMMANDS = new Set([
   "next-tab", "previous-tab",
   "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",
   "open-app-settings", "open-shortcut-settings", "open-settings",
-  "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems"
+  "toggle-lint", "toggle-lint-rules", "show-explorer", "show-problems", "show-merge", "merge-with-folder"
+]);
+
+const MERGE_DOCUMENT_COMMANDS = new Set([
+  "open-file", "open-folder", "close-all", "copy", "select-all", "search", "find-next", "find-previous",
+  "go-to-row", "next-tab", "previous-tab", "toggle-sidebar", "toggle-theme", "toggle-colorize",
+  "zoom-in", "zoom-out", "zoom-reset", "show-explorer", "show-problems", "show-merge",
+  "merge-with-current", "merge-with-folder", "open-app-settings", "open-shortcut-settings", "open-settings"
 ]);
 
 export function canRunCommandForDocument(id, kind = "table") {
+  if (kind === "merge") return MERGE_DOCUMENT_COMMANDS.has(id);
   return kind !== "json" || JSON_DOCUMENT_COMMANDS.has(id);
 }

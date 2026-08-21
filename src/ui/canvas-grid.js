@@ -728,6 +728,7 @@ export class CanvasGrid {
   }
 
   startEdit(initialText = null, replace = false, mode = replace ? "quick" : "explicit") {
+    if (this.doc?.kind === "merge") return;
     if (this.editing && replace) return;
     const { row, column } = this.selection.focus;
     const box = this.cellBox(row, column);

@@ -13,11 +13,29 @@ const PRODUCT_SURFACE_AUDIT = [
     'data-command="close-all" data-i18n="toolbar.closeAll"',
     'data-i18n-aria-label="aria.tableEditor"',
     'data-i18n-placeholder="palette.placeholder"',
-    'data-i18n="dialog.saveChanges"'
+    'data-i18n="dialog.saveChanges"',
+    'data-i18n="merge.title"',
+    'data-i18n="merge.stage.setup"',
+    'data-i18n-placeholder="merge.placeholder.output"',
+    'data-i18n="merge.analyze"',
+    'data-i18n="merge.description"',
+    'data-i18n="merge.changesTab"'
   ]],
   ["src/ui/controllers/command-surface-controller.js", [
     'tText("menu.columnOperations")', 'tText("menu.rowOperations")',
-    'tText("menu.goToDefinition")', 'txteditor-locale-changed'
+    'tText("menu.goToDefinition")', 'tText("command.mergeWithFile")', 'txteditor-locale-changed'
+  ]],
+  ["src/ui/controllers/merge-controller.js", [
+    'tText("merge.status.noChangedFiles")',
+    'tText("merge.error.folderDirty"',
+    '"merge.conflict.message.generic"',
+    'tText("merge.change.result"',
+    'tText("merge.overwrite.text"',
+    'tText("merge.status.existingCancelled")'
+  ]],
+  ["src/app.js", [
+    'tText("merge.error.readOnly")',
+    'tText("merge.error.saveResultPath")'
   ]],
   ["src/ui/controllers/shell-controller.js", [
     'tText("lint.on")', 'tText("theme.lightMode")', 'tText("activity.explorer")',
@@ -81,4 +99,30 @@ test("product-facing source audit requires stable i18n keys at audited UI and li
   assert.match(i18n, /"json\.goToLine"/);
   assert.doesNotMatch(source("src/ui/controllers/settings-controller.js"), />Lint Options</);
   assert.doesNotMatch(source("src/ui/controllers/settings-controller.js"), />Restart LSP</);
+  assert.doesNotMatch(source("src/ui/controllers/merge-controller.js"), /merge-change-basis|merge\.base/);
+  assert.match(source("src/styles.css"), /\.merge-status\s*\{/);
+});
+
+test("merge catalog keys are assigned only once in source", () => {
+  const contents = source("src/core/i18n.js");
+  const counts = new Map();
+  const keyPattern = /^\s*,?\s*"(merge\.[^"]+)"\s*:/gm;
+  for (const match of contents.matchAll(keyPattern)) {
+    counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+  }
+  const duplicates = [...counts.entries()].filter(([, count]) => count > 1);
+  assert.deepEqual(duplicates, []);
+});
+
+test("Merge sidebar contracts prevent narrow-layout overflow and picker text overflow", () => {
+  const html = source("index.html");
+  const css = source("src/styles.css");
+  assert.match(html, /data-merge-action="pick-a"[^>]*>…<\/button>/);
+  assert.match(html, /data-merge-action="pick-b"[^>]*>…<\/button>/);
+  assert.match(html, /data-merge-action="pick-output"[^>]*>…<\/button>/);
+  assert.match(css, /\.merge-view\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(css, /\.merge-path-row input\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  assert.match(css, /\.merge-path-row button\s*\{[^}]*min-width:\s*30px[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.merge-file-list\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(css, /\.merge-conflicts-panel\s*\{[^}]*minmax\(0, \.86fr\)/s);
 });

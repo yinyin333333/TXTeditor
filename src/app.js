@@ -55,6 +55,7 @@ import { createShortcutSettingsController } from "./ui/controllers/shortcut-sett
 import { createShellController } from "./ui/controllers/shell-controller.js";
 import { createLocaleController, initializeLocale } from "./ui/controllers/locale-controller.js";
 import { createManualHighlightController } from "./ui/manual-highlight.js";
+import { createMergeController } from "./ui/controllers/merge-controller.js";
 import { t, tText } from "./core/i18n.js";
 const { state, savedTheme, savedGridFont, savedPanelState } = createInitialAppState({ storage: localStorage });
 const {
@@ -72,7 +73,7 @@ document.documentElement.style.setProperty("--sidebar-width", `${savedPanelState
 document.documentElement.style.setProperty("--problems-height", `${savedPanelState.problemsHeight}px`);
 const els = collectAppElements(document);
 const { showError, showToast } = createToastFeedback(els);
-let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null, manualHighlightController = null;
+let documentController = null, documentEditorController = null, lspController = null, cellInputController = null, commandSurfaceController = null, searchController = null, manualHighlightController = null, mergeController = null;
 const jsonEditorController = createJsonEditorController({
   gridHost: els.host,
   jsonHost: els.jsonHost,
@@ -170,12 +171,14 @@ const grid = new CanvasGrid({
   onContextMenu: showContextMenu,
   onResizeCommand: (resize) => gridCommandController.commitResize(resize),
   onAutoFitColumn: (column) => gridCommandController.autoFitColumns([column]).catch(showError),
-  onHoverRequest: (row, column, meta) => lspController.requestHover(row, column, meta).catch((error) => lspController.reportHoverDispatchFailure(row, column, error, "grid-hover-request")),
+  onHoverRequest: (row, column, meta) => activeDoc()?.kind === "merge" ? Promise.resolve() : lspController.requestHover(row, column, meta).catch((error) => lspController.reportHoverDispatchFailure(row, column, error, "grid-hover-request")),
   onHoverInvalidated: () => lspController.clearVisibleHover("grid-hover-cleared"),
   onViewportChanged: (reason) => lspController.scheduleHoverPrewarm(reason),
   onSelectionChanged: () => { saveSelectionState(); diagnosticsController.handleSelectionChanged(); cellInputController?.refresh(); },
   onZoomChanged: (zoom) => settingsController?.recordZoomLevel(zoom),
-  highlightColorForCell: (doc, row, column) => manualHighlightController?.colorForCell(doc, row, column) ?? null
+  highlightColorForCell: (doc, row, column) => doc?.kind === "merge"
+    ? mergeController?.highlightColorForCell(doc, row, column) ?? null
+    : manualHighlightController?.colorForCell(doc, row, column) ?? null
 });
 manualHighlightController = createManualHighlightController({ state, activeDoc, grid, storage: localStorage });
 
@@ -295,8 +298,8 @@ documentController = createDocumentController({
   els,
   grid,
   emptyDoc: EMPTY_DOC,
-  activeDoc,
-  activateDocument,
+  activeDoc: regularActiveDoc,
+  activateDocument: activateRegularDocument,
   commitActiveEditor,
   focusActiveEditor,
   jsonEditorController,
@@ -339,6 +342,21 @@ searchController = createSearchController({
   escapeHtml,
   focusActiveEditor
 });
+mergeController = createMergeController({
+  state,
+  els,
+  grid,
+  emptyDoc: EMPTY_DOC,
+  regularActiveDoc,
+  activateDocument,
+  commitActiveEditor,
+  renderChrome,
+  showError,
+  showToast,
+  documentController,
+  updateGridDiagnostics,
+  focusActiveEditor
+});
 const editCommandController = createEditCommandController({
   state,
   grid,
@@ -365,6 +383,7 @@ const commandController = createCommandController({
   state,
   activeDoc,
   hasOpenDocument,
+  activeDocumentKind: () => activeDoc()?.kind ?? "table",
   execute,
   rowsFromSelection,
   rowsForRowOperation,
@@ -372,8 +391,8 @@ const commandController = createCommandController({
   columnsForColumnOperation,
   showError,
   handlers: {
-    openFile: documentController.openFile,
-    openFolder: documentController.openFolder, closeAll: documentController.closeAll,
+    openFile: openRegularFile,
+    openFolder: openRegularFolder, closeAll: documentController.closeAll,
     saveFile: documentController.saveFile,
     saveAs: documentController.saveAs,
     undo,
@@ -399,8 +418,11 @@ const commandController = createCommandController({
     toggleVectorLspHover: settingsController.toggleVectorLspHover,
     toggleLint: settingsController.toggleLint,
     toggleLintRules: settingsController.toggleLintRules,
-    toggleExplorerPane,
-    toggleProblemsPanel,
+    toggleExplorerPane: mergeController.showExplorer,
+    toggleProblemsPanel: mergeController.showProblems,
+    showMerge: mergeController.showMerge,
+    mergeWithCurrent: mergeController.mergeWithCurrent,
+    mergeWithFolder: mergeController.mergeWithFolder,
     resetRowHeights,
     toggleSidebar,
     toggleTheme: settingsController.toggleTheme,
@@ -459,7 +481,9 @@ shellController = createShellController({
   perfNow,
   showError,
   lintPathKey,
-  escapeHtml
+  escapeHtml,
+  renderMergeUi: mergeController.render,
+  beforeSelectRegularDocument: mergeController.beforeRegularDocumentActivation
 });
 const eventController = createAppEventController({
   state,
@@ -478,13 +502,13 @@ const eventController = createAppEventController({
   switchBottomTab,
   showError,
   hideContextMenu,
-  closeTab: documentController.closeTab,
-  openFile: documentController.openFile,
+  closeTab: closeRegularTab,
+  openFile: openRegularFile,
   toggleSidebar,
   toggleProblemsPanel,
   resetRowHeights,
-  saveAs: documentController.saveAs,
-  saveFile: documentController.saveFile,
+  saveAs: saveAsFromShortcut,
+  saveFile: saveFromShortcut,
   redo,
   undo,
   showPalette,
@@ -497,10 +521,13 @@ const eventController = createAppEventController({
   commitActiveEditor,
   focusActiveEditor
 });
+mergeController.wireEvents();
 renderChrome();
 eventController.wireEvents();
 wireCloseHandler().catch((error) => reportStartupFailure("Window close handler", error));
-settingsController.loadConfig().catch((error) => {
+settingsController.loadConfig().then(() => {
+  mergeController.syncConfiguredVersion();
+}).catch((error) => {
   state.config = {};
   reportStartupFailure("Configuration load", error);
 });
@@ -510,7 +537,11 @@ documentController.restoreWorkspace().then(() => startupOpenPathsNative())
   .then((paths) => openDroppedNativePaths(paths))
   .catch(showError);
 
-function activeDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
+function regularActiveDoc() { return state.docs[state.active] ?? EMPTY_DOC; }
+function activeDoc() {
+  if (state.activity === "merge") return state.merge.previewDoc ?? EMPTY_DOC;
+  return regularActiveDoc();
+}
 
 function activateDocument(doc = activeDoc(), options) {
   const result = documentEditorController.activateDocument(doc, options);
@@ -518,14 +549,21 @@ function activateDocument(doc = activeDoc(), options) {
   cellInputController?.refresh({ force: true });
   return result;
 }
+function activateRegularDocument(doc = regularActiveDoc(), options) {
+  mergeController?.beforeRegularDocumentActivation();
+  return activateDocument(doc, options);
+}
 function commitActiveEditor() {
   cellInputController?.commit();
   documentEditorController.commitDocument(activeDoc());
 }
 function focusActiveEditor() { documentEditorController.focusDocument(activeDoc()); }
 
-function hasOpenDocument() { return state.docs.length > 0 && state.active >= 0; }
-function saveSelectionState(doc = activeDoc()) { if (hasOpenDocument() && doc !== EMPTY_DOC) documentEditorController.saveViewState(doc); }
+function hasOpenDocument() {
+  if (state.activity === "merge") return Boolean(state.merge.previewDoc);
+  return state.docs.length > 0 && state.active >= 0;
+}
+function saveSelectionState(doc = activeDoc()) { if (doc && doc !== EMPTY_DOC) documentEditorController.saveViewState(doc); }
 
 function isVectorLintEngine() {
   return isVectorLintEngineValue(state.lint.engine);
@@ -546,6 +584,7 @@ function effectiveVectorLspHoverEnabled() {
 function execute(command) {
   if (!hasOpenDocument()) return showError(tText("error.openDocument"));
   if (!isTableDocument(activeDoc())) return showError(tText("error.tableOnly"));
+  if (activeDoc()?.kind === "merge") return showError(tText("merge.error.readOnly"));
   if (!command || command.isEmpty) return;
   const started = perfNow();
   const doc = activeDoc();
@@ -580,18 +619,41 @@ function applyEdits(edits, label = "Edit Cells") {
   execute(makeCellCommand(label, activeDoc(), edits));
 }
 
+async function openRegularFile() {
+  mergeController?.beforeRegularDocumentActivation();
+  return documentController.openFile();
+}
+async function openRegularFolder() {
+  mergeController?.beforeRegularDocumentActivation();
+  return documentController.openFolder();
+}
+async function closeRegularTab(index) {
+  mergeController?.beforeRegularDocumentActivation();
+  return documentController.closeTab(index);
+}
+async function saveFromShortcut() {
+  if (activeDoc()?.kind === "merge") return mergeController.saveResult();
+  return documentController.saveFile();
+}
+async function saveAsFromShortcut() {
+  if (activeDoc()?.kind === "merge") return showError(tText("merge.error.saveResultPath"));
+  return documentController.saveAs();
+}
+
 async function wireCloseHandler() { return documentController.wireCloseHandler(); }
 async function addDocument(doc, options = {}) { return documentController.addDocument(doc, options); }
 async function openDroppedNativePaths(paths, options = {}) { return documentController.openDroppedNativePaths(paths, options); }
 
 function undo() {
   const doc = activeDoc();
+  if (doc?.kind === "merge") return;
   const command = documentEditorController.undoDocument(doc);
   if (command) finishCommand(doc, command, "undo");
 }
 
 function redo() {
   const doc = activeDoc();
+  if (doc?.kind === "merge") return;
   const command = documentEditorController.redoDocument(doc);
   if (command) finishCommand(doc, command, "redo");
 }
