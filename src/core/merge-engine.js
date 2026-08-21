@@ -128,7 +128,7 @@ export function mergeTableDocuments({
     conflicts: [],
     warnings: [],
     schemaAcknowledged: false,
-    formatSource: base ? "base" : a ? "a" : b ? "b" : "base",
+    formatSource: null,
     formats: {
       base: formatFromDocument(base),
       a: formatFromDocument(a),
@@ -142,6 +142,7 @@ export function mergeTableDocuments({
     _model: null,
     result: null
   };
+  descriptor.formatSource = automaticFormatSource(descriptor);
 
   const present = [base, a, b].filter(Boolean);
   if (!present.length) return fallbackFile(descriptor, "No merge inputs were available.", MERGE_CONFLICT_KINDS.AMBIGUOUS_SCHEMA);
@@ -159,6 +160,21 @@ export function mergeTableDocuments({
       kind: MERGE_CONFLICT_KINDS.AMBIGUOUS_SCHEMA,
       message: invalidHeaders.map(({ side, reasons }) => `${side.toUpperCase()}: ${reasons.join(", ")}`).join("; ")
     });
+  }
+
+  if (base && a && b) {
+    const baseIds = new Set(headerDescriptors.base.order);
+    const missingFromBoth = headerDescriptors.base.order.filter((id) => (
+      !headerDescriptors.a.byId.has(id) && !headerDescriptors.b.byId.has(id)
+    ));
+    const addedA = headerDescriptors.a.order.filter((id) => !baseIds.has(id));
+    const addedB = headerDescriptors.b.order.filter((id) => !baseIds.has(id));
+    if (missingFromBoth.length && (addedA.length || addedB.length) && !arrayEquals(addedA, addedB)) {
+      return safeWholeTableFallback(descriptor, {
+        kind: MERGE_CONFLICT_KINDS.AMBIGUOUS_SCHEMA,
+        message: `A and B both removed the same built-in column(s) (${missingFromBoth.join(", ")}) but introduced different replacement headers (${addedA.join(", ") || "none"} vs ${addedB.join(", ") || "none"}); rename mapping is ambiguous.`
+      });
+    }
   }
 
   if (base) {
@@ -1372,16 +1388,21 @@ function emptyMetrics() {
 }
 
 function selectedFormat(file) {
-  const selected = file.formats[automaticFormatSource(file)] ?? file.formats.base ?? file.formats.a ?? file.formats.b ?? formatFromDocument(null);
+  const source = eligibleFormatSource(file, file.formatSource) ? file.formatSource : automaticFormatSource(file);
+  const selected = file.formats[source] ?? file.formats.base ?? file.formats.a ?? file.formats.b ?? formatFromDocument(null);
   return { ...selected };
 }
 
 function automaticFormatSource(file) {
-  if (verifiedBuiltInBase(file)) return "base";
   if (file?.docs?.a && file?.sidePresence?.a !== false) return "a";
   if (file?.docs?.b && file?.sidePresence?.b !== false) return "b";
-  if (file?.docs?.base) return "base";
+  if (file?.docs?.base && (file.baseAvailable || verifiedBuiltInBase(file))) return "base";
   return "a";
+}
+
+function eligibleFormatSource(file, source) {
+  if (!source || !file?.docs?.[source] || !file?.formats?.[source]) return false;
+  return source === "base" || file.sidePresence?.[source] !== false;
 }
 
 function verifiedBuiltInBase(file) {

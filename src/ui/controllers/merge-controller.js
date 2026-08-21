@@ -76,6 +76,7 @@ export function createMergeController({
   const referenceCache = new Map();
   let pendingDirtyChoice = null;
   let pendingOverwriteChoice = null;
+  let analysisGeneration = 0;
 
   function wireEvents() {
     if (els.mergeView && !els.mergeView.dataset.mergeBound) {
@@ -143,6 +144,7 @@ export function createMergeController({
     if (action === "pick-b") return pickInput("b");
     if (action === "pick-output") return pickOutput();
     if (action === "change-inputs") return changeInputs();
+    if (action === "swap-inputs") return swapInputs();
     if (action === "reset") return resetSession();
     if (action === "analyze") return analyze();
     if (action === "save") return saveResult();
@@ -161,6 +163,9 @@ export function createMergeController({
   }
 
   function handleMergeChange(event) {
+    if (event.target === els.mergeFormatSource) {
+      return setMergeFormatSource(event.target.value);
+    }
     if (event.target === els.mergeGameVersion) {
       state.merge.gameVersion = normalizeGameVersion(event.target.value) ?? "3.3";
       state.merge.gameVersionTouched = true;
@@ -306,9 +311,26 @@ export function createMergeController({
     const session = state.merge.session;
     const file = selectedFile();
     if (!session || !file) {
+      els.mergeFormatRow?.classList.add("hidden");
       if (els.mergeSaveButton) els.mergeSaveButton.disabled = true;
       if (els.mergeValidateButton) els.mergeValidateButton.disabled = !state.merge.savedOutputPath;
       return;
+    }
+    const formatSources = eligibleFormatSources(file);
+    if (els.mergeFormatRow && els.mergeFormatSource) {
+      els.mergeFormatRow.classList.toggle("hidden", !formatSources.length);
+      els.mergeFormatSource.innerHTML = formatSources.map((source) => {
+        const format = file.formats[source];
+        const description = tText("merge.format.description", {
+          encoding: format.encoding,
+          newline: tText(newlineLabelKey(format.lineEnding)),
+          final: format.finalNewline ? ` · ${tText("merge.format.finalNewline")}` : ""
+        });
+        return `<option value="${escapeHtml(source)}">${escapeHtml(`${formatSideLabel(source)} — ${description}`)}</option>`;
+      }).join("");
+      const automatic = automaticFormatSourceForFile(file);
+      els.mergeFormatSource.value = formatSources.includes(file.formatSource) ? file.formatSource : automatic;
+      els.mergeFormatSource.disabled = state.merge.busy;
     }
     const blockingWarnings = file.warnings?.filter((warning) => warning.blockingUntilAcknowledged) ?? [];
     els.mergeSchemaAckRow.classList.toggle("hidden", !blockingWarnings.length);
@@ -318,6 +340,40 @@ export function createMergeController({
     els.mergeSaveButton.disabled = !canSave;
     els.mergeSaveButton.textContent = state.merge.stage === "saving" ? tText("merge.stage.saving") : tText("merge.saveResult");
     els.mergeValidateButton.disabled = !state.merge.savedOutputPath || state.merge.busy;
+  }
+
+  function setMergeFormatSource(source) {
+    const file = selectedFile();
+    if (state.merge.busy || !file || !eligibleFormatSources(file).includes(source)) return false;
+    file.formatSource = source;
+    rebuildPreview(file, { preserveSelection: true });
+    Promise.resolve(activateDocument(state.merge.previewDoc, { focus: false }))
+      .then(() => {
+        updateGridDiagnostics();
+        renderChrome();
+      })
+      .catch(showError);
+    return true;
+  }
+
+  function eligibleFormatSources(file) {
+    return ["a", "b", "base"].filter((source) => {
+      if (!file?.docs?.[source] || !file?.formats?.[source]) return false;
+      return source === "base" || file.sidePresence?.[source] !== false;
+    });
+  }
+
+  function automaticFormatSourceForFile(file) {
+    if (file?.docs?.a && file.sidePresence?.a !== false) return "a";
+    if (file?.docs?.b && file.sidePresence?.b !== false) return "b";
+    if (file?.docs?.base) return "base";
+    return "a";
+  }
+
+  function newlineLabelKey(lineEnding) {
+    if (lineEnding === "\r\n") return "merge.newline.CRLF";
+    if (lineEnding === "\r") return "merge.newline.CR";
+    return "merge.newline.LF";
   }
 
   function renderConflicts() {
@@ -341,7 +397,12 @@ export function createMergeController({
       selected = conflicts.find((change) => !change.resolution) ?? all[0];
       state.merge.selectedChangeId = selected.id;
     }
-    if (selected.kind === "conflict") state.merge.selectedConflictId = selected.conflictId;
+    if (selected.kind === "conflict") {
+      state.merge.selectedConflictId = selected.conflictId;
+      state.merge.selectedChangeId = `change:${selected.fileId}:conflict:${selected.conflictId}`;
+    } else {
+      state.merge.selectedConflictId = null;
+    }
     els.mergeConflictsList.innerHTML = all.map((change) => {
       const location = [change.relativePath || change.fileName, change.rowLabel, change.columnLabel]
         .filter(Boolean).join(" · ");
@@ -408,7 +469,8 @@ export function createMergeController({
       return `<div class="merge-conflict-value merge-conflict-choice-card"><strong>${escapeHtml(formatSideLabel(side))}</strong><pre>${escapeHtml(formatConflictValue(conflict.values?.[side]))}</pre><button type="button" data-merge-choice="${side}" ${available ? "" : "disabled"}>${escapeHtml(tText(labelKey))}</button></div>`;
     };
     const resultValue = projectedChange?.result ?? MERGE_MISSING;
-    const values = primaryChoiceCard("a", "merge.conflict.useAValue")
+    const values = primaryChoiceCard("base", "merge.conflict.useBaseValue")
+      + primaryChoiceCard("a", "merge.conflict.useAValue")
       + primaryChoiceCard("b", "merge.conflict.useBValue")
       + `<div class="merge-conflict-value merge-conflict-result-card"><strong>${escapeHtml(tText("merge.change.result"))}</strong><pre>${escapeHtml(formatConflictValue(resultValue))}</pre></div>`;
     const resolution = conflict.resolution
@@ -568,11 +630,27 @@ export function createMergeController({
   }
 
   function changeInputs() {
+    if (state.merge.busy) return false;
+    invalidateAnalysis(tText("merge.status.inputsChanged"));
+    return true;
+  }
+
+  function swapInputs() {
+    if (state.merge.busy) return false;
+    const { aPath, bPath, aSnapshot, bSnapshot } = state.merge;
+    Object.assign(state.merge, {
+      aPath: bPath,
+      bPath: aPath,
+      aSnapshot: bSnapshot,
+      bSnapshot: aSnapshot
+    });
     invalidateAnalysis(tText("merge.status.inputsChanged"));
     return true;
   }
 
   function resetSession() {
+    analysisGeneration += 1;
+    state.merge.busy = false;
     const configuredVersion = vectorGameVersion(state.config ?? {});
     Object.assign(state.merge, {
       kind: "file",
@@ -601,6 +679,8 @@ export function createMergeController({
   }
 
   function invalidateAnalysis(message = "", { renderNow = true } = {}) {
+    analysisGeneration += 1;
+    state.merge.busy = false;
     state.merge.session = null;
     state.merge.previewDoc = null;
     state.merge.previewFileId = null;
@@ -624,53 +704,70 @@ export function createMergeController({
   async function analyze() {
     requireDesktopRuntime();
     validateSetup();
-    setBusy(true, "analyzing", tText("merge.status.loadingBase", { version: state.merge.gameVersion }));
+    const request = Object.freeze({
+      kind: state.merge.kind,
+      gameVersion: state.merge.gameVersion,
+      aPath: state.merge.aPath,
+      bPath: state.merge.bPath,
+      outputPath: state.merge.outputPath,
+      includeSubfolders: Boolean(state.merge.includeSubfolders),
+      aSnapshot: state.merge.aSnapshot,
+      bSnapshot: state.merge.bSnapshot
+    });
+    const generation = ++analysisGeneration;
+    setBusy(true, "analyzing", tText("merge.status.loadingBase", { version: request.gameVersion }));
     try {
-      const baseFiles = await loadReferenceFiles(state.merge.gameVersion);
+      const baseFiles = await loadReferenceFiles(request.gameVersion, generation);
+      if (!isCurrentAnalysis(generation) || !baseFiles) return false;
       let session;
-      if (state.merge.kind === "file") {
+      if (request.kind === "file") {
         state.merge.status = tText("merge.status.readingAB");
         renderChrome();
         const [aFile, bFile] = await Promise.all([
-          readInputFile(state.merge.aPath, state.merge.aSnapshot),
-          readInputFile(state.merge.bPath, state.merge.bSnapshot)
+          readInputFile(request.aPath, request.aSnapshot, generation),
+          readInputFile(request.bPath, request.bSnapshot, generation)
         ]);
+        if (!isCurrentAnalysis(generation) || !aFile || !bFile) return false;
         const key = canonicalMergeFileKey(aFile.relativePath || aFile.name);
         const baseFile = baseFiles.find((file) => canonicalMergeFileKey(file.relativePath || file.name) === key) ?? null;
         session = analyzeFileMerge({
           baseFile,
           aFile,
           bFile,
-          gameVersion: state.merge.gameVersion,
-          outputPath: state.merge.outputPath
+          gameVersion: request.gameVersion,
+          outputPath: request.outputPath
         });
         if (!baseFile) markBaseUnavailable(session.files[0]);
       } else {
         state.merge.status = tText("merge.status.readingFolder", { side: "A" });
         renderChrome();
-        const aFiles = await readFolder(state.merge.aPath, "A");
+        const aFiles = await readFolder(request.aPath, "A", request.includeSubfolders, generation);
+        if (!isCurrentAnalysis(generation) || !aFiles) return false;
         state.merge.status = tText("merge.status.readingFolder", { side: "B" });
         renderChrome();
-        const bFiles = await readFolder(state.merge.bPath, "B");
+        const bFiles = await readFolder(request.bPath, "B", request.includeSubfolders, generation);
+        if (!isCurrentAnalysis(generation) || !bFiles) return false;
         state.merge.status = tText("merge.status.structural");
         renderChrome();
         session = analyzeFolderMerge({
           baseFiles,
           aFiles,
           bFiles,
-          gameVersion: state.merge.gameVersion,
-          aPath: state.merge.aPath,
-          bPath: state.merge.bPath,
-          outputPath: state.merge.outputPath
+          gameVersion: request.gameVersion,
+          aPath: request.aPath,
+          bPath: request.bPath,
+          outputPath: request.outputPath
         });
         for (const file of session.files) {
           if (!file.baseAvailable && (!file.custom || (file.sidePresence?.a && file.sidePresence?.b))) markBaseUnavailable(file);
         }
       }
-      session.aPath = state.merge.aPath;
-      session.bPath = state.merge.bPath;
-      session.outputPath = state.merge.outputPath;
+      if (!isCurrentAnalysis(generation)) return false;
+      session.aPath = request.aPath;
+      session.bPath = request.bPath;
+      session.outputPath = request.outputPath;
       refreshMergeSession(session);
+      if (!isCurrentAnalysis(generation)) return false;
       state.merge.session = session;
       state.merge.stage = session.stage;
       state.merge.savedOutputPath = "";
@@ -684,14 +781,22 @@ export function createMergeController({
       state.merge.selectedConflictId = firstConflict?.id ?? null;
       state.merge.status = analysisStatus(session);
       state.merge.statusError = false;
-      if (first) await selectFile(first.id, { renderNow: false });
-      else await activateDocument(emptyDoc, { focus: false });
+      if (first) {
+        const selected = await selectFile(first.id, { renderNow: false, analysisGeneration: generation });
+        if (!isCurrentAnalysis(generation) || selected === false) return false;
+      } else {
+        await activateDocument(emptyDoc, { focus: false });
+        if (!isCurrentAnalysis(generation)) return false;
+      }
       if (firstConflict) {
         state.merge.selectedConflictId = firstConflict.id;
         state.merge.selectedChangeId = `change:${firstConflict.fileId}:conflict:${firstConflict.id}`;
       }
+      if (!isCurrentAnalysis(generation)) return false;
       showToast(tText("merge.toast.analysisComplete"));
+      return true;
     } catch (error) {
+      if (!isCurrentAnalysis(generation)) return false;
       state.merge.stage = "setup";
       state.merge.status = localizedErrorMessage(error);
       state.merge.statusError = true;
@@ -699,23 +804,32 @@ export function createMergeController({
       state.merge.previewDoc = null;
       state.merge.previewFileId = null;
       await activateDocument(emptyDoc, { focus: false });
+      if (!isCurrentAnalysis(generation)) return false;
       throw new Error(localizedErrorMessage(error));
     } finally {
-      state.merge.busy = false;
-      if (state.merge.session) state.merge.stage = state.merge.session.stage;
-      renderChrome();
+      if (isCurrentAnalysis(generation)) {
+        state.merge.busy = false;
+        if (state.merge.session) state.merge.stage = state.merge.session.stage;
+        renderChrome();
+      }
     }
   }
 
-  async function readInputFile(path, snapshot) {
+  function isCurrentAnalysis(generation) {
+    return analysisGeneration === generation;
+  }
+
+  async function readInputFile(path, snapshot, generation) {
     if (snapshot) return { ...snapshot };
     const [result] = await native.readTextFilesNative([path]);
+    if (!isCurrentAnalysis(generation)) return null;
     if (!result || result.error || !result.payload) throw new Error(result?.error || `Cannot read '${path}'.`);
     return mergeInputFileFromPayload(result.payload, { relativePath: result.payload.name || fileName(path) });
   }
 
-  async function readFolder(root, label) {
-    const workspace = await native.listWorkspaceNative(root, null, { includeSubfolders: state.merge.includeSubfolders });
+  async function readFolder(root, label, includeSubfolders, generation) {
+    const workspace = await native.listWorkspaceNative(root, null, { includeSubfolders });
+    if (!isCurrentAnalysis(generation)) return null;
     const candidates = (workspace?.files ?? []).filter((file) => TEXT_FILE_PATTERN.test(file.name || file.path || ""));
     const files = [];
     for (let start = 0; start < candidates.length; start += READ_BATCH_SIZE) {
@@ -727,6 +841,7 @@ export function createMergeController({
       });
       renderChrome();
       const results = await native.readTextFilesNative(batch.map((file) => file.path));
+      if (!isCurrentAnalysis(generation)) return null;
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];
         const source = batch[index];
@@ -740,9 +855,10 @@ export function createMergeController({
     return files;
   }
 
-  async function loadReferenceFiles(gameVersion) {
+  async function loadReferenceFiles(gameVersion, generation) {
     if (referenceCache.has(gameVersion)) return referenceCache.get(gameVersion);
     const payload = await native.loadLintReferenceDataset(gameVersion);
+    if (!isCurrentAnalysis(generation)) return null;
     if (!payload || !Array.isArray(payload.files)) throw new Error(tText("merge.error.baseUnavailable"));
     const received = normalizeGameVersion(payload.gameVersion);
     if (received !== gameVersion) throw new Error(tText("merge.error.versionMismatch", { requested: gameVersion, received: payload.gameVersion || "unknown" }));
@@ -752,13 +868,15 @@ export function createMergeController({
     return files;
   }
 
-  async function selectFile(fileId, { focus = false, renderNow = true } = {}) {
+  async function selectFile(fileId, { focus = false, renderNow = true, analysisGeneration: expectedGeneration = null } = {}) {
+    if (expectedGeneration != null && !isCurrentAnalysis(expectedGeneration)) return false;
     const file = findFile(fileId);
     if (!file) return;
     state.merge.previewFileId = file.id;
     state.merge.session.selectedFileId = file.id;
     rebuildPreview(file);
     await activateDocument(state.merge.previewDoc, { focus: false });
+    if (expectedGeneration != null && !isCurrentAnalysis(expectedGeneration)) return false;
     const firstConflict = file.conflicts.find((conflict) => !conflict.resolution) ?? file.conflicts[0];
     if (firstConflict && !findConflict(state.merge.selectedConflictId, file)) state.merge.selectedConflictId = firstConflict.id;
     const firstChange = mergeFileChanges(file)[0];
@@ -769,6 +887,7 @@ export function createMergeController({
     updateGridDiagnostics();
     if (renderNow) renderChrome();
     if (focus) focusActiveEditor();
+    return true;
   }
 
   function rebuildPreview(file, { preserveSelection = false } = {}) {
@@ -806,6 +925,8 @@ export function createMergeController({
     state.bottomTab = "merge-conflicts";
     if (state.merge.previewFileId !== conflict.fileId) {
       await selectFile(conflict.fileId, { renderNow: false });
+      state.merge.selectedConflictId = conflict.id;
+      state.merge.selectedChangeId = `change:${conflict.fileId}:conflict:${conflict.id}`;
     }
     renderChrome();
     navigateToConflict(conflict);
@@ -821,6 +942,7 @@ export function createMergeController({
     if (state.merge.previewFileId !== change.fileId) {
       await selectFile(change.fileId, { renderNow: false });
       state.merge.selectedChangeId = change.id;
+      if (change.kind === "conflict") state.merge.selectedConflictId = change.conflictId;
     }
     state.problemsVisible = true;
     state.bottomTab = "merge-conflicts";
@@ -863,10 +985,17 @@ export function createMergeController({
       const next = nextUnresolvedAfter(conflict.id);
       if (next) {
         state.merge.selectedConflictId = next.id;
-        if (next.fileId !== file.id) await selectFile(next.fileId, { renderNow: false });
+        state.merge.selectedChangeId = `change:${next.fileId}:conflict:${next.id}`;
+        if (next.fileId !== file.id) {
+          await selectFile(next.fileId, { renderNow: false });
+          state.merge.selectedConflictId = next.id;
+          state.merge.selectedChangeId = `change:${next.fileId}:conflict:${next.id}`;
+        }
       }
     }
-    state.merge.status = analysisStatus(state.merge.session);
+    state.merge.status = unresolvedMergeConflicts(file).length || state.merge.session.summary.unresolvedConflicts
+      ? analysisStatus(state.merge.session)
+      : tText("merge.status.allResolved");
     renderChrome();
     const selected = findConflict(state.merge.selectedConflictId);
     if (selected) navigateToConflict(selected);
@@ -1107,6 +1236,7 @@ export function createMergeController({
     selectChange,
     selectConflict,
     selectFile,
+    swapInputs,
     showExplorer,
     showMerge,
     showProblems,
@@ -1171,6 +1301,7 @@ function localizedErrorMessage(error) {
 function formatSideLabel(side) {
   if (side === "a") return tText("merge.inputA");
   if (side === "b") return tText("merge.inputB");
+  if (side === "base") return tText("merge.inputBase");
   return "";
 }
 

@@ -25,6 +25,8 @@ export const APP_ELEMENT_IDS = Object.freeze({
   mergeReviewActions: "mergeReviewActions",
   mergeSchemaAckRow: "mergeSchemaAckRow",
   mergeSchemaAck: "mergeSchemaAck",
+  mergeFormatRow: "mergeFormatRow",
+  mergeFormatSource: "mergeFormatSource",
   mergeSaveButton: "mergeSaveButton",
   mergeValidateButton: "mergeValidateButton",
   mergeFileToolbar: "mergeFileToolbar",

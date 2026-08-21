@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { TableDocument } from "../src/core/table-model.js";
 import {
   MERGE_MISSING,
+  MERGE_CONFLICT_KINDS,
+  materializeMergeFile,
   mergeScalar,
   mergeTableDocuments,
   mergeFileChanges,
@@ -276,16 +278,40 @@ test("rows wider than their headers are never structurally auto-mapped", () => {
   assert.equal(file.overrideSource, "a");
 });
 
-test("automatic output format uses verified Base even when A and B differ", () => {
-  const base = doc("skills.txt", "skill\tvalue\r\nx\t0\r\n");
+test("divergent replacements for the same deleted Base header stay an ambiguous schema conflict", () => {
+  const baseHeaders = ["id", "H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "Value"];
+  const aHeaders = [...baseHeaders.slice(0, -1), "Alpha"];
+  const bHeaders = [...baseHeaders.slice(0, -1), "Beta"];
+  const file = mergeTableDocuments({
+    base: doc("schema.txt", `${baseHeaders.join("\t")}\nx\t0\t0\t0\t0\t0\t0\t0\t0\t0\n`),
+    a: doc("schema.txt", `${aHeaders.join("\t")}\nx\t0\t0\t0\t0\t0\t0\t0\t0\t1\n`),
+    b: doc("schema.txt", `${bHeaders.join("\t")}\nx\t0\t0\t0\t0\t0\t0\t0\t0\t2\n`),
+    fileName: "schema.txt"
+  });
+  assert.equal(file.conflicts[0].kind, MERGE_CONFLICT_KINDS.AMBIGUOUS_SCHEMA);
+  assert.match(file.conflicts[0].message, /both removed the same built-in column.*different replacement headers.*rename mapping is ambiguous/i);
+  assert.equal(unresolvedMergeConflicts(file).length, 1);
+  assert.equal(file.status, "conflict");
+  assert.equal(file.result.rows[0].includes("Alpha") && file.result.rows[0].includes("Beta"), false);
+});
+
+test("automatic output format uses present A before verified Base, while explicit Base remains available", () => {
+  const base = TableDocument.fromText("skills.txt", "skill\tvalue\nx\t0\n", { encoding: "utf-8" });
   const file = mergeTableDocuments({
     base,
-    a: doc("skills.txt", "skill\tvalue\nx\t1\n"),
-    b: doc("skills.txt", "skill\tvalue\nx\t0\n"),
+    a: TableDocument.fromText("skills.txt", "skill\tvalue\r\nx\t1\r\n", { encoding: "windows-1252" }),
+    b: TableDocument.fromText("skills.txt", "skill\tvalue\r\nx\t0\r\n", { encoding: "windows-1252" }),
     fileName: "skills.txt",
   });
-  assert.equal(file.formatSource, "base");
+  assert.equal(file.formatSource, "a");
+  assert.equal(file.result.encoding, "windows-1252");
   assert.equal(file.result.lineEnding, "\r\n");
+  assert.equal(file.result.finalNewline, true);
+
+  file.formatSource = "base";
+  materializeMergeFile(file);
+  assert.equal(file.result.encoding, "utf-8");
+  assert.equal(file.result.lineEnding, "\n");
   assert.equal(file.result.finalNewline, true);
 });
 

@@ -113,6 +113,10 @@ const CATALOG_ROWS = {
 };
 
 Object.assign(CATALOG_ROWS, {
+  "merge.inputBase": ["Base", "基礎", "Basis", "Original", "Original", "Originale", "기본", "Baza", "Original", "ベース", "Original", "База", "基准"],
+  "merge.swapInputs": ["Swap A/B", "交換 A/B", "A/B tauschen", "Intercambiar A/B", "Échanger A/B", "Scambia A/B", "A/B 바꾸기", "Zamień A/B", "Intercambiar A/B", "A/Bを入れ替え", "Trocar A/B", "Поменять A/B", "交换 A/B"],
+  "merge.conflict.useBaseValue": ["Use Base value", "使用基礎值", "Basiswert verwenden", "Usar valor original", "Utiliser la valeur de base", "Usa valore di base", "기본값 사용", "Użyj wartości bazowej", "Usar valor base", "ベース値を使用", "Usar valor base", "Использовать значение Base", "使用基准值"],
+  "merge.resultFormat": ["Result format", "結果格式", "Ergebnisformat", "Formato del resultado", "Format du résultat", "Formato del risultato", "결과 형식", "Format wyniku", "Formato del resultado", "結果形式", "Formato do resultado", "Формат результата", "结果格式"],
   "aria.activity": ["Activity", "活動", "Aktivität", "Actividad", "Activité", "Attività", "활동", "Aktywność", "Actividad", "アクティビティ", "Atividade", "Действия", "活动"],
   "aria.topDock": ["Top dock", "上方停駐區", "Obere Andockleiste", "Panel superior", "Volet supérieur", "Pannello superiore", "상단 도킹 영역", "Górny panel", "Panel superior", "上部ドック", "Painel superior", "Верхняя панель", "顶部靠区"],
   "aria.leftDock": ["Left dock", "左側停駐區", "Linke Andockleiste", "Panel izquierdo", "Volet gauche", "Pannello sinistro", "왼쪽 도킹 영역", "Lewy panel", "Panel izquierdo", "左ドック", "Painel esquerdo", "Левая панель", "左侧靠区"],

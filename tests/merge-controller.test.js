@@ -6,7 +6,7 @@ import { mergeFileChanges } from "../src/core/merge-engine.js";
 import { analyzeFileMerge } from "../src/core/merge-workspace.js";
 import { createMergeController } from "../src/ui/controllers/merge-controller.js";
 
-function createHarness({ kind = "file", config = {}, workspace = null, docs = [], inputTexts = {}, folderEntries = null, referenceFiles = null, writeOutput = null, renderChrome = null, els = {}, documentRef } = {}) {
+function createHarness({ kind = "file", config = {}, workspace = null, docs = [], inputTexts = {}, folderEntries = null, referenceFiles = null, loadLintReferenceDataset = null, writeOutput = null, renderChrome = null, els = {}, documentRef } = {}) {
   const emptyDoc = TableDocument.fromText("empty.txt", "");
   const state = {
     activity: "merge",
@@ -68,11 +68,11 @@ function createHarness({ kind = "file", config = {}, workspace = null, docs = []
   let commits = 0;
   const io = {
     isTauriRuntime: () => true,
-    loadLintReferenceDataset: async () => ({
+    loadLintReferenceDataset: loadLintReferenceDataset ?? (async () => ({
       gameVersion: "3.3",
       canonicalSha256: "verified-test-digest",
       files: referenceFiles ?? [{ name: "skills.txt", text: "skill\tA\tB\nx\t0\t0\n", encoding: "utf-8", bytes: 20 }]
-    }),
+    })),
     listWorkspaceNative: async (root) => ({
       files: folderFiles.map((file) => ({
         ...file,
@@ -134,7 +134,7 @@ function renderElement() {
       listeners.set(type, current);
     },
     dispatchEvent(event) {
-      for (const listener of listeners.get(event.type) ?? []) listener(event);
+      return Promise.all((listeners.get(event.type) ?? []).map((listener) => listener(event)));
     },
     classList: {
       add(name) { classes.add(name); },
@@ -167,6 +167,8 @@ function renderElements() {
     "mergeSourceSummary",
     "mergeSummary",
     "mergeReviewActions",
+    "mergeFormatRow",
+    "mergeFormatSource",
     "mergeFileToolbar",
     "mergeFileFilter",
     "mergeStatusFilter",
@@ -176,6 +178,7 @@ function renderElements() {
     "mergeSchemaAckRow",
     "mergeSchemaAck",
     "mergeConflictCount",
+    "mergeConflictsPanel",
     "mergeConflictsList",
     "mergeConflictDetails",
     "mergeDirtyDialog",
@@ -197,6 +200,51 @@ function overwriteChoiceEvent(choice) {
     }
   };
 }
+
+function mergeChoiceEvent(choice) {
+  return {
+    type: "click",
+    target: {
+      closest(selector) {
+        return selector === "[data-merge-choice]" ? { dataset: { mergeChoice: choice } } : null;
+      }
+    }
+  };
+}
+
+function mergeGameVersionChangeEvent(element, value) {
+  element.value = value;
+  return { type: "change", target: element };
+}
+
+test("stale analysis is discarded when the game version changes while Base is loading", async () => {
+  let releaseReference;
+  const pendingReference = new Promise((resolve) => { releaseReference = resolve; });
+  const harness = createHarness({
+    loadLintReferenceDataset: async (version) => {
+      if (version === "3.3") return pendingReference;
+      return { gameVersion: version, canonicalSha256: "new-digest", files: [] };
+    }
+  });
+  harness.controller.wireEvents();
+  const analysis = harness.controller.analyze();
+  await Promise.resolve();
+  assert.equal(harness.state.merge.busy, true);
+
+  await harness.els.mergeView.dispatchEvent(mergeGameVersionChangeEvent(harness.els.mergeGameVersion, "3.2"));
+  releaseReference({
+    gameVersion: "3.3",
+    canonicalSha256: "old-digest",
+    files: [{ name: "skills.txt", text: "skill\tA\tB\nx\t0\t0\n", encoding: "utf-8" }]
+  });
+
+  assert.equal(await analysis, false);
+  assert.equal(harness.state.merge.session, null);
+  assert.equal(harness.state.merge.previewDoc, null);
+  assert.equal(harness.state.merge.busy, false);
+  assert.match(harness.state.merge.status, /Game version changed/);
+  assert.equal(harness.renderedStates.some(({ status }) => /Comparison complete/.test(status)), false);
+});
 
 test("merge controller analyzes in memory and saves without a browser confirmation gate", async () => {
   const harness = createHarness();
@@ -269,12 +317,41 @@ test("merge review hides setup, selects the first unresolved conflict, and expos
   assert.equal(els.mergeSummary.classList.contains("hidden"), false);
   assert.equal(els.mergeFileToolbar.classList.contains("hidden"), true);
   assert.equal(els.mergeReviewActions.classList.contains("hidden"), false);
+  assert.match(els.mergeFormatSource.innerHTML, /A .*encoding|A/);
+  assert.equal(els.mergeFormatSource.value, "a");
+  assert.ok(els.mergeFormatSource.innerHTML.indexOf('value="a"') < els.mergeFormatSource.innerHTML.indexOf('value="b"'));
+  assert.ok(els.mergeFormatSource.innerHTML.indexOf('value="b"') < els.mergeFormatSource.innerHTML.indexOf('value="base"'));
   assert.match(els.mergeSummary.innerHTML, /Conflict resolution is the next step/);
   assert.match(els.mergeConflictDetails.innerHTML, /merge-conflict-callout/);
+  assert.match(els.mergeConflictDetails.innerHTML, /data-merge-choice="base"(?![^>]*disabled)/);
+  assert.match(els.mergeConflictDetails.innerHTML, /Use Base value/);
   assert.match(els.mergeConflictDetails.innerHTML, /data-merge-choice="a"[^>]*>Use A value/);
   assert.match(els.mergeConflictDetails.innerHTML, /data-merge-choice="b"[^>]*>Use B value/);
   assert.match(els.mergeConflictDetails.innerHTML, /Other choices/);
   assert.match(els.mergeConflictDetails.innerHTML, /Skip for now/);
+});
+
+test("Result format selection rematerializes the preview without writing", async () => {
+  const els = renderElements();
+  const harness = createHarness({
+    inputTexts: {
+      a: "skill\tA\tB\r\nx\t1\t0\r\n",
+      b: "skill\tA\tB\r\nx\t0\t2\r\n"
+    },
+    els,
+    documentRef: { activeElement: null, querySelectorAll: () => [] }
+  });
+  await harness.controller.analyze();
+  harness.controller.wireEvents();
+  harness.controller.render();
+  assert.match(els.mergeFormatSource.innerHTML, /CRLF · final newline/);
+  assert.equal(harness.state.merge.session.files[0].formatSource, "a");
+  els.mergeFormatSource.value = "base";
+  await els.mergeView.dispatchEvent({ type: "change", target: els.mergeFormatSource });
+  await Promise.resolve();
+  assert.equal(harness.state.merge.session.files[0].formatSource, "base");
+  assert.equal(harness.state.merge.previewDoc.lineEnding, "\n");
+  assert.equal(harness.writes.length, 0);
 });
 
 test("merge review selects the first unresolved conflict file when automatic changes come first", async () => {
@@ -309,6 +386,57 @@ test("merge review selects the first unresolved conflict file when automatic cha
   assert.equal(harness.state.merge.session.selectedFileId, conflictFile.id);
   assert.equal(harness.state.merge.selectedConflictId, projectedConflict.conflictId);
   assert.equal(harness.state.merge.selectedChangeId, projectedConflict.id);
+});
+
+test("Apply-and-next selects the next same-file conflict in both the list and Result navigation", async () => {
+  const els = renderElements();
+  const harness = createHarness({
+    inputTexts: {
+      a: "skill\tA\tB\nx\t1\t1\n",
+      b: "skill\tA\tB\nx\t2\t2\n"
+    },
+    els,
+    documentRef: { activeElement: null, querySelectorAll: () => [] }
+  });
+  await harness.controller.analyze();
+  const [file] = harness.state.merge.session.files;
+  const conflicts = mergeFileChanges(file).filter((change) => change.kind === "conflict" && !change.resolution);
+  assert.equal(conflicts.length, 2);
+  harness.controller.wireEvents();
+
+  await els.mergeConflictsPanel.dispatchEvent(mergeChoiceEvent("a"));
+  const nextConflict = conflicts[1];
+  harness.controller.render();
+  assert.equal(harness.state.merge.selectedConflictId, nextConflict.conflictId);
+  assert.equal(harness.state.merge.selectedChangeId, `change:${file.id}:conflict:${nextConflict.conflictId}`);
+  assert.match(els.mergeConflictDetails.innerHTML, new RegExp(`column ${nextConflict.columnLabel}`));
+});
+
+test("swapInputs exchanges paths and snapshots while preserving the other setup values", () => {
+  const harness = createHarness();
+  const before = {
+    outputPath: harness.state.merge.outputPath,
+    gameVersion: harness.state.merge.gameVersion,
+    kind: harness.state.merge.kind,
+    includeSubfolders: harness.state.merge.includeSubfolders
+  };
+  const aSnapshot = { name: "a.txt", text: "A" };
+  const bSnapshot = { name: "b.txt", text: "B" };
+  harness.state.merge.aSnapshot = aSnapshot;
+  harness.state.merge.bSnapshot = bSnapshot;
+
+  assert.equal(harness.controller.swapInputs(), true);
+  assert.equal(harness.state.merge.aPath, "/mods/b/skills.txt");
+  assert.equal(harness.state.merge.bPath, "/mods/a/skills.txt");
+  assert.equal(harness.state.merge.aSnapshot, bSnapshot);
+  assert.equal(harness.state.merge.bSnapshot, aSnapshot);
+  assert.deepEqual({
+    outputPath: harness.state.merge.outputPath,
+    gameVersion: harness.state.merge.gameVersion,
+    kind: harness.state.merge.kind,
+    includeSubfolders: harness.state.merge.includeSubfolders
+  }, before);
+  assert.equal(harness.state.merge.status, "Inputs changed. Compare again when ready.");
 });
 
 test("automatic change details explain the decision without rendering Base", async () => {

@@ -71,6 +71,7 @@
                 </label>
                 <label id="mergeIncludeSubfoldersRow" class="merge-check"><input id="mergeIncludeSubfolders" type="checkbox" checked /> <span data-i18n="merge.includeSubfolders">Include subfolders</span></label>
                 <div class="merge-action-row">
+                  <button type="button" data-merge-action="swap-inputs" data-i18n="merge.swapInputs">Swap A/B</button>
                   <button type="button" data-merge-action="reset" data-i18n="merge.reset">Reset</button>
                 </div>
                 <button id="mergeAnalyzeButton" class="merge-primary-action" type="button" data-merge-action="analyze" data-i18n="merge.analyze">Compare and preview merge</button>
@@ -81,6 +82,7 @@
               <div id="mergeSummary" class="merge-summary hidden"></div>
               <div id="mergeReviewActions" class="merge-review-actions hidden">
                 <label id="mergeSchemaAckRow" class="merge-check hidden"><input id="mergeSchemaAck" type="checkbox" /> <span data-i18n="merge.schemaAck">I reviewed the schema mismatch with the built-in original.</span></label>
+                <label id="mergeFormatRow" class="merge-format-row"><span data-i18n="merge.resultFormat">Result format</span><select id="mergeFormatSource"></select></label>
                 <button id="mergeSaveButton" class="merge-primary-action" type="button" data-merge-action="save" data-i18n="merge.saveResult">Save merged result</button>
                 <button id="mergeValidateButton" type="button" data-merge-action="validate" data-i18n="merge.validate" disabled>Open saved Result for validation</button>
               </div>

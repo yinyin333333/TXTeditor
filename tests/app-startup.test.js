@@ -31,14 +31,17 @@ test("current app startup DOM ids are declared in index.html", () => {
   assert.equal(document.getElementById("gridHost")?.tagName, "SECTION");
 });
 
-test("Merge setup has symmetric inputs and no manual Result format control", () => {
+test("Merge setup exposes swap and Result format controls", () => {
   const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const elementsSource = readFileSync(new URL("../src/ui/app-elements.js", import.meta.url), "utf8");
   const controllerSource = readFileSync(new URL("../src/ui/controllers/merge-controller.js", import.meta.url), "utf8");
-  assert.doesNotMatch(indexHtml, /data-merge-action="swap"|data-i18n="merge\.swap"/);
-  assert.doesNotMatch(indexHtml, /id="mergeFormatSource"|data-i18n="merge\.resultFormat"/);
-  assert.doesNotMatch(elementsSource, /mergeFormatSource/);
-  assert.doesNotMatch(controllerSource, /mergeFormatSource|setMergeFormatSource|swapInputs/);
+  assert.match(indexHtml, /data-merge-action="swap-inputs" data-i18n="merge\.swapInputs"/);
+  assert.match(indexHtml, /id="mergeFormatSource"/);
+  assert.match(indexHtml, /data-i18n="merge\.resultFormat"/);
+  assert.match(elementsSource, /mergeFormatRow/);
+  assert.match(elementsSource, /mergeFormatSource/);
+  assert.match(controllerSource, /mergeFormatSource|setMergeFormatSource/);
+  assert.match(controllerSource, /swapInputs/);
 
   const setupStart = indexHtml.indexOf('id="mergeSetup"');
   const setupEnd = indexHtml.indexOf("</div>", setupStart);

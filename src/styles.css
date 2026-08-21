@@ -2508,6 +2508,7 @@ details:not([open]) .problem-file-header::before {
 .merge-setup.hidden,
 .merge-summary.hidden,
 .merge-review-actions.hidden,
+.merge-format-row.hidden,
 .merge-file-toolbar.hidden,
 .merge-check.hidden,
 .merge-conflicts-panel.hidden {
@@ -2689,7 +2690,7 @@ details:not([open]) .problem-file-header::before {
 
 .merge-action-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -2719,6 +2720,24 @@ details:not([open]) .problem-file-header::before {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.merge-format-row {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.merge-format-row select {
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--button-border);
+  border-radius: 4px;
 }
 
 .merge-check input {
@@ -2994,7 +3013,7 @@ details:not([open]) .problem-file-header::before {
 
 .merge-conflict-values {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 7px;
 }
 
