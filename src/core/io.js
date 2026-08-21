@@ -6,6 +6,7 @@ export {
   listWorkspaceNative,
   openFilesNative,
   pickOpenFilePathsNative,
+  pickSaveFilePathNative,
   openNativePaths,
   openNativePathsBulk,
   openWorkspaceNative,
@@ -14,7 +15,8 @@ export {
   saveDocumentNative,
   saveTextNative,
   startupOpenPathsNative,
-  takePendingOpenPathsNative
+  takePendingOpenPathsNative,
+  writeMergeOutputNative
 } from "./platform/file-io.js";
 export {
   closeWindow,

@@ -331,6 +331,19 @@ export function createDocumentController({
     }
   }
 
+  async function openWorkspacePath(path, {
+    includeSubfolders = !state.excludeWorkspaceSubfolders,
+    persist = true
+  } = {}) {
+    if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
+    const workspacePath = String(path ?? "").trim();
+    if (!workspacePath) throw new Error("A workspace folder path is required.");
+    const workspace = await listWorkspaceNative(workspacePath, null, { includeSubfolders });
+    if (!workspace?.path) throw new Error(`Could not open workspace folder: ${workspacePath}`);
+    activateWorkspace(workspace, includeSubfolders, persist);
+    return workspace;
+  }
+
   async function openFolder() {
     try {
       if (!isTauriRuntime()) return showError(tText("error.openFolderDesktop"));
@@ -786,6 +799,7 @@ export function createDocumentController({
     openDroppedNativePaths,
     openFile,
     openFolder,
+    openWorkspacePath,
     restoreWorkspace,
     openJsonDocumentPath,
     saveAs,

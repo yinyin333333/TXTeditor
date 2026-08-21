@@ -61,7 +61,16 @@ test("locale catalogs only retain deliberate product, protocol, or universal UI 
     "app.title",
     "settings.vectorEngine",
     "search.cellStatus",
-    "common.ok"
+    "common.ok",
+    "merge.inputA",
+    "merge.inputB",
+    "merge.change.source.a",
+    "merge.change.source.b",
+    "merge.sources.compact",
+    "merge.format.description",
+    "merge.newline.LF",
+    "merge.newline.CRLF",
+    "merge.newline.CR"
   ]);
   for (const locale of SUPPORTED_LOCALES.filter((locale) => locale !== "enUS")) {
     for (const [key, english] of Object.entries(catalogs.enUS)) {

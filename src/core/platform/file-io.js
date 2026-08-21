@@ -80,6 +80,29 @@ export async function pickOpenFilePathsNative(invokeFn = null) {
   return Array.isArray(paths) ? paths : [];
 }
 
+
+export async function pickSaveFilePathNative(defaultName, invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  return invoke("save_file_dialog", { defaultName });
+}
+
+export async function writeMergeOutputNative({
+  outputPath,
+  kind,
+  files,
+  overwrite = false,
+  protectedPaths = []
+}, invokeFn = null) {
+  const invoke = invokeFn ?? (await tauriApi()).invoke;
+  return invoke("write_merge_output_safe", {
+    outputPath,
+    kind,
+    files,
+    overwrite,
+    protectedPaths
+  });
+}
+
 export async function openFilesNative(DocumentType) {
   const api = await tauriApi();
   const paths = await pickOpenFilePathsNative(api.invoke);
