@@ -34,8 +34,6 @@ export function createShellController({
   showError,
   lintPathKey,
   escapeHtml,
-  renderMergeUi = () => {},
-  beforeSelectRegularDocument = () => {},
   documentRef = document
 }) {
   const collapsedFileGroups = new Set();
@@ -97,29 +95,22 @@ export function createShellController({
     els.sidebar?.classList.toggle("hidden", !state.sidebarVisible);
     els.problemsPanel?.classList.toggle("hidden", !state.problemsVisible);
     for (const btn of documentRef.querySelectorAll("[data-bottom-tab]")) {
-      if (btn.dataset.bottomTab === "merge-conflicts") btn.classList.toggle("hidden", state.activity !== "merge");
       btn.classList.toggle("active", btn.dataset.bottomTab === state.bottomTab);
     }
-    if (els.explorerView) els.explorerView.classList.toggle("hidden", state.activity !== "explorer");
-    if (els.mergeView) els.mergeView.classList.toggle("hidden", state.activity !== "merge");
     if (els.problemsList) els.problemsList.classList.toggle("hidden", state.bottomTab !== "problems");
     if (els.logList) els.logList.classList.toggle("hidden", state.bottomTab !== "log");
-    if (els.mergeConflictsPanel) els.mergeConflictsPanel.classList.toggle("hidden", state.bottomTab !== "merge-conflicts");
     els.emptyState.classList.toggle("hidden", documentOpen);
     updateDiagnosticIndicators();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
-      button.classList.toggle("active", state.activity === "explorer");
+      button.classList.toggle("active", state.sidebarVisible);
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
-      button.classList.toggle("active", state.activity === "problems");
-    }
-    for (const button of documentRef.querySelectorAll("[data-command='show-merge']")) {
-      button.classList.toggle("active", state.activity === "merge");
+      button.classList.toggle("active", state.problemsVisible);
     }
     for (const button of documentRef.querySelectorAll("[data-command='close-all']")) {
       button.disabled = !state.workspace && !state.docs.length;
     }
-    const tableDocumentOpen = documentOpen && isTableDocument(activeDoc()) && activeDoc()?.kind !== "merge";
+    const tableDocumentOpen = documentOpen && isTableDocument(activeDoc());
     for (const button of documentRef.querySelectorAll("[data-command='toggle-freeze-row']")) {
       button.disabled = !tableDocumentOpen;
       button.classList.toggle("active", tableDocumentOpen && state.freezeRow);
@@ -132,7 +123,6 @@ export function createShellController({
       button.classList.toggle("active", state.colorizeColumns);
     }
     renderLintControls();
-    els.lintControls?.classList.toggle("hidden", state.activity === "merge" && state.bottomTab === "merge-conflicts");
     for (const button of documentRef.querySelectorAll("[data-command='toggle-lint']")) {
       button.classList.toggle("active", state.lint.enabled);
       button.textContent = state.lint.enabled ? tText("lint.on") : tText("lint.offSummary");
@@ -148,7 +138,7 @@ export function createShellController({
         const titleClass = severity ? `tab-title tab-title-${severity}` : "tab-title";
         const kindClass = isJsonDocument(doc) ? "tab-json" : "tab-table";
         const dirty = doc.dirty ? `<span class="tab-dirty-dot" title="${tText("tab.unsavedChanges")}">●</span>` : "";
-        return `<button class="${state.activity !== "merge" && index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
+        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
       })
       .join("");
     const workspaceFiles = renderWorkspaceFileList({
@@ -160,31 +150,25 @@ export function createShellController({
       problemBadgeForPath
     });
     els.fileList.innerHTML = state.docs
-      .map((doc, index) => `<button class="${state.activity !== "merge" && index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
+      .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
       .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
-    renderMergeUi();
     renderProblemsPanelIfNeeded();
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
-        beforeSelectRegularDocument();
         selectTab(Number(button.dataset.tab)).catch(showError);
       });
     }
     for (const button of documentRef.querySelectorAll("[data-close-tab]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
-        beforeSelectRegularDocument();
         closeTab(Number(button.dataset.closeTab)).catch(showError);
       });
     }
     for (const button of documentRef.querySelectorAll("[data-open-path]")) {
-      button.addEventListener("click", async () => {
-        beforeSelectRegularDocument();
-        return openDroppedNativePaths(
-          [button.dataset.openPath], { requireCurrentJsonMode: true }
-        ).catch(showError);
-      });
+      button.addEventListener("click", async () => openDroppedNativePaths(
+        [button.dataset.openPath], { requireCurrentJsonMode: true }
+      ).catch(showError));
     }
     for (const details of els.fileList.querySelectorAll("details[data-file-group]")) {
       details.addEventListener("toggle", () => {
@@ -201,7 +185,6 @@ export function createShellController({
     if (index < 0 || index >= state.docs.length) return Promise.resolve();
     commitActiveEditor();
     saveSelectionState();
-    beforeSelectRegularDocument();
     state.active = index;
     const doc = activeDoc();
     if (isTableDocument(doc)) applyFreezeToDoc(doc);

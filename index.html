@@ -11,7 +11,6 @@
       <aside class="activity" aria-label="Activity" data-i18n-aria-label="aria.activity">
         <button class="activity-button active" data-command="show-explorer" data-i18n-title="activity.explorer" title="Explorer">E</button>
         <button class="activity-button" data-command="show-problems" data-i18n-title="activity.problems" title="Problems">P</button>
-        <button class="activity-button" data-command="show-merge" data-i18n-title="activity.merge" title="Merge">M</button>
       </aside>
 
       <div id="layoutRoot" class="layout-root">
@@ -20,81 +19,17 @@
         <section id="dockLeft" class="dock dock-left" data-dock-edge="left" aria-label="Left dock" data-i18n-aria-label="aria.leftDock">
           <aside id="sidebar" class="sidebar" aria-label="Workspace" data-i18n-aria-label="aria.workspace" data-dock-panel="explorer">
             <div id="sidebarResizer" class="sidebar-resizer pane-resizer" aria-hidden="true"></div>
-            <div id="explorerView" class="sidebar-view explorer-view">
-              <header class="sidebar-header" data-i18n="app.title">TXTeditor</header>
-              <div class="sidebar-actions">
-                <button data-command="open-file" data-i18n="toolbar.openFile">Open File</button>
-                <button data-command="open-folder" data-i18n="toolbar.openFolder">Open Folder</button>
-                <button data-command="merge-with-folder" data-i18n="command.mergeWithFolder">Merge Folder…</button>
-              </div>
-              <div class="sidebar-search">
-                <span class="sidebar-search-icon" aria-hidden="true"></span>
-                <input id="explorerFilter" class="sidebar-filter" type="search" data-i18n-placeholder="explorer.search" data-i18n-aria-label="explorer.search" placeholder="Search file" aria-label="Search file" autocomplete="off" spellcheck="false" />
-                <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files" data-i18n-aria-label="aria.matchingFiles"></div>
-              </div>
-              <div id="fileList" class="file-list"></div>
+            <header class="sidebar-header" data-i18n="app.title">TXTeditor</header>
+            <div class="sidebar-actions">
+              <button data-command="open-file" data-i18n="toolbar.openFile">Open File</button>
+              <button data-command="open-folder" data-i18n="toolbar.openFolder">Open Folder</button>
             </div>
-            <section id="mergeView" class="sidebar-view merge-view hidden" aria-label="Merge" data-i18n-aria-label="merge.title">
-              <header class="sidebar-header merge-header">
-                <span data-i18n="merge.title">Merge</span>
-                <span id="mergeStageBadge" class="merge-stage-badge" data-i18n="merge.stage.setup">Setup</span>
-              </header>
-              <div id="mergeSetup" class="merge-setup">
-                <label class="merge-field">
-                  <span data-i18n="merge.gameVersion">Game version</span>
-                  <select id="mergeGameVersion">
-                    <option value="3.3">3.3</option>
-                    <option value="3.2">3.2</option>
-                    <option value="3.1">3.1</option>
-                    <option value="2.4">2.4</option>
-                    <option value="1.13c">1.13c</option>
-                  </select>
-                </label>
-                <label class="merge-field">
-                  <span data-i18n="merge.inputType">Input type</span>
-                  <select id="mergeKind">
-                    <option value="file" data-i18n="merge.inputType.file">TXT file ↔ TXT file</option>
-                    <option value="folder" data-i18n="merge.inputType.folder">Folder ↔ Folder</option>
-                  </select>
-                </label>
-                <label class="merge-field merge-path-field">
-                  <span data-i18n="merge.inputA">A</span>
-                  <span class="merge-path-row"><input id="mergeAPath" type="text" readonly data-i18n-placeholder="merge.placeholder.a" placeholder="Select the first file or folder" /><button type="button" data-merge-action="pick-a" aria-label="Choose A" title="Choose A" data-i18n-aria-label="merge.path.pick" data-i18n-title="merge.path.pick">…</button></span>
-                </label>
-                <label class="merge-field merge-path-field">
-                  <span data-i18n="merge.inputB">B</span>
-                  <span class="merge-path-row"><input id="mergeBPath" type="text" readonly data-i18n-placeholder="merge.placeholder.b" placeholder="Select the second file or folder" /><button type="button" data-merge-action="pick-b" aria-label="Choose B" title="Choose B" data-i18n-aria-label="merge.path.pick" data-i18n-title="merge.path.pick">…</button></span>
-                </label>
-                <label class="merge-field merge-path-field">
-                  <span data-i18n="merge.result">Result</span>
-                  <span class="merge-path-row"><input id="mergeOutputPath" type="text" data-i18n-placeholder="merge.placeholder.output" placeholder="Output is not created until Save merged result" /><button type="button" data-merge-action="pick-output" aria-label="Choose save destination" title="Choose save destination" data-i18n-aria-label="merge.path.pick" data-i18n-title="merge.path.pick">…</button></span>
-                </label>
-                <label id="mergeIncludeSubfoldersRow" class="merge-check"><input id="mergeIncludeSubfolders" type="checkbox" checked /> <span data-i18n="merge.includeSubfolders">Include subfolders</span></label>
-                <div class="merge-action-row">
-                  <button type="button" data-merge-action="reset" data-i18n="merge.reset">Reset</button>
-                </div>
-                <button id="mergeAnalyzeButton" class="merge-primary-action" type="button" data-merge-action="analyze" data-i18n="merge.analyze">Compare and preview merge</button>
-                <p class="merge-supporting-copy" data-i18n="merge.description">Compare A and B against the built-in original and preview the merged result before anything is saved.</p>
-              </div>
-              <div id="mergeStatus" class="merge-status" aria-live="polite" data-i18n="merge.status.default">Choose A, B, and a save destination. Nothing is saved during preview.</div>
-              <div id="mergeSourceSummary" class="merge-source-summary hidden"></div>
-              <div id="mergeSummary" class="merge-summary hidden"></div>
-              <div id="mergeReviewActions" class="merge-review-actions hidden">
-                <label id="mergeSchemaAckRow" class="merge-check hidden"><input id="mergeSchemaAck" type="checkbox" /> <span data-i18n="merge.schemaAck">I reviewed the schema mismatch with the built-in original.</span></label>
-                <button id="mergeSaveButton" class="merge-primary-action" type="button" data-merge-action="save" data-i18n="merge.saveResult">Save merged result</button>
-                <button id="mergeValidateButton" type="button" data-merge-action="validate" data-i18n="merge.validate" disabled>Open saved Result for validation</button>
-              </div>
-              <div id="mergeFileToolbar" class="merge-file-toolbar hidden">
-                <input id="mergeFileFilter" type="search" data-i18n-placeholder="merge.filter" placeholder="Filter merge files" autocomplete="off" spellcheck="false" />
-                <select id="mergeStatusFilter" aria-label="Merge file status filter" data-i18n-aria-label="merge.statusFilter">
-                  <option value="all" data-i18n="merge.statusFilter.all">All</option>
-                  <option value="changed" data-i18n="merge.statusFilter.changed">Changed / conflicts</option>
-                  <option value="conflict" data-i18n="merge.statusFilter.conflict">Conflicts</option>
-                  <option value="custom" data-i18n="merge.statusFilter.custom">Custom</option>
-                </select>
-              </div>
-              <div id="mergeFileList" class="merge-file-list"></div>
-            </section>
+            <div class="sidebar-search">
+              <span class="sidebar-search-icon" aria-hidden="true"></span>
+              <input id="explorerFilter" class="sidebar-filter" type="search" data-i18n-placeholder="explorer.search" data-i18n-aria-label="explorer.search" placeholder="Search file" aria-label="Search file" autocomplete="off" spellcheck="false" />
+              <div id="explorerSearchResults" class="sidebar-search-results hidden" role="listbox" aria-label="Matching files" data-i18n-aria-label="aria.matchingFiles"></div>
+            </div>
+            <div id="fileList" class="file-list"></div>
           </aside>
         </section>
 
@@ -104,7 +39,6 @@
             <button data-command="open-file" data-i18n="toolbar.open">Open</button>
             <button data-command="save-file" data-i18n="toolbar.save">Save</button>
             <button data-command="save-as" data-i18n="toolbar.saveAs">Save As</button>
-            <button data-command="merge-with-current" data-i18n="command.mergeWithFile">Merge with…</button>
             <button data-command="close-all" data-i18n="toolbar.closeAll" disabled>Close All</button>
             <button data-command="undo" data-i18n="toolbar.undo">Undo</button>
             <button data-command="redo" data-i18n="toolbar.redo">Redo</button>
@@ -142,19 +76,12 @@
               <div class="bottom-tabs">
                 <button class="bottom-tab active" data-bottom-tab="problems"><span data-i18n="activity.problems">Problems</span> <span id="lintSummary" class="lint-summary"></span></button>
                 <button class="bottom-tab" data-bottom-tab="log" data-i18n="problems.log">Log</button>
-                <button class="bottom-tab" data-bottom-tab="merge-conflicts"><span data-i18n="merge.changesTab">Merge Review</span> <span id="mergeConflictCount" class="lint-summary"></span></button>
               </div>
               <div id="lintControls" class="lint-controls"></div>
             </header>
             <div id="lintRulesPanel" class="lint-rules-panel hidden" aria-label="Lint rules" data-i18n-aria-label="lint.rules"></div>
             <div id="problemsList" class="problems-list"></div>
             <div id="logList" class="log-list hidden"></div>
-            <div id="mergeConflictsPanel" class="merge-conflicts-panel hidden">
-              <div id="mergeConflictsList" class="merge-conflicts-list"></div>
-              <div id="mergeConflictDetails" class="merge-conflict-details">
-                <p class="merge-conflict-empty" data-i18n="merge.changes.empty">Select a change to inspect A, B, and Result values.</p>
-              </div>
-            </div>
           </section>
         </section>
       </div>
@@ -220,29 +147,6 @@
         <div class="modal-actions">
           <button data-external-change-choice="reload" data-i18n="dialog.reload">Reload</button>
           <button data-external-change-choice="keep" data-i18n="dialog.keepChanges">Keep My Changes</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="mergeDirtyDialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="mergeDirtyTitle">
-      <div class="modal merge-dirty-modal">
-        <h2 id="mergeDirtyTitle" data-i18n="merge.dirty.title">Unsaved changes in A</h2>
-        <p id="mergeDirtyDialogText" data-i18n="merge.dirty.text">Choose how the current editor state should be used for this merge.</p>
-        <div class="modal-actions merge-dirty-actions">
-          <button data-merge-dirty-choice="snapshot" data-i18n="merge.dirty.snapshot">Use in-memory snapshot</button>
-          <button data-merge-dirty-choice="save" data-i18n="merge.dirty.save">Save first, then use disk file</button>
-          <button data-merge-dirty-choice="cancel" data-i18n="merge.dirty.cancel">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="mergeOverwriteDialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="mergeOverwriteTitle">
-      <div class="modal merge-overwrite-modal">
-        <h2 id="mergeOverwriteTitle" data-i18n="merge.overwrite.title">Replace existing output?</h2>
-        <p id="mergeOverwriteDialogText" class="merge-overwrite-dialog-text" data-i18n="merge.overwrite.text">An output already exists at the selected path.</p>
-        <div class="modal-actions">
-          <button data-merge-overwrite-choice="cancel" data-i18n="common.cancel">Cancel</button>
-          <button data-merge-overwrite-choice="replace" data-i18n="merge.overwrite.replace">Replace</button>
         </div>
       </div>
     </div>

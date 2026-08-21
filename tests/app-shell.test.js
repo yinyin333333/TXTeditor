@@ -23,7 +23,6 @@ function pathKey(path) {
 }
 
 const INDEX_HTML = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const STYLES_CSS = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 function explorerHarness({ docs = [], workspace = null } = {}) {
   const originalDocument = globalThis.document;
@@ -31,7 +30,6 @@ function explorerHarness({ docs = [], workspace = null } = {}) {
   const { document } = installFakeAppStartupDom({ indexHtml: INDEX_HTML });
   const opened = [];
   const state = {
-    activity: "explorer",
     docs,
     active: 0,
     workspace,
@@ -51,7 +49,6 @@ function explorerHarness({ docs = [], workspace = null } = {}) {
     "logList",
     "emptyState",
     "lintSummary",
-    "lintControls",
     "tabs",
     "fileList",
     "explorerFilter",
@@ -103,33 +100,6 @@ function explorerHarness({ docs = [], workspace = null } = {}) {
     }
   };
 }
-
-test("Merge Review tab is visible only in Merge and hides lint controls while active", () => {
-  assert.match(STYLES_CSS, /\.lint-controls\.hidden\s*\{\s*display:\s*none;\s*\}/);
-  const harness = explorerHarness();
-  const mergeTab = harness.document.querySelector("[data-bottom-tab='merge-conflicts']");
-  const lintControls = harness.els.lintControls;
-
-  try {
-    harness.controller.renderChrome();
-    assert.equal(mergeTab.classList.contains("hidden"), true);
-    assert.equal(lintControls.classList.contains("hidden"), false);
-
-    harness.state.activity = "merge";
-    harness.state.bottomTab = "merge-conflicts";
-    harness.controller.renderChrome();
-    assert.equal(mergeTab.classList.contains("hidden"), false);
-    assert.equal(lintControls.classList.contains("hidden"), true);
-
-    harness.state.activity = "problems";
-    harness.state.bottomTab = "problems";
-    harness.controller.renderChrome();
-    assert.equal(mergeTab.classList.contains("hidden"), true);
-    assert.equal(lintControls.classList.contains("hidden"), false);
-  } finally {
-    harness.restore();
-  }
-});
 
 test("workspace Explorer rendering preserves open-file suppression, grouping, badges, and escaping", () => {
   const workspace = {

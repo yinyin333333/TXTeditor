@@ -6,7 +6,6 @@ mod launch_paths;
 mod lsp_file_watcher;
 mod lsp_protocol;
 mod lsp_service;
-mod merge_output;
 mod native_paths;
 mod reference_data;
 mod workspace_files;
@@ -34,7 +33,6 @@ pub fn run() {
             file_io::read_text_files,
             file_io::write_text_file_safe,
             file_io::write_text_file_chunk_safe,
-            merge_output::write_merge_output_safe,
             launch_paths::startup_open_paths,
             workspace_files::list_workspace_files,
             workspace_files::list_sibling_txt_files,

@@ -21,7 +21,7 @@ export function duplicateRowPairs(table, columnName, { ignoredValues = new Set([
   return pairs;
 }
 
-export function duplicateIdentity(value, comparison) {
+function duplicateIdentity(value, comparison) {
   if (comparison === "fixed4cc") return fixed4Key(value);
   if (comparison === "ascii-ci") return asciiLower(String(value ?? ""));
   if (comparison === "integer") {
