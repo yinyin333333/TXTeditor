@@ -262,11 +262,11 @@ test("native exit explicitly reaps active and starting Vector-LSP children", () 
 });
 
 test("Vector-LSP packaging contract keeps adjacent executable and contrib resources", () => {
-  const rustLspService = readFileSync(new URL("../src-tauri/src/lsp_service.rs", import.meta.url), "utf8");
+  const rustLspLaunch = readFileSync(new URL("../src-tauri/src/lsp_launch.rs", import.meta.url), "utf8");
   const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
-  assert.match(rustLspService, /std::env::current_exe\(\)/);
-  assert.match(rustLspService, /candidates\.push\(dir\.join\(exe\)\)/);
+  assert.match(rustLspLaunch, /std::env::current_exe\(\)/);
+  assert.match(rustLspLaunch, /candidates\.push\(dir\.join\(exe\)\)/);
   assert.match(releaseWorkflow, /repository:\s+yinyin333333\/vector-lsp/);
   assert.doesNotMatch(releaseWorkflow, /repository:\s+eezstreet\/vector-lsp/);
   assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/target\/x86_64-pc-windows-msvc\/release\/vector-lsp\.exe": "vector-lsp\.exe"/);

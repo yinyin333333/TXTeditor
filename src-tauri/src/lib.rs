@@ -4,6 +4,7 @@ mod config;
 mod file_io;
 mod launch_paths;
 mod lsp_file_watcher;
+mod lsp_launch;
 mod lsp_protocol;
 mod lsp_service;
 mod native_paths;
