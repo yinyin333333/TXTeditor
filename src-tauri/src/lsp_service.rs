@@ -324,6 +324,7 @@ fn configure_editor_command(command: &mut Command, spec: &EditorLaunchSpec) {
         "VLSP_SCHEMA_VARIANT",
         "VLSP_REFERENCE_VARIANT",
         "VLSP_PLUGIN_PATH",
+        "VLSP_PLUGIN_TIMEOUT_MS",
         "VLSP_WORKSPACE_PATH",
         "VLSP_ENCODING",
         "VLSP_DEBUG_LOGGING",
@@ -2480,6 +2481,7 @@ mod tests {
         let mut command = Command::new(&spec.binary);
         command.env("VLSP_SINGLE_SHOT", "true");
         command.env("VLSP_IO_TYPE", "tcp");
+        command.env("VLSP_PLUGIN_TIMEOUT_MS", "60000");
         command.env("VLSP_JSON_DIAGNOSTICS", "true");
         command.env("VLSP_JSON_DUPLICATE_IDS_ACTION", "error");
         command.env("VLSP_JSON_STRING_FORMAT_ACTION", "error");
@@ -2506,6 +2508,7 @@ mod tests {
             .collect::<HashMap<_, _>>();
         assert_eq!(environment.get("VLSP_IO_TYPE"), Some(&None));
         assert_eq!(environment.get("VLSP_SINGLE_SHOT"), Some(&None));
+        assert_eq!(environment.get("VLSP_PLUGIN_TIMEOUT_MS"), Some(&None));
         assert_eq!(
             environment.get("VLSP_ENCODING"),
             Some(&Some("auto".to_string()))
