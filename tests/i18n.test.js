@@ -44,6 +44,7 @@ test("i18n persists locale and escapes named parameters without changing source 
   assert.equal(readLocale(memory), "zhCN");
   assert.equal(t("lint.lintingProfile", { profile: "<calc&itemtype>" }, "koKR"), "&lt;calc&amp;itemtype&gt; 검사 중...");
   assert.equal(t("lint.lintingProfile", { profile: "gem" }, "zhCN").includes("gem"), true);
+  assert.equal(tText("error.saveTargetAlreadyOpen", {}, "koKR"), "선택한 경로가 이미 다른 문서에서 열려 있습니다.");
 });
 
 test("command, prompt, search, and shortcut catalogs do not silently copy English UI text", () => {

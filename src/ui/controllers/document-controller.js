@@ -546,7 +546,7 @@ export function createDocumentController({
     const target = normalizePath(path);
     if (target && state.docs.some((candidate) => candidate !== doc
       && normalizePath(candidate?.path || "") === target)) {
-      throw new Error("The selected path is already open in another document.");
+      throw new Error(tText("error.saveTargetAlreadyOpen"));
     }
     if (!isJsonDocument(doc)) return true;
     return isEditableLocalizationJsonPath(path)
