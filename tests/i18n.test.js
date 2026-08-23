@@ -71,13 +71,19 @@ test("locale catalogs only retain deliberate product, protocol, or universal UI 
   }
 });
 
-test("locale changes re-run Legacy lint and force a Vector-LSP restart without editing documents", async () => {
+test("locale changes re-run Legacy lint and refresh an active Vector-LSP session in place", async () => {
   const memory = storage();
   const ownerDocument = { documentElement: {}, querySelectorAll: () => [], querySelector: () => null };
   const calls = [];
   const state = {
     locale: "enUS",
-    lsp: { started: true, workspacePath: "E:\\Workspace", contextMode: "workspace", referenceRootPath: "", includeSubfolders: true }
+    lsp: { started: true, generation: 7, workspacePath: "E:\\Workspace", contextMode: "workspace", referenceRootPath: "", includeSubfolders: true }
+  };
+  const lspController = {
+    invalidateHover: (...args) => calls.push(["hover", ...args]),
+    changeLocale: async (...args) => calls.push(["change-locale", ...args]),
+    startWorkspace: async (...args) => calls.push(["start", ...args]),
+    ensureStandaloneSession: async (...args) => calls.push(["standalone", ...args])
   };
   const controller = createLocaleController({
     state,
@@ -85,11 +91,7 @@ test("locale changes re-run Legacy lint and force a Vector-LSP restart without e
     ownerDocument,
     legacyActive: () => false,
     scheduleLegacyLintFull: (...args) => calls.push(["legacy", ...args]),
-    lspController: {
-      invalidateHover: (...args) => calls.push(["hover", ...args]),
-      startWorkspace: async (...args) => calls.push(["start", ...args]),
-      ensureStandaloneSession: async (...args) => calls.push(["standalone", ...args])
-    },
+    lspController,
     activeDoc: () => ({ name: "items.txt" }),
     setLintDiagnostics: (diagnostics) => calls.push(["diagnostics", diagnostics]),
     updateGridDiagnostics: () => calls.push(["grid"]),
@@ -101,14 +103,48 @@ test("locale changes re-run Legacy lint and force a Vector-LSP restart without e
   assert.equal(state.locale, "zhCN");
   assert.equal(ownerDocument.documentElement.lang, "zh-CN");
   assert.equal(readLocale(memory), "zhCN");
+  assert.deepEqual(calls.find(([kind]) => kind === "change-locale"), ["change-locale", "zhCN"]);
+  assert.equal(calls.some(([kind]) => kind === "start"), false);
+  assert.equal(calls.some(([kind]) => kind === "diagnostics" || kind === "grid"), false);
+  assert.equal(calls.some(([kind]) => kind === "legacy"), false);
+  assert.equal(calls.some(([kind]) => kind === "json-editor-locale"), true);
+
+  calls.length = 0;
+  lspController.changeLocale = async () => { throw new Error("writer stopped"); };
+  await controller.setLocale("koKR");
   assert.deepEqual(calls.find(([kind]) => kind === "start"), ["start", "E:\\Workspace", {
     forceRestart: true,
     contextMode: "workspace",
     referenceRootPath: "",
     includeSubfolders: true
   }]);
-  assert.equal(calls.some(([kind]) => kind === "legacy"), false);
-  assert.equal(calls.some(([kind]) => kind === "json-editor-locale"), true);
+
+  calls.length = 0;
+  let rejectOlderLocale;
+  lspController.changeLocale = (locale) => {
+    calls.push(["change-locale", locale]);
+    if (locale === "deDE") {
+      return new Promise((_resolve, reject) => { rejectOlderLocale = reject; });
+    }
+    return Promise.resolve();
+  };
+  const olderLocale = controller.setLocale("deDE");
+  const newerLocale = controller.setLocale("frFR");
+  rejectOlderLocale(new Error("stale locale notification failed"));
+  await Promise.all([olderLocale, newerLocale]);
+  assert.equal(state.locale, "frFR");
+  assert.equal(calls.some(([kind]) => kind === "start" || kind === "standalone"), false);
+
+  calls.length = 0;
+  let rejectStaleGeneration;
+  lspController.changeLocale = () => new Promise((_resolve, reject) => {
+    rejectStaleGeneration = reject;
+  });
+  const staleGeneration = controller.setLocale("jaJP");
+  state.lsp.generation = 8;
+  rejectStaleGeneration(new Error("old session stopped"));
+  await staleGeneration;
+  assert.equal(calls.some(([kind]) => kind === "start" || kind === "standalone"), false);
 
   const legacyCalls = [];
   const legacy = createLocaleController({

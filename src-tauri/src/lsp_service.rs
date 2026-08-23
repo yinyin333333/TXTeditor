@@ -1076,6 +1076,18 @@ fn normalize_lsp_locale(value: Option<&str>) -> &'static str {
     }
 }
 
+fn locale_configuration_notification(locale: Option<&str>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "workspace/didChangeConfiguration",
+        "params": {
+            "settings": {
+                "locale": normalize_lsp_locale(locale)
+            }
+        }
+    })
+}
+
 #[tauri::command]
 pub(crate) async fn lsp_reserve_generation(
     state: tauri::State<'_, LspManager>,
@@ -1355,6 +1367,19 @@ pub(crate) async fn lsp_stop(
 }
 
 #[tauri::command]
+pub(crate) fn lsp_change_locale(
+    locale: String,
+    generation: u64,
+    state: tauri::State<'_, LspManager>,
+) -> Result<(), String> {
+    let proc = get_lsp_proc(&state, generation)?;
+    queue_lsp_msg(
+        &proc,
+        locale_configuration_notification(Some(locale.as_str())),
+    )
+}
+
+#[tauri::command]
 pub(crate) async fn lsp_open_file(
     uri: String,
     version: u32,
@@ -1454,15 +1479,11 @@ pub(crate) async fn lsp_update_file_incremental(
     let proc = get_lsp_proc(&state, generation)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut documents = proc.documents.lock().unwrap();
-        let previous = documents
+        let current_version = documents
             .get(&uri)
-            .cloned()
+            .map(|document| document.version)
             .ok_or_else(|| format!("LSP document is not open: {uri}"))?;
-        require_newer_document_version(&uri, previous.version, version)?;
-        let mut next_lines = previous.lines.as_ref().clone();
-        for change in &changes {
-            apply_line_change(&mut next_lines, &change.range, &change.text);
-        }
+        require_newer_document_version(&uri, current_version, version)?;
         let content_changes: Vec<Value> = changes
             .iter()
             .map(|c| {
@@ -1475,14 +1496,7 @@ pub(crate) async fn lsp_update_file_incremental(
                 })
             })
             .collect();
-        documents.insert(
-            uri.clone(),
-            DocumentMirror {
-                version,
-                lines: Arc::new(next_lines),
-            },
-        );
-        if let Err(error) = queue_lsp_msg(
+        queue_lsp_msg(
             &proc,
             json!({
                 "jsonrpc": "2.0",
@@ -1492,10 +1506,19 @@ pub(crate) async fn lsp_update_file_incremental(
                     "contentChanges": content_changes
                 }
             }),
-        ) {
-            documents.insert(uri, previous);
-            return Err(error);
+        )?;
+
+        // Keep the mirror lock until its queued didChange is reflected locally,
+        // so diagnostics cannot observe the new version with the old lines.
+        // Arc::make_mut updates in place unless a reader already owns a snapshot.
+        let document = documents
+            .get_mut(&uri)
+            .expect("validated open document must remain present while locked");
+        let lines = Arc::make_mut(&mut document.lines);
+        for change in &changes {
+            apply_line_change(lines, &change.range, &change.text);
         }
+        document.version = version;
         Ok(())
     })
     .await
@@ -2412,6 +2435,14 @@ mod tests {
         assert_eq!(normalize_lsp_locale(Some("koKR")), "koKR");
         assert_eq!(normalize_lsp_locale(Some("zh-CN")), "zhCN");
         assert_eq!(normalize_lsp_locale(Some("unsupported")), "enUS");
+        assert_eq!(
+            locale_configuration_notification(Some("ko-KR")),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "workspace/didChangeConfiguration",
+                "params": { "settings": { "locale": "koKR" } }
+            })
+        );
     }
 
     #[test]

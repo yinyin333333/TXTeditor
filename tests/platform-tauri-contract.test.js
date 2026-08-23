@@ -11,6 +11,7 @@ import {
   closeWindow,
   getConfig,
   isTauriRuntime,
+  lspChangeLocale,
   lspCloseFile,
   lspDefinition,
   lspFieldMetadata,
@@ -218,6 +219,7 @@ test("Tauri command boundary preserves JS invoke names and Rust registrations", 
     "list_sibling_txt_files",
     "list_workspace_files",
     "load_lint_reference_dataset",
+    "lsp_change_locale",
     "lsp_close_file",
     "lsp_definition",
     "lsp_field_metadata",
@@ -400,6 +402,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
     await lspStart("E:\\Workspace", 7);
     await lspStart("E:\\Mod\\TXT", 8, "sibling", "E:\\Workspace", true, "koKR");
     await lspStart("E:\\Workspace", 9, "workspace", "", false);
+    await lspChangeLocale("ko-KR", 9);
     await lspStop(9);
     await lspOpenFile("file:///items.txt", 1, "id\n1", 7);
     await lspUpdateFile("file:///items.txt", 2, "id\n2", 7);
@@ -459,6 +462,7 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", generation: 7, locale: "enUS" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Mod\\TXT", contextMode: "sibling", referenceRootPath: "E:\\Workspace", generation: 8, locale: "koKR" }],
       ["invoke", "lsp_start", { workspacePath: "E:\\Workspace", includeSubfolders: false, generation: 9, locale: "enUS" }],
+      ["invoke", "lsp_change_locale", { locale: "koKR", generation: 9 }],
       ["invoke", "lsp_stop", { generation: 9 }],
       ["invoke", "lsp_open_file", { uri: "file:///items.txt", version: 1, text: "id\n1", generation: 7 }],
       ["invoke", "lsp_update_file", { uri: "file:///items.txt", version: 2, text: "id\n2", generation: 7 }],
@@ -477,6 +481,41 @@ test("platform facade preserves Tauri command payload shapes", async () => {
       ["unlisten", "lsp-log"],
       ["unlisten", "lsp-ready"],
       ["unlisten", "lsp-stopped"]
+    ]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Vector-LSP locale notifications are serialized", async () => {
+  const originalWindow = globalThis.window;
+  const calls = [];
+  let releaseFirst;
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: (command, args) => {
+          calls.push([command, args]);
+          if (calls.length === 1) return new Promise((resolve) => { releaseFirst = resolve; });
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+
+  try {
+    const first = lspChangeLocale("de-DE", 4);
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = lspChangeLocale("fr-FR", 4);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, [["lsp_change_locale", { locale: "deDE", generation: 4 }]]);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    assert.deepEqual(calls, [
+      ["lsp_change_locale", { locale: "deDE", generation: 4 }],
+      ["lsp_change_locale", { locale: "frFR", generation: 4 }]
     ]);
   } finally {
     if (originalWindow === undefined) delete globalThis.window;

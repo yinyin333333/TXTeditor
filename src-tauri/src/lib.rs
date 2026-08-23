@@ -43,6 +43,7 @@ pub fn run() {
             lsp_service::lsp_reserve_generation,
             lsp_service::lsp_start,
             lsp_service::lsp_stop,
+            lsp_service::lsp_change_locale,
             lsp_service::lsp_open_file,
             lsp_service::lsp_update_file,
             lsp_service::lsp_update_file_incremental,

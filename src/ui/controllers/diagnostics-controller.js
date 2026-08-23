@@ -57,6 +57,8 @@ export function createDiagnosticsController({
   const collapsedProblemFiles = new Set();
   let indexedSource = null;
   let diagnosticIndex = null;
+  let problemButtonsById = null;
+  let activeProblemIds = new Set();
 
   function rebuildDiagnosticIndex() {
     const byFile = new Map();
@@ -315,7 +317,9 @@ export function createDiagnosticsController({
         else collapsedProblemFiles.add(fileKey);
       });
     }
-    for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
+    const problemButtons = els.problemsList.querySelectorAll("[data-diagnostic-id]");
+    rebuildProblemButtonIndex(problemButtons);
+    for (const button of problemButtons) {
       button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
       button.addEventListener("contextmenu", (event) => openDiagnosticContextMenu(event, button));
       button.addEventListener("keydown", (event) => handleDiagnosticKeydown(event, button));
@@ -327,16 +331,39 @@ export function createDiagnosticsController({
 
   function updateActiveProblemHighlight({ scroll = false } = {}) {
     if (!els.problemsList) return;
-    const activeIds = activeProblemDiagnosticIds();
-    let activeButton = null;
-    for (const button of els.problemsList.querySelectorAll("[data-diagnostic-id]")) {
-      const itemState = activeProblemItemState(activeIds.has(button.dataset.diagnosticId));
+    if (!problemButtonsById) rebuildProblemButtonIndex(els.problemsList.querySelectorAll("[data-diagnostic-id]"));
+    const nextActiveIds = activeProblemDiagnosticIds();
+    for (const id of activeProblemIds) {
+      if (!nextActiveIds.has(id)) updateProblemButtonState(id, false);
+    }
+    for (const id of nextActiveIds) {
+      if (!activeProblemIds.has(id)) updateProblemButtonState(id, true);
+    }
+    activeProblemIds = nextActiveIds;
+    const activeButton = scroll
+      ? [...nextActiveIds].flatMap((id) => problemButtonsById.get(id) ?? [])[0] ?? null
+      : null;
+    if (activeButton) activeButton.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  }
+
+  function rebuildProblemButtonIndex(buttons) {
+    problemButtonsById = new Map();
+    activeProblemIds = new Set();
+    for (const button of buttons) {
+      const id = button.dataset.diagnosticId;
+      if (!problemButtonsById.has(id)) problemButtonsById.set(id, []);
+      problemButtonsById.get(id).push(button);
+      if (button.classList.contains("problem-item-active-cell")) activeProblemIds.add(id);
+    }
+  }
+
+  function updateProblemButtonState(id, active) {
+    const itemState = activeProblemItemState(active);
+    for (const button of problemButtonsById.get(id) ?? []) {
       button.classList.toggle("problem-item-active-cell", itemState.active);
       if (itemState.ariaCurrent) button.setAttribute("aria-current", itemState.ariaCurrent);
       else button.removeAttribute("aria-current");
-      if (itemState.active && !activeButton) activeButton = button;
     }
-    if (scroll && activeButton) activeButton.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
   }
 
   function lintSummaryText() {

@@ -227,18 +227,27 @@ export function createLspDiagnosticsEventController({
 
     if (replacements.size > 0 && acceptsCurrentSession(generation)) {
       const replacedKeys = new Set(replacements.keys());
+      const currentDiagnosticsByFile = new Map();
+      const nextDiagnostics = [];
+      for (const diagnostic of state.lint.diagnostics) {
+        if (!replacedKeys.has(diagnostic.fileKey)) {
+          nextDiagnostics.push(diagnostic);
+          continue;
+        }
+        let currentDiagnostics = currentDiagnosticsByFile.get(diagnostic.fileKey);
+        if (!currentDiagnostics) {
+          currentDiagnostics = [];
+          currentDiagnosticsByFile.set(diagnostic.fileKey, currentDiagnostics);
+        }
+        currentDiagnostics.push(diagnostic);
+      }
       let presentationChanged = false;
       for (const [fileKey, { displayDiagnostics }] of replacements) {
-        const currentDiagnostics = state.lint.diagnostics.filter(
-          (diagnostic) => diagnostic.fileKey === fileKey
-        );
+        const currentDiagnostics = currentDiagnosticsByFile.get(fileKey) ?? [];
         if (!sameProblemsPresentation(currentDiagnostics, displayDiagnostics)) {
           presentationChanged = true;
         }
       }
-      const nextDiagnostics = state.lint.diagnostics.filter(
-        (diagnostic) => !replacedKeys.has(diagnostic.fileKey)
-      );
       for (const { displayDiagnostics } of replacements.values()) {
         nextDiagnostics.push(...displayDiagnostics);
       }

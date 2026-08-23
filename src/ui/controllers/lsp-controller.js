@@ -1,6 +1,7 @@
 import { clamp, TableDocument } from "../../core/table-model.js";
 import {
   isTauriRuntime,
+  lspChangeLocale,
   lspCloseFile,
   lspDefinition,
   lspFieldMetadata,
@@ -83,7 +84,8 @@ export function createLspController({
   canNavigateJsonDiagnostic = () => false,
   handleWatchedFilesChanged = () => {},
   reserveLspGeneration = lspReserveGeneration,
-  lspHoverRequest = lspHover
+  lspHoverRequest = lspHover,
+  lspDefinitionRequest = lspDefinition
 }) {
   state.lsp.generation = Number(state.lsp.generation) || 0;
   state.lsp.readiness ??= state.lsp.started ? "ready" : "stopped";
@@ -91,6 +93,7 @@ export function createLspController({
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
   let startReservationSequence = 0;
+  let definitionRequestSequence = 0;
   const readyGenerations = new Set();
   const stoppedGenerations = new Set();
   // Prevent didOpen for a URI from overtaking its in-flight didClose.
@@ -751,6 +754,14 @@ export function createLspController({
     return reportBackgroundFailure("Window close", error, context);
   }
 
+  function changeLocale(locale) {
+    const generation = Number(state.lsp.generation) || 0;
+    if (!state.lsp.started || generation <= 0) {
+      return Promise.reject(new Error("Vector-LSP session is not active"));
+    }
+    return lspChangeLocale(locale, generation);
+  }
+
   function charOffsetToColumn(doc, row, charOffset) {
     let offset = 0;
     for (let col = 0; col < doc.columnCount; col++) {
@@ -771,14 +782,33 @@ export function createLspController({
     const col = hit?.column ?? state.selection.focus.column;
     const charOffset = computeCharOffset(doc, row, col);
     const generation = state.lsp.generation ?? 0;
-    let definitionFailed = false;
-    const result = await lspDefinition(uri, row, charOffset, generation).catch((error) => {
-      definitionFailed = true;
-      reportDefinitionFailure(doc, uri, error, "go-to-definition");
-      return null;
-    });
-    if (definitionFailed) return;
-    if (state.lsp.generation !== generation || !state.lsp.started) return;
+    const requestSequence = ++definitionRequestSequence;
+    const documentVersion = lspDocumentState(doc).version;
+    const sourceCellValue = doc.getCell(row, col);
+    const focusRow = state.selection.focus.row;
+    const focusColumn = state.selection.focus.column;
+    const requestIsCurrent = () => requestSequence === definitionRequestSequence
+      && state.lsp.started
+      && state.lsp.generation === generation
+      && docToUri(doc) === uri
+      && lspDocumentState(doc).version === documentVersion
+      && doc.getCell(row, col) === sourceCellValue;
+    const sourceIsCurrent = () => {
+      const currentHit = state.contextHit;
+      return requestIsCurrent()
+        && activeDoc() === doc
+        && state.selection.focus.row === focusRow
+        && state.selection.focus.column === focusColumn
+        && (!currentHit || (currentHit.row === row && currentHit.column === col));
+    };
+    let result;
+    try {
+      result = await lspDefinitionRequest(uri, row, charOffset, generation);
+    } catch (error) {
+      if (sourceIsCurrent()) reportDefinitionFailure(doc, uri, error, "go-to-definition");
+      return;
+    }
+    if (!sourceIsCurrent()) return;
     if (!result) {
       showToast(tText("lsp.noDefinition"));
       return;
@@ -788,14 +818,17 @@ export function createLspController({
     let index = state.docs.findIndex((d) => lintPathKey(d.path) === lintPathKey(targetPath));
     if (index < 0 && isTauriRuntime()) {
       const newDocs = await openNativePaths([targetPath], TableDocument).catch((error) => {
-        reportBackgroundFailure("Definition file open", error, "go-to-definition");
+        if (sourceIsCurrent()) reportBackgroundFailure("Definition file open", error, "go-to-definition");
         return [];
       });
+      if (!sourceIsCurrent()) return;
       if (newDocs.length) {
-        await addDocument(newDocs[0]);
-        index = state.active;
+        const targetDoc = await addDocument(newDocs[0]);
+        index = state.docs.indexOf(targetDoc);
+        if (!requestIsCurrent() || index < 0 || state.active !== index || activeDoc() !== targetDoc) return;
       }
     }
+    if (index < 0) return;
     if (index >= 0 && index !== state.active) {
       state.active = index;
       applyFreezeToDoc(activeDoc());
@@ -878,6 +911,7 @@ export function createLspController({
   return {
     appendLog: appendLspLog,
     cellHasReference,
+    changeLocale,
     clearVisibleHover: hoverController.clearVisibleHover,
     closeDoc,
     docToUri,

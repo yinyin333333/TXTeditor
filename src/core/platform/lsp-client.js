@@ -2,6 +2,7 @@ import { isTauriRuntime, tauriApi } from "./tauri-api.js";
 import { normalizeLocale } from "../i18n.js";
 
 let generationReservationQueue = Promise.resolve();
+let localeChangeQueue = Promise.resolve();
 
 function withGeneration(payload, generation) {
   return generation == null ? payload : { ...payload, generation };
@@ -32,6 +33,16 @@ export async function lspStop(generation) {
   if (!isTauriRuntime()) return 0;
   const api = await tauriApi();
   return api.invoke("lsp_stop", { generation });
+}
+
+export function lspChangeLocale(locale, generation) {
+  if (!isTauriRuntime()) return Promise.resolve();
+  const change = localeChangeQueue.then(async () => {
+    const api = await tauriApi();
+    return api.invoke("lsp_change_locale", withGeneration({ locale: normalizeLocale(locale) }, generation));
+  });
+  localeChangeQueue = change.catch(() => {});
+  return change;
 }
 
 export async function lspOpenFile(uri, version, text, generation) {
