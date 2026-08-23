@@ -119,15 +119,6 @@ export function fillSelectionCommand(doc, rect) {
   return fillRangeCommand(doc, rect, doc.getCell(rect.top, rect.left));
 }
 
-export function fillRangesCommand(doc, ranges) {
-  const edits = [];
-  for (const rect of ranges) {
-    const value = doc.getCell(rect.top, rect.left);
-    for (const { row, column } of rectCells(rect)) edits.push({ row, column, value });
-  }
-  return makeCellCommand("Fill Selected Cells", doc, uniqueEdits(edits));
-}
-
 export function fillSelectedCellsCommand(doc, ranges, sourceCell) {
   const source = sourceCellOrFirstRangeCell(ranges, sourceCell);
   const value = doc.getCell(source.row, source.column);
@@ -147,23 +138,6 @@ export function incrementFillCommand(doc, rect) {
     }
   }
   return makeCellCommand("Increment Fill", doc, edits);
-}
-
-export function incrementFillRangesCommand(doc, ranges) {
-  const edits = [];
-  for (const rect of ranges) {
-    const seed = String(doc.getCell(rect.top, rect.left)).trim();
-    if (seed === "") continue;
-    const nextValue = incrementValueFactory(seed);
-    let index = 0;
-    for (let row = rect.top; row <= rect.bottom; row++) {
-      for (let column = rect.left; column <= rect.right; column++) {
-        edits.push({ row, column, value: nextValue(index) });
-        index++;
-      }
-    }
-  }
-  return makeCellCommand("Increment Fill", doc, uniqueEdits(edits));
 }
 
 export function incrementFillSelectedCellsCommand(doc, ranges, sourceCell) {
