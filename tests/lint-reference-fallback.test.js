@@ -948,6 +948,64 @@ test("closing a Legacy shadow refreshes a deleted workspace path before choosing
   }
 });
 
+test("Legacy controller does not include AnimData documents in its index", async () => {
+  const regular = doc(
+    "MagicPrefix.txt",
+    "Name\titype1\nCaster\tstaff\n",
+    "E:/Mod/MagicPrefix.txt"
+  );
+  const animData = TableDocument.fromText("animdata.d2", "CofName\tFramesPerDirection\nA1NUHTH\t1\n", {
+    path: "E:/Mod/animdata.d2",
+    encoding: "animdata-d2",
+    autoFitInitialColumns: false
+  });
+  const published = [];
+  const state = {
+    docs: [regular, animData],
+    workspace: null,
+    config: { gameVersion: "3.3", referenceVersion: "3.3" },
+    lint: {
+      legacy: {
+        settings: createDefaultLintSettings(),
+        timer: 0,
+        pendingRun: null,
+        version: 0,
+        running: false,
+        status: "",
+        lastRunAt: 0,
+        workspaceDocs: [],
+        workspaceLoad: { status: "not-started", files: [], error: "", signature: "" },
+        workspaceIndexCache: { signature: "", profile: "", index: null }
+      }
+    }
+  };
+  const controller = createLegacyLintController({
+    state,
+    renderChrome: () => {},
+    setLintDiagnostics: (diagnostics) => published.push(diagnostics),
+    updateGridDiagnostics: () => {},
+    legacyLintDisplayActive: () => true,
+    docHasDiagnostics: () => false,
+    recordLintEngineEvent: () => {},
+    perfNow: () => Date.now(),
+    elapsedMs: (started) => Date.now() - started,
+    lintDocKey: (value) => value.path || value.name,
+    listSiblingFiles: async () => ({ path: "E:/Mod", files: [] }),
+    loadReferenceDataset: async () => referencePayload("3.3", "digest33")
+  });
+
+  try {
+    controller.scheduleFull("unrelated-change", 0);
+    await waitFor(() => published.length === 1);
+    const indexedNames = state.lint.legacy.workspaceIndexCache.index.tables
+      .map((table) => table.fileName);
+    assert.deepEqual(indexedNames, ["magicprefix.txt"]);
+    assert.equal(indexedNames.includes("animdata.d2"), false);
+  } finally {
+    controller.cancelJobs();
+  }
+});
+
 test("a stale bundled-reference load cannot replace the latest unified Legacy game version", async () => {
   const pending = [];
   const state = {

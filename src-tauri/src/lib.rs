@@ -1,3 +1,4 @@
+mod animdata;
 mod app_bootstrap;
 mod clipboard;
 mod config;

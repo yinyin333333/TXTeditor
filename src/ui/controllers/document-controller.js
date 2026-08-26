@@ -3,6 +3,7 @@ import { JsonDocument } from "../../core/json-document.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import {
   documentTextSnapshot,
+  isAnimDataDocument,
   isJsonDocument,
   isTableDocument,
   markDocumentSaved
@@ -14,7 +15,7 @@ import {
 } from "../../core/json-document-policy.js";
 import { normalizePath } from "../../core/lint-paths.js";
 import { docToUri, lspStandaloneParentPath, pathFromUri } from "../../core/lsp-uri-policy.js";
-import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
+import { isAnimDataPath, isSupportedTablePath, isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
   downloadText,
@@ -202,6 +203,7 @@ export function createDocumentController({
   }
 
   async function syncOpenedTable(doc) {
+    if (isAnimDataDocument(doc)) return;
     if (documentOpenSyncRoute(state.lint.engine, state.lint.enabled) === "vector-open") {
       const referenceRootPath = state.workspace?.path ?? "";
       const siblingParent = isTauriRuntime()
@@ -253,8 +255,8 @@ export function createDocumentController({
   }
 
   async function openNativeDocumentPaths(paths, { requireCurrentJsonMode = false } = {}) {
-    const candidates = Array.from(paths ?? []).filter((path) => isTextLikePath(path) || isJsonPath(path));
-    const tablePaths = candidates.filter(isTextLikePath);
+    const candidates = Array.from(paths ?? []).filter((path) => isSupportedTablePath(path) || isJsonPath(path));
+    const tablePaths = candidates.filter(isSupportedTablePath);
     const jsonPaths = candidates.filter(isJsonPath);
     if (tablePaths.length) {
       const documentsByPath = new Map(state.docs
@@ -548,10 +550,13 @@ export function createDocumentController({
       && normalizePath(candidate?.path || "") === target)) {
       throw new Error(tText("error.saveTargetAlreadyOpen"));
     }
-    if (!isJsonDocument(doc)) return true;
-    return isEditableLocalizationJsonPath(path)
-      && (target === normalizePath(doc.path)
-        || isLocalizationJsonPathInCurrentMode(path, state));
+    if (isJsonDocument(doc)) {
+      return isEditableLocalizationJsonPath(path)
+        && (target === normalizePath(doc.path)
+          || isLocalizationJsonPathInCurrentMode(path, state));
+    }
+    if (isAnimDataDocument(doc)) return isAnimDataPath(path);
+    return !isAnimDataPath(path);
   }
 
   async function loadFixture(size) {

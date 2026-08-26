@@ -30,6 +30,7 @@ import {
   legacySiblingContextTargets
 } from "../../core/lint-sibling-context.js";
 import { documentKey, normalizePath } from "../../core/lint-paths.js";
+import { isAnimDataDocument } from "../../core/document-file-state.js";
 import { tText } from "../../core/i18n.js";
 
 export function createLegacyLintController({
@@ -187,7 +188,8 @@ export function createLegacyLintController({
   }
 
   function activeDocuments() {
-    return mergeOpenLegacyWorkspaceDocs(state.lint.legacy.workspaceDocs, state.docs);
+    return mergeOpenLegacyWorkspaceDocs(state.lint.legacy.workspaceDocs, state.docs)
+      .filter((doc) => !isAnimDataDocument(doc));
   }
 
   function workspaceIndexesFor(docs, profile) {
@@ -247,11 +249,12 @@ export function createLegacyLintController({
       return groups.get(key);
     };
     for (const doc of docs) groupFor(legacyDocumentDirectoryKey(doc)).documents.push(doc);
-    for (const doc of state.docs) groupFor(legacyDocumentDirectoryKey(doc)).openDocuments.push(doc);
+    const openDocuments = state.docs.filter((doc) => !isAnimDataDocument(doc));
+    for (const doc of openDocuments) groupFor(legacyDocumentDirectoryKey(doc)).openDocuments.push(doc);
 
     const allWorkspaceFiles = workspaceTxtFiles();
     const allWorkspaceDocuments = state.lint.legacy.workspaceDocs;
-    const workspaceOpenDocuments = state.docs.filter((doc) =>
+    const workspaceOpenDocuments = openDocuments.filter((doc) =>
       isLegacyLintWorkspaceDocument(doc, workspacePath, scopeOptions)
     );
     return [...groups.values()]

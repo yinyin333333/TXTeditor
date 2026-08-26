@@ -138,13 +138,13 @@ export async function saveDocumentNative(doc, saveAs = false, { validateTarget =
     target = await api.invoke("save_file_dialog", { defaultName: doc.name });
     if (!target) return false;
   }
-  if (!validateTarget(target)) throw new Error("The selected path is not an editable localization JSON file in the current mode.");
+  if (!validateTarget(target)) throw new Error("The selected path is not valid for this document format.");
   const snapshot = documentTextSnapshot(doc);
   doc.beginWrite?.(snapshot);
   let payload;
   try {
     payload = await queueNativeTargetSave(target, () => writeDocumentNative(
-      api.invoke, target, snapshot.chunks, snapshot.encoding
+      api.invoke, target, snapshot.chunks, snapshot.text, snapshot.encoding
     ));
   } catch (error) {
     doc.cancelWrite?.();
@@ -170,7 +170,10 @@ function perfNow() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
-async function writeDocumentNative(invoke, path, chunks, encoding) {
+async function writeDocumentNative(invoke, path, chunks, text, encoding) {
+  if (String(encoding || "").toLowerCase() === "animdata-d2") {
+    return invoke("write_text_file_safe", { path, text, encoding });
+  }
   const transactionId = nextNativeSaveTransactionId();
   const iterator = chunks[Symbol.iterator]();
   let current = iterator.next();

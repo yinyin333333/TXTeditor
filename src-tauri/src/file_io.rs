@@ -1,3 +1,4 @@
+use crate::animdata;
 use crate::native_paths::file_path_to_string;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,8 +15,13 @@ pub(crate) async fn open_files_dialog(app: tauri::AppHandle) -> Result<Vec<Strin
     let picked = app
         .dialog()
         .file()
+        .add_filter(
+            "Editable files",
+            &["txt", "tsv", "tbl", "csv", "json", "d2"],
+        )
         .add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
         .add_filter("Localization JSON", &["json"])
+        .add_filter("AnimData binary", &["d2"])
         .blocking_pick_files();
     match picked {
         Some(paths) => paths.into_iter().map(file_path_to_string).collect(),
@@ -40,6 +46,8 @@ pub(crate) async fn save_file_dialog(
     let dialog = app.dialog().file().set_file_name(default_name.clone());
     let dialog = if default_name.to_ascii_lowercase().ends_with(".json") {
         dialog.add_filter("Localization JSON", &["json"])
+    } else if default_name.eq_ignore_ascii_case("animdata.d2") {
+        dialog.add_filter("AnimData binary", &["d2"])
     } else {
         dialog.add_filter("Tabular text", &["txt", "tsv", "tbl", "csv"])
     };
@@ -54,7 +62,11 @@ pub(crate) fn read_text_file(path: String) -> Result<TextFilePayload, String> {
     recover_interrupted_write(Path::new(&path))?;
     let bytes = fs::read(&path).map_err(|err| err.to_string())?;
     let size_bytes = bytes.len() as u64;
-    let (text, encoding) = decode_text(bytes)?;
+    let (text, encoding) = if animdata::is_animdata_path(Path::new(&path)) {
+        (animdata::decode(&bytes)?, animdata::ENCODING.to_string())
+    } else {
+        decode_text(bytes)?
+    };
     let name = Path::new(&path)
         .file_name()
         .and_then(|value| value.to_str())
@@ -81,11 +93,12 @@ pub(crate) fn write_text_file_safe(
     encoding: Option<String>,
 ) -> Result<SavePayload, String> {
     let target = PathBuf::from(&path);
+    let encoding = encoding.as_deref().unwrap_or("utf-8");
+    let bytes = encode_text(&text, encoding, true)?;
     let transaction_id = next_transaction_id();
     let temp = temp_path_for(&target, Some(&transaction_id));
-    let bytes = encode_text(&text, encoding.as_deref().unwrap_or("utf-8"), true)?;
 
-    write_complete_temp_file(&temp, &bytes).map_err(|err| err.to_string())?;
+    write_complete_file(&temp, &bytes).map_err(|err| err.to_string())?;
     finish_temp_write(path, &target, &temp)
 }
 
@@ -160,8 +173,8 @@ fn next_transaction_id() -> String {
     )
 }
 
-fn write_complete_temp_file(temp: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = fs::File::create(temp)?;
+fn write_complete_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -188,12 +201,16 @@ fn finish_temp_write(path: String, target: &Path, temp: &Path) -> Result<SavePay
     }
     sync_parent_dir(target);
 
+    Ok(save_payload(path, target))
+}
+
+fn save_payload(path: String, target: &Path) -> SavePayload {
     let name = target
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("Untitled.txt")
         .to_string();
-    Ok(SavePayload { path, name })
+    SavePayload { path, name }
 }
 
 fn backup_path_for(target: &Path) -> PathBuf {
@@ -309,7 +326,7 @@ fn write_recovery_journal(target: &Path, temp: &Path, backup: &Path) -> Result<(
         backup_name: child_file_name(backup)?,
     };
     let bytes = serde_json::to_vec(&journal).map_err(|err| err.to_string())?;
-    write_complete_temp_file(&journal_path_for(target), &bytes).map_err(|err| err.to_string())?;
+    write_complete_file(&journal_path_for(target), &bytes).map_err(|err| err.to_string())?;
     sync_parent_dir(target);
     Ok(())
 }
@@ -501,6 +518,7 @@ pub(crate) fn encode_text(
     include_bom: bool,
 ) -> Result<Vec<u8>, String> {
     match encoding.to_ascii_lowercase().as_str() {
+        animdata::ENCODING => animdata::encode(text),
         "utf-8" => Ok(text.as_bytes().to_vec()),
         "utf-8-bom" => {
             let mut bytes = Vec::with_capacity(text.len() + usize::from(include_bom) * 3);
@@ -797,6 +815,75 @@ mod tests {
         assert_eq!(results[2].as_ref().unwrap().name, "b.tbl");
         assert_eq!(results[2].as_ref().unwrap().encoding, "windows-1252");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn native_animdata_read_and_safe_write_use_binary_encoding() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-animdata-save-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("animdata.d2");
+        fs::write(&target, vec![0u8; 256 * 4]).unwrap();
+        let target_string = target.to_string_lossy().to_string();
+
+        let payload = read_text_file(target_string.clone()).unwrap();
+        assert_eq!(payload.encoding, animdata::ENCODING);
+        assert!(payload.text.starts_with("CofName\tFramesPerDirection"));
+
+        let mut edited = payload.text;
+        edited.push_str("A1NUHTH\t1\t256");
+        for _ in 0..144 {
+            edited.push_str("\t0");
+        }
+        edited.push_str("\r\n");
+        write_text_file_safe(
+            target_string.clone(),
+            edited.clone(),
+            Some(animdata::ENCODING.to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(fs::metadata(&target).unwrap().len(), (256 * 4 + 160) as u64);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let reopened = read_text_file(target_string).unwrap();
+        assert_eq!(reopened.text, edited);
+        assert_eq!(reopened.encoding, animdata::ENCODING);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn invalid_animdata_save_leaves_the_existing_binary_unchanged() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-invalid-animdata-save-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("animdata.d2");
+        let original = vec![0u8; 256 * 4];
+        fs::write(&target, &original).unwrap();
+        let target_string = target.to_string_lossy().to_string();
+        let invalid_text = read_text_file(target_string.clone())
+            .unwrap()
+            .text
+            .replacen("CofName", "Name", 1);
+
+        let error = write_text_file_safe(
+            target_string,
+            invalid_text,
+            Some(animdata::ENCODING.to_string()),
+        )
+        .err()
+        .expect("invalid AnimData text must be rejected");
+
+        assert!(error.contains("header"));
+        assert_eq!(fs::read(&target).unwrap(), original);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
 

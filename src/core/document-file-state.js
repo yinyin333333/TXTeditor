@@ -8,6 +8,10 @@ export function isTableDocument(doc) {
   return doc?.kind !== "json";
 }
 
+export function isAnimDataDocument(doc) {
+  return isTableDocument(doc) && String(doc?.encoding || "").toLowerCase() === "animdata-d2";
+}
+
 export function documentRevision(doc) {
   if (isJsonDocument(doc)) return Number(doc.revision) || 0;
   return tableFileState(doc).revision;
