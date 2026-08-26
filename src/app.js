@@ -305,6 +305,7 @@ documentController = createDocumentController({
   renderChrome,
   showError,
   showToast,
+  promptNumber,
   reportWindowCloseFailure,
   lspOpenDoc, lspUpdateDoc,
   reportLspOpenFailure,
@@ -372,6 +373,8 @@ const commandController = createCommandController({
   columnsForColumnOperation,
   showError,
   handlers: {
+    newTable: documentController.newTable,
+    duplicateTemporary: documentController.duplicateTemporary,
     openFile: documentController.openFile,
     openFolder: documentController.openFolder, closeAll: documentController.closeAll,
     saveFile: documentController.saveFile,

@@ -168,6 +168,11 @@ Object.assign(CATALOG_ROWS, {
 });
 
 Object.assign(CATALOG_ROWS, {
+  "command.new-table": ["New Table", "新增表格", "Neue Tabelle", "Nueva tabla", "Nouveau tableau", "Nuova tabella", "새 표 문서", "Nowa tabela", "Nueva tabla", "新しい表", "Nova tabela", "Новая таблица", "新建表格"],
+  "command.duplicate-temporary": ["Duplicate as Temporary", "複製為暫存文件", "Als temporär duplizieren", "Duplicar como temporal", "Dupliquer en temporaire", "Duplica come temporaneo", "임시 문서로 복제", "Duplikuj jako tymczasowy", "Duplicar como temporal", "一時ドキュメントとして複製", "Duplicar como temporário", "Дублировать как временный", "复制为临时文档"]
+});
+
+Object.assign(CATALOG_ROWS, {
   "settings.colorizeColumns": ["Colorize columns", "欄位著色", "Spalten einfärben", "Colorear columnas", "Colorer les colonnes", "Colora colonne", "열 색상 표시", "Koloruj kolumny", "Colorear columnas", "列を色分け", "Colorir colunas", "Раскрашивать столбцы", "列着色"],
   "settings.lockResize": ["Lock mouse row and column resizing", "鎖定滑鼠調整列欄大小", "Größenänderung per Maus sperren", "Bloquear cambio de tamaño con el ratón", "Verrouiller le redimensionnement à la souris", "Blocca ridimensionamento con mouse", "마우스 행·열 크기 조정 잠금", "Zablokuj zmianę rozmiaru myszą", "Bloquear cambio de tamaño con el ratón", "マウスによる行列サイズ変更をロック", "Bloquear redimensionamento pelo mouse", "Блокировать изменение размера мышью", "锁定鼠标调整行列大小"],
   "settings.excludeSubfolders": ["Exclude subfolders when opening a folder", "開啟資料夾時排除子資料夾", "Unterordner beim Öffnen ausschließen", "Excluir subcarpetas al abrir una carpeta", "Exclure les sous-dossiers à l’ouverture", "Escludi sottocartelle all’apertura", "폴더 열기에서 하위 폴더 제외", "Wyklucz podfoldery przy otwieraniu", "Excluir subcarpetas al abrir una carpeta", "フォルダーを開く際にサブフォルダーを除外", "Excluir subpastas ao abrir uma pasta", "Исключать подпапки при открытии", "打开文件夹时排除子文件夹"],

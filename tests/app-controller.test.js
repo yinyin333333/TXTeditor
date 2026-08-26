@@ -12,6 +12,8 @@ import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
 import {
+  DEFAULT_NEW_TABLE_COLUMNS,
+  DEFAULT_NEW_TABLE_ROWS,
   createDocumentController,
   WORKSPACE_PATH_STORAGE_KEY,
   WORKSPACE_RELOAD_STORAGE_KEY
@@ -211,11 +213,14 @@ test("command registry preserves public command labels and availability policy",
   assert.deepEqual(calls, ["open-file", "show-problems"]);
 
   assert.equal(canRunCommandWithoutDocument("open-file"), true);
+  assert.equal(canRunCommandWithoutDocument("new-table"), true);
   assert.equal(canRunCommandWithoutDocument("close-all"), true);
   assert.equal(canRunCommandWithoutDocument("show-problems"), true);
   assert.equal(canRunCommandWithoutDocument("save-file"), false);
   assert.equal(canRunCommandWithoutDocument("go-to-definition"), false);
   assert.deepEqual(commandActionForId("open-file"), { type: "handler", name: "openFile" });
+  assert.deepEqual(commandActionForId("new-table"), { type: "handler", name: "newTable" });
+  assert.deepEqual(commandActionForId("duplicate-temporary"), { type: "handler", name: "duplicateTemporary" });
   assert.deepEqual(commandActionForId("close-all"), { type: "handler", name: "closeAll" });
   assert.deepEqual(commandActionForId("load-fixture-20k"), { type: "fixture", size: 20000 });
   assert.deepEqual(commandActionForId("insert-row"), { type: "handler", name: "insertRows" });
@@ -225,6 +230,46 @@ test("command registry preserves public command labels and availability policy",
   assert.deepEqual(commandActionForId("resize-selected-fit"), { type: "resize", useSelection: true });
   assert.deepEqual(commandActionForId("go-to-definition"), { type: "handler", name: "goToDefinition" });
   assert.deepEqual(commandActionForId("missing-command"), { type: "unknown", id: "missing-command" });
+});
+
+test("new table creates an unsaved table with default 3 x 10 dimensions", async () => {
+  const prompts = [];
+  const { controller, state } = testDocumentController([], {}, {
+    promptNumber: async (options) => {
+      prompts.push(options);
+      return options.defaultValue;
+    }
+  });
+
+  const doc = await controller.newTable();
+
+  assert.equal(doc.rowCount, DEFAULT_NEW_TABLE_ROWS);
+  assert.equal(doc.columnCount, DEFAULT_NEW_TABLE_COLUMNS);
+  assert.equal(doc.path, "");
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.name, "Untitled.txt");
+  assert.equal(state.docs.length, 1);
+  assert.deepEqual(prompts.map(({ defaultValue }) => defaultValue), [DEFAULT_NEW_TABLE_ROWS, DEFAULT_NEW_TABLE_COLUMNS]);
+});
+
+test("temporary duplicate is independent from the active source document", async () => {
+  const source = TableDocument.fromText("items.txt", "id\tvalue\n1\toriginal", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const { controller, state } = testDocumentController(source);
+
+  const copy = await controller.duplicateTemporary();
+
+  assert.notEqual(copy, source);
+  assert.equal(copy.name, "items [Temporary].txt");
+  assert.equal(copy.path, "");
+  assert.equal(copy.dirty, true);
+  assert.equal(copy.toText(), source.toText());
+  assert.equal(state.active, 1);
+  copy.setCell(1, 1, "changed");
+  assert.equal(source.getCell(1, 1), "original");
+  assert.equal(copy.getCell(1, 1), "changed");
 });
 
 test("document lifecycle policy preserves open, unsaved, and close-tab decisions", () => {
@@ -2043,6 +2088,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     applyFreezeToDoc: () => {},
     renderChrome: options.renderChrome ?? (() => {}),
     showError: options.showError ?? ((error) => { throw error; }),
+    promptNumber: options.promptNumber,
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
