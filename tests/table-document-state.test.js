@@ -110,6 +110,54 @@ test("cell commands undo and redo without full table snapshots", () => {
   assert.equal(doc.getCell(1, 1), "42");
 });
 
+test("in-bounds cell edits avoid shape refreshes and undo ragged row growth exactly", () => {
+  const doc = TableDocument.fromText("ragged.txt", "h0\th1\th2\nshort\nwide\tvalue\ttail");
+  const originalRefreshShape = doc.refreshShape.bind(doc);
+  let refreshes = 0;
+  doc.refreshShape = () => {
+    refreshes += 1;
+    return originalRefreshShape();
+  };
+  const command = makeCellCommand("Edit ragged cell", doc, [{ row: 1, column: 2, value: "added" }]);
+
+  command.redo(doc);
+  assert.equal(refreshes, 0);
+  assert.deepEqual(doc.rows[1], ["short", "", "added"]);
+  assert.equal(doc.columnCount, 3);
+
+  command.undo(doc);
+  assert.equal(refreshes, 0);
+  assert.deepEqual(doc.rows[1], ["short"]);
+  assert.equal(doc.columnCount, 3);
+});
+
+test("cell edits refresh shape only when expanding global row or column bounds", () => {
+  const doc = TableDocument.fromText("expand.txt", "h0\th1\nvalue\tother");
+  const originalRows = doc.rows.map((row) => [...row]);
+  const originalRefreshShape = doc.refreshShape.bind(doc);
+  let refreshes = 0;
+  doc.refreshShape = () => {
+    refreshes += 1;
+    return originalRefreshShape();
+  };
+  const command = makeCellCommand("Expand table", doc, [{
+    row: doc.rowCount,
+    column: doc.columnCount + 1,
+    value: "expanded"
+  }]);
+
+  command.redo(doc);
+  assert.equal(refreshes, 1);
+  assert.equal(doc.rowCount, 3);
+  assert.equal(doc.columnCount, 4);
+
+  command.undo(doc);
+  assert.equal(refreshes, 2);
+  assert.deepEqual(doc.rows, originalRows);
+  assert.equal(doc.rowCount, 2);
+  assert.equal(doc.columnCount, 2);
+});
+
 test("first row cell edits are undoable and saved as file data", () => {
   const doc = TableDocument.fromText("skills.txt", "pSrvDoFunc\tpSrvHitFunc\n1\t2\n");
   const undo = new UndoManager();

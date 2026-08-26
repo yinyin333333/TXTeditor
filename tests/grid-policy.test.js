@@ -1900,6 +1900,39 @@ test("grid metrics invalidate when document view revision changes", () => {
   assert.equal(metrics.rowAtContent(30), 3);
 });
 
+test("grid metrics invalidate when switching between documents with matching cache keys", () => {
+  const first = {
+    viewRevision: 2,
+    rowCount: 2,
+    columnCount: 2,
+    defaultRowHeight: 26,
+    defaultColumnWidth: 56,
+    rowHeights: [26, 26],
+    columnWidths: [56, 56],
+    hiddenRows: new Set(),
+    hiddenColumns: new Set(),
+    hasCustomRowHeights: true
+  };
+  const second = {
+    ...first,
+    rowHeights: [26, 52],
+    columnWidths: [211, 56],
+    hiddenRows: new Set(),
+    hiddenColumns: new Set()
+  };
+  const metrics = new GridMetrics();
+
+  metrics.updateRows({ doc: first, zoom: 1, scrollStartRow: 0 });
+  metrics.updateColumns({ doc: first, zoom: 1, scrollStartColumn: 0 });
+  metrics.updateRows({ doc: second, zoom: 1, scrollStartRow: 0 });
+  metrics.updateColumns({ doc: second, zoom: 1, scrollStartColumn: 0 });
+
+  assert.equal(metrics.scrollableRowsHeight(), 78);
+  assert.equal(metrics.scrollableColumnWidth(), 267);
+  assert.equal(metrics.rowContentTop(1), 26);
+  assert.equal(metrics.columnContentLeft(1), 211);
+});
+
 test("freeze state layout changes redraw the grid immediately", () => {
   const draws = [];
   const grid = {

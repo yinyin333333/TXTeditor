@@ -209,12 +209,14 @@ export class TableDocument {
   }
 
   applyCellChanges(changes, direction = "after") {
+    let expandsShape = false;
     for (const change of changes) {
+      if (change.row >= this.rowCount || change.column >= this.columnCount) expandsShape = true;
       this.ensureCell(change.row, change.column);
       this.rows[change.row][change.column] = change[direction];
     }
     markTableContentDirty(this);
-    this.refreshShape();
+    if (expandsShape) this.refreshShape();
   }
 
   applyCells(changes, direction = "after") {

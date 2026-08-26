@@ -79,7 +79,7 @@ export function makeCellCommand(label, doc, edits) {
 function captureCellShape(doc) {
   return {
     rowCount: doc.rows.length,
-    rowLengths: doc.rows.map((row) => row.length),
+    columnCount: doc.columnCount,
     serializedColumnCount: doc.serializedColumnCount
   };
 }
@@ -91,10 +91,8 @@ function captureCellRows(doc, rows) {
 }
 
 function restoreCellShape(doc, shape, rowSnapshots = new Map()) {
+  const shapeChanged = doc.rows.length !== shape.rowCount || doc.columnCount !== shape.columnCount;
   doc.rows.length = shape.rowCount;
-  for (let row = 0; row < shape.rowLengths.length; row++) {
-    doc.rows[row].length = shape.rowLengths[row];
-  }
   for (const [row, before] of rowSnapshots) {
     const targetRow = doc.rows[row];
     if (!targetRow) continue;
@@ -105,7 +103,7 @@ function restoreCellShape(doc, shape, rowSnapshots = new Map()) {
     }
   }
   doc.serializedColumnCount = shape.serializedColumnCount;
-  doc.refreshShape();
+  if (shapeChanged) doc.refreshShape();
 }
 
 export function makeCustomCommand(label, { redo, undo, empty = false, ...metadata }) {
