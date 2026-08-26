@@ -2,6 +2,8 @@ export class GridMetrics {
   constructor() {
     this.rows = emptyMetrics(0);
     this.columns = emptyMetrics(0);
+    this.rowDocument = null;
+    this.columnDocument = null;
     this.rowKey = "";
     this.columnKey = "";
   }
@@ -16,7 +18,8 @@ export class GridMetrics {
       scrollStartRow,
       zoom
     ].join("|");
-    if (key === this.rowKey) return this.rows;
+    if (doc === this.rowDocument && key === this.rowKey) return this.rows;
+    this.rowDocument = doc;
     this.rowKey = key;
     this.rows = buildMetrics({
       count: doc.rowCount,
@@ -38,7 +41,8 @@ export class GridMetrics {
       scrollStartColumn,
       zoom
     ].join("|");
-    if (key === this.columnKey) return this.columns;
+    if (doc === this.columnDocument && key === this.columnKey) return this.columns;
+    this.columnDocument = doc;
     this.columnKey = key;
     this.columns = buildMetrics({
       count: doc.columnCount,

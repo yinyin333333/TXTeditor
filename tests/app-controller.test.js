@@ -530,6 +530,52 @@ test("Save As enforces the AnimData document format boundary in both directions"
   }
 });
 
+test("document native Save As rejects another open document path but allows its own path", async () => {
+  const originalWindow = globalThis.window;
+  const active = TableDocument.fromText("active.txt", "id\nactive", {
+    path: "E:\\Mods\\active.txt",
+    dirty: true
+  });
+  const other = TableDocument.fromText("other.txt", "id\nother", {
+    path: "E:\\Mods\\other.txt",
+    dirty: false
+  });
+  const errors = [];
+  const writes = [];
+  let target = "e:/mods/OTHER.txt";
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        async invoke(command, args) {
+          if (command === "save_file_dialog") return target;
+          assert.equal(command, "write_text_file_chunk_safe");
+          writes.push(args);
+          return { path: args.path, name: "active.txt" };
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController([active, other], {}, {
+      showError: (error) => errors.push(String(error?.message ?? error))
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(writes.length, 0);
+    assert.equal(active.path, "E:\\Mods\\active.txt");
+    assert.deepEqual(errors, ["The selected path is already open in another document."]);
+
+    target = "e:/mods/ACTIVE.txt";
+    assert.equal(await controller.saveAs(), true);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, target);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("document browser save as write failure keeps committed edit dirty", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });

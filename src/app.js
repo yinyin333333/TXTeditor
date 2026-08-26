@@ -612,8 +612,8 @@ function clearVisibleLspHover(reason = "hover-cleared") {
   return lspController.clearVisibleHover(reason);
 }
 
-function setLintDiagnostics(diagnostics) {
-  return diagnosticsController.setLintDiagnostics(diagnostics);
+function setLintDiagnostics(diagnostics, options) {
+  return diagnosticsController.setLintDiagnostics(diagnostics, options);
 }
 
 function switchBottomTab(tab) {

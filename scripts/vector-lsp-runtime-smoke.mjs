@@ -337,6 +337,43 @@ async function withTimeout(promise, ms, label) {
   }
 }
 
+function verifyReadyNotification(params, { label, sessionGeneration, rootUri }) {
+  const expectedKeys = ["rootUri", "scanGeneration", "sessionGeneration", "workspaceRevision"];
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    throw new Error(`${label} params are not an object: ${JSON.stringify(params)}`);
+  }
+  const actualKeys = Object.keys(params).sort();
+  if (actualKeys.length !== expectedKeys.length
+      || actualKeys.some((key, index) => key !== expectedKeys[index])) {
+    throw new Error(`${label} shape changed: ${JSON.stringify(params)}`);
+  }
+  if (params.sessionGeneration !== sessionGeneration
+      || !Number.isSafeInteger(params.scanGeneration)
+      || params.scanGeneration <= 0
+      || !Number.isSafeInteger(params.workspaceRevision)
+      || params.workspaceRevision <= 0
+      || params.rootUri !== rootUri) {
+    throw new Error(`${label} values changed: ${JSON.stringify(params)}`);
+  }
+  return params;
+}
+
+function verifyParseFieldMetadata(metadata, label) {
+  const expectedKeys = ["fieldType", "maxLength", "source"];
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error(`${label} result is not an object: ${JSON.stringify(metadata)}`);
+  }
+  const actualKeys = Object.keys(metadata).sort();
+  if (actualKeys.length !== expectedKeys.length
+      || actualKeys.some((key, index) => key !== expectedKeys[index])
+      || metadata.fieldType !== "parse"
+      || metadata.maxLength !== 255
+      || metadata.source !== "schema") {
+    throw new Error(`${label} result changed: ${JSON.stringify(metadata)}`);
+  }
+  return metadata;
+}
+
 async function requestNonNullHover(client, params, timeoutMs, label) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -438,7 +475,7 @@ class LspClient {
   request(method, params = {}) {
     const id = this.nextId++;
     this.send({ jsonrpc: "2.0", id, method, params });
-    return this.waitFor((message) => message.id === id).then((message) => {
+    return this.waitFor((message) => message.id === id && message.method == null).then((message) => {
       if (message.error) throw new Error(`${method} failed: ${JSON.stringify(message.error)}`);
       return message.result;
     });
@@ -509,6 +546,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
   const monpetUri = encodeFileUriPath(monpetPath);
   const missilesUri = encodeFileUriPath(missilesPath);
   const upperUri = encodeFileUriPath(upperPath);
+  const workspaceRootUri = encodeFileUriPath(paths.workspaceDir);
   const jsonPath = path.join(paths.workspaceDir, "data", "local", "lng", "strings", "item-names.json");
   const jsonUri = encodeFileUriPath(jsonPath);
   const duplicateJsonText = `${JSON.stringify([
@@ -558,7 +596,7 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
   try {
     await withTimeout(client.request("initialize", {
       processId: process.pid,
-      rootUri: encodeFileUriPath(paths.workspaceDir),
+      rootUri: workspaceRootUri,
       initializationOptions: { sessionGeneration: 42 },
       capabilities: {
         workspace: {
@@ -597,9 +635,20 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
     const readyMessage = await withTimeout(client.waitFor((message) => (
       message.method === "vectorLsp/ready"
     )), timeoutMs, "workspace ready");
-    if (readyMessage.params?.sessionGeneration !== 42) {
-      throw new Error(`ready notification lost session generation: ${JSON.stringify(readyMessage.params)}`);
-    }
+    verifyReadyNotification(readyMessage.params, {
+      label: "workspace ready notification",
+      sessionGeneration: 42,
+      rootUri: workspaceRootUri
+    });
+    const fieldMetadataRequest = { uri: monpetUri, columnName: "monster" };
+    const fieldMetadata = verifyParseFieldMetadata(await withTimeout(
+      client.request("workspace/executeCommand", {
+        command: "vectorLsp.fieldMetadata",
+        arguments: [fieldMetadataRequest]
+      }),
+      timeoutMs,
+      "schema parse field metadata"
+    ), "schema parse field metadata");
     if (!client.dynamicRegistrations.some((registration) => (
       registration.method === "workspace/didChangeWatchedFiles"
       && registration.registerOptions?.watchers?.some((watcher) => (
@@ -1202,6 +1251,9 @@ async function runLspSession({ exePath, paths, schemaVariant, timeoutMs }) {
       watchedJsonFinalDeleteDiagnostics: jsonFinalDelete.params.diagnostics.length,
       watchedJsonFallbackPublishes: unexpectedJsonPublishes.length,
       readyGeneration: readyMessage.params.sessionGeneration,
+      ready: readyMessage.params,
+      fieldMetadataRequest,
+      fieldMetadata,
       serverPerf,
       startupDiagnostics: startupDiagnostics.params.diagnostics.length,
       propertiesDiagnostics: propertiesDiagnostics.length,
@@ -1256,6 +1308,7 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
   const suffixUri = encodeFileUriPath(suffixPath);
   const siblingItemTypesUri = encodeFileUriPath(siblingItemTypesPath);
   const referenceItemTypesUri = encodeFileUriPath(referenceItemTypesPath);
+  const siblingRootUri = encodeFileUriPath(paths.siblingWorkspaceDir);
   const initialMagicText = "Name\titype1\nSmoke Prefix\tmodx\nSmoke Staff\tstaff\n";
   const suffixText = "Name\titype1\nSmoke Ring\tring  \n";
   const magicText = (value) => `Name\titype1\nSmoke Prefix\t${value}\n`;
@@ -1297,7 +1350,7 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
   try {
     await withTimeout(client.request("initialize", {
       processId: process.pid,
-      rootUri: encodeFileUriPath(paths.siblingWorkspaceDir),
+      rootUri: siblingRootUri,
       initializationOptions: {
         sessionGeneration: 84,
         referenceContextMode: "sibling",
@@ -1321,9 +1374,11 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
     const ready = await withTimeout(client.waitFor((message) => (
       message.method === "vectorLsp/ready"
     )), timeoutMs, "sibling workspace ready");
-    if (ready.params?.sessionGeneration !== 84) {
-      throw new Error(`sibling ready notification lost generation: ${JSON.stringify(ready.params)}`);
-    }
+    verifyReadyNotification(ready.params, {
+      label: "sibling ready notification",
+      sessionGeneration: 84,
+      rootUri: siblingRootUri
+    });
     if (client.dynamicRegistrations.filter((registration) => (
       registration.method === "workspace/didChangeWatchedFiles"
     )).length < 2) {
@@ -1528,6 +1583,7 @@ async function runStandaloneSiblingSession({ exePath, paths, timeoutMs }) {
     return {
       initialize: "pass",
       readyGeneration: ready.params.sessionGeneration,
+      ready: ready.params,
       watchedFileRegistrations: client.dynamicRegistrations.length,
       hiddenReferencePublishes: hiddenPublishes.length,
       siblingMod4ccDiagnostics: referenceDiagnostics(initialMagic).length,

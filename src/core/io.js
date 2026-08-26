@@ -26,6 +26,7 @@ export {
 } from "./platform/config.js";
 export {
   lspCloseFile,
+  lspChangeLocale,
   lspDefinition,
   lspFieldMetadata,
   lspGetDiagnostics,
