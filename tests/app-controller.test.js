@@ -465,6 +465,71 @@ test("document native save as cancel keeps committed edit dirty", async () => {
   }
 });
 
+test("Save As enforces the AnimData document format boundary in both directions", async () => {
+  const originalWindow = globalThis.window;
+  let selectedTarget = "";
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "save_file_dialog") return selectedTarget;
+          return { path: args.path, name: args.path.split(/[/\\]/).at(-1) };
+        }
+      }
+    }
+  };
+
+  const runSaveAs = async (doc, target) => {
+    selectedTarget = target;
+    calls.length = 0;
+    const errors = [];
+    const { controller } = testDocumentController(doc, {}, {
+      showError: (error) => errors.push(String(error?.message ?? error))
+    });
+    const saved = await controller.saveAs();
+    return { saved, errors, calls: calls.map((entry) => [...entry]) };
+  };
+
+  try {
+    for (const target of ["E:\\foo.d2", "E:\\foo.txt"]) {
+      const animData = TableDocument.fromText("animdata.d2", "CofName\n", {
+        encoding: "animdata-d2",
+        dirty: true
+      });
+      const result = await runSaveAs(animData, target);
+      assert.equal(result.saved, false);
+      assert.deepEqual(result.calls.map(([command]) => command), ["save_file_dialog"]);
+      assert.deepEqual(result.errors, ["The selected path is not valid for this document format."]);
+    }
+
+    const textResult = await runSaveAs(
+      TableDocument.fromText("items.txt", "id\n1", { dirty: true }),
+      "E:\\ANIMDATA.D2"
+    );
+    assert.equal(textResult.saved, false);
+    assert.deepEqual(textResult.calls.map(([command]) => command), ["save_file_dialog"]);
+    assert.deepEqual(textResult.errors, ["The selected path is not valid for this document format."]);
+
+    const allowed = await runSaveAs(
+      TableDocument.fromText("animdata.d2", "CofName\n", {
+        encoding: "animdata-d2",
+        dirty: true
+      }),
+      "E:\\ANIMDATA.D2"
+    );
+    assert.equal(allowed.saved, true);
+    assert.deepEqual(allowed.calls.map(([command]) => command), [
+      "save_file_dialog",
+      "write_text_file_safe"
+    ]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("document browser save as write failure keeps committed edit dirty", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { dirty: false });

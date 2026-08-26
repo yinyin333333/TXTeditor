@@ -1,6 +1,6 @@
 # TXTeditor
 
-TXTeditor is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files and supported D2R JSON string files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
+TXTeditor is a Windows-focused desktop editor for Diablo II / Diablo II: Resurrected style tab-separated `.txt` data files, `animdata.d2`, and supported D2R JSON string files. It is built as a Tauri v2 desktop app with a canvas-rendered virtual grid for editing large tables.
 
 TXTeditor is a personal project. I am not an experienced programmer, and most of the implementation was built with the help of OpenAI Codex. The app may contain bugs, incomplete behavior, or rough edges, but I am sharing it in case it is useful to others.
 
@@ -26,7 +26,7 @@ Windows builds are available from the [GitHub Releases page](https://github.com/
 
 ### Files, Workspaces, and Navigation
 
-- Open individual `.txt` files, supported D2R JSON string files, or an entire `data/global/excel` style folder.
+- Open individual `.txt` files, `animdata.d2`, supported D2R JSON string files, or a whole data folder.
 - Include subfolders in a workspace or exclude them through Settings.
 - Open file paths passed to TXTeditor when the desktop app starts.
 - Work with multiple open documents in tabs and filter files in the Explorer panel.
@@ -58,6 +58,10 @@ Windows builds are available from the [GitHub Releases page](https://github.com/
 TXTeditor includes a dedicated JSON code editor based on [CodeMirror](https://codemirror.net/). It currently supports D2R string files under `data/local/lng/strings/*.json`, with JSON syntax highlighting, bracket matching, folding, search, and syntax markers.
 
 JSON files use the same document tab and save workflow as table files. If an open JSON file changes on disk, TXTeditor asks whether to reload the disk version or keep the editor version.
+
+## AnimData Editing
+
+The desktop app opens `animdata.d2` through the normal file, folder, startup-path, and drag-and-drop flows. It presents the binary records as a table and automatically rebuilds the 256 hashed record buckets when saving, without creating an intermediate `animdata.txt`. Headers, record widths, COF names, and numeric ranges are fully validated in memory before the existing transactional save path atomically replaces the target. Its short-lived hidden transaction files are removed after a successful save.
 
 ## Linting
 

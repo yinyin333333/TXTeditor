@@ -21,6 +21,7 @@ import { diagnosticsForDocument } from "../../core/lint-engine.js";
 import { tableFileState } from "../../core/table-file-state.js";
 import {
   documentRevision,
+  isAnimDataDocument,
   isJsonDocument,
   isTableDocument
 } from "../../core/document-file-state.js";
@@ -361,6 +362,7 @@ export function createLspController({
   }
   async function openDoc(doc, { deferRender = false } = {}) {
     if (state.lint.enabled === false) return;
+    if (isAnimDataDocument(doc)) return;
     if (isTableDocument(doc) && doc?.largeFileMode) {
       recordLintEngineEvent("vector-open-skipped-large-file", {
         fileName: doc?.name, reasons: doc?.largeFileReasons ?? []
@@ -441,7 +443,7 @@ export function createLspController({
     return trackedPromise;
   }
   async function ensureStandaloneSession(doc = activeDoc(), { forceRestart = false } = {}) {
-    if (doc?.kind === "json" || state.lint.enabled === false || !isVectorLintEngine() || !isTauriRuntime()) return;
+    if (doc?.kind === "json" || isAnimDataDocument(doc) || state.lint.enabled === false || !isVectorLintEngine() || !isTauriRuntime()) return;
     if (!forceRestart && state.lsp.started && documentCanOpenInSession(doc)) return openDoc(doc);
     const referenceRootPath = state.workspace?.path ?? "";
     const parent = lspStandaloneParentPath(doc?.path, referenceRootPath, {

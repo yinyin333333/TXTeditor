@@ -1,5 +1,5 @@
 import { TableDocument, clamp } from "./core/table-model.js";
-import { isTableDocument } from "./core/document-file-state.js";
+import { isAnimDataDocument, isTableDocument } from "./core/document-file-state.js";
 import { canNavigateLocalizationJsonDiagnostic } from "./core/json-document-policy.js";
 import { makeCellCommand } from "./core/undo.js";
 import { resetUndoManagerForDocument } from "./core/document-undo-state.js";
@@ -556,10 +556,12 @@ function execute(command) {
 
 function finishCommand(doc, command, context = "edit", started = perfNow()) {
   if (!isTableDocument(doc)) return;
+  const isAnimData = isAnimDataDocument(doc);
   if (context === "undo" || context === "redo") manualHighlightController.afterCommand(doc, command, context);
   const contentChanged = command.contentChanged !== false;
+  const syncLint = contentChanged && !isAnimData;
+  if (syncLint) markLegacyLintDocChanged(doc);
   if (contentChanged) {
-    markLegacyLintDocChanged(doc);
     searchController?.notifyDocumentChanged(doc);
   }
   keepSelectionOnVisibleRow({ doc, selection: state.selection, clamp });
@@ -567,10 +569,12 @@ function finishCommand(doc, command, context = "edit", started = perfNow()) {
   grid.layout();
   const lspChange = context === "undo" ? command.undoLspChange ?? command.lspChange : command.lspChange;
   const syncRoute = documentChangeSyncRoute(state.lint.engine, state.lint.enabled);
-  if (contentChanged && syncRoute === "vector-update") {
-    lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
-  } else if (contentChanged && syncRoute === "legacy-lint-edit" && !doc.largeFileMode) {
-    scheduleLegacyLintForEdit(doc);
+  if (syncLint) {
+    if (syncRoute === "vector-update") {
+      lspUpdateDoc(doc, lspChange).catch((error) => handleLspUpdateError(doc, error, context));
+    } else if (syncRoute === "legacy-lint-edit" && !doc.largeFileMode) {
+      scheduleLegacyLintForEdit(doc);
+    }
   }
   recordUiPerf("row-command", started, { changedRows: Array.isArray(lspChange) ? lspChange.length : lspChange?.rows?.length ?? 0, contentChanged });
   renderChrome();

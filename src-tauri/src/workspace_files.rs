@@ -1,3 +1,4 @@
+use crate::animdata;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
@@ -204,7 +205,7 @@ fn collect_workspace_candidates(
         if !canonical_file.starts_with(root) || !visited_files.insert(canonical_file) {
             continue;
         }
-        if is_text_like(&entry_path) {
+        if is_text_like(&entry_path) || animdata::is_animdata_path(&entry_path) {
             text_paths.push(entry_path);
         } else if data_root_from_string_json(&entry_path).is_some() {
             json_candidates.push(entry_path);
@@ -479,6 +480,33 @@ mod tests {
 
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(names, vec!["direct.txt"]);
+    }
+
+    #[test]
+    fn workspace_listing_includes_animdata_binary_and_ignores_other_d2_files() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "txteditor-list-animdata-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let global = root.join("data/global");
+        fs::create_dir_all(&global).unwrap();
+        fs::write(global.join("animdata.d2"), [0u8; 4]).unwrap();
+        fs::write(global.join("other.d2"), [0u8; 4]).unwrap();
+
+        let payload = list_workspace_files(root.to_string_lossy().to_string(), None).unwrap();
+        let names = payload
+            .files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>();
+
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(names, vec!["animdata.d2"]);
     }
 
     #[test]

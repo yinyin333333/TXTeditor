@@ -484,6 +484,39 @@ test("platform facade preserves Tauri command payload shapes", async () => {
   }
 });
 
+test("animdata documents use one validated native binary write", async () => {
+  const originalWindow = globalThis.window;
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          return { path: args.path, name: "animdata.d2" };
+        }
+      }
+    }
+  };
+
+  try {
+    const doc = TableDocument.fromText("animdata.d2", "CofName\tFramesPerDirection\tAnimationSpeed\n", {
+      path: "E:\\Mod\\data\\global\\animdata.d2",
+      encoding: "animdata-d2",
+      dirty: true
+    });
+
+    assert.equal(await saveDocumentNative(doc), true);
+    assert.deepEqual(calls, [["write_text_file_safe", {
+      path: "E:\\Mod\\data\\global\\animdata.d2",
+      text: "CofName\tFramesPerDirection\tAnimationSpeed\n",
+      encoding: "animdata-d2"
+    }]]);
+    assert.equal(doc.dirty, false);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test("native save leaves dirty set when content changes during the write", async () => {
   const originalWindow = globalThis.window;
   const doc = TableDocument.fromText("items.txt", "id\nold", { path: "E:\\items.txt", dirty: true });
