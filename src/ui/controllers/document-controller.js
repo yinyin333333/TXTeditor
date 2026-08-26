@@ -43,6 +43,35 @@ import { tText } from "../../core/i18n.js";
 
 export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
 export const WORKSPACE_RELOAD_STORAGE_KEY = "txteditor.workspaceReload";
+export const DEFAULT_NEW_TABLE_ROWS = 3;
+export const DEFAULT_NEW_TABLE_COLUMNS = 10;
+
+export function createEmptyTableDocument(name = "Untitled.txt", rowCount = DEFAULT_NEW_TABLE_ROWS, columnCount = DEFAULT_NEW_TABLE_COLUMNS) {
+  const rows = Math.max(1, Math.floor(Number(rowCount) || DEFAULT_NEW_TABLE_ROWS));
+  const columns = Math.max(1, Math.floor(Number(columnCount) || DEFAULT_NEW_TABLE_COLUMNS));
+  return new TableDocument(
+    name,
+    Array.from({ length: rows }, () => Array.from({ length: columns }, () => "")),
+    { dirty: true, serializedColumnCount: columns, autoFitInitialColumns: false }
+  );
+}
+
+export function createTemporaryTableDocument(source, name) {
+  return new TableDocument(name, source.rows.map((row) => row.slice()), {
+    encoding: source.encoding,
+    lineEnding: source.lineEnding,
+    finalNewline: source.finalNewline,
+    dirty: true,
+    fileSizeBytes: source.fileSizeBytes,
+    serializedColumnCount: source.serializedColumnCount,
+    columnWidths: source.columnWidths,
+    rowHeights: source.rowHeights,
+    defaultColumnWidth: source.defaultColumnWidth,
+    defaultRowHeight: source.defaultRowHeight,
+    hasCustomRowHeights: source.hasCustomRowHeights,
+    autoFitInitialColumns: false
+  });
+}
 
 export function createDocumentController({
   state,
@@ -59,6 +88,7 @@ export function createDocumentController({
   renderChrome,
   showError,
   showToast = () => {},
+  promptNumber = async () => null,
   reportWindowCloseFailure,
   lspOpenDoc,
   lspUpdateDoc = async () => {},
@@ -251,6 +281,44 @@ export function createDocumentController({
       }
     } catch (error) {
       showError(error);
+    }
+  }
+
+  async function newTable() {
+    commitActiveEditor();
+    const rowCount = await promptNumber({
+      title: tText("command.new-table"),
+      message: tText("prompt.rowsToAdd"),
+      defaultValue: DEFAULT_NEW_TABLE_ROWS,
+      min: 1
+    });
+    if (rowCount == null) return null;
+    const columnCount = await promptNumber({
+      title: tText("command.new-table"),
+      message: tText("prompt.columnsToAdd"),
+      defaultValue: DEFAULT_NEW_TABLE_COLUMNS,
+      min: 1
+    });
+    if (columnCount == null) return null;
+    return addDocument(createEmptyTableDocument(uniqueDocumentName("Untitled.txt"), rowCount, columnCount));
+  }
+
+  async function duplicateTemporary() {
+    commitActiveEditor();
+    const source = activeDoc();
+    if (!state.docs.length || !isTableDocument(source)) return null;
+    return addDocument(createTemporaryTableDocument(source, uniqueDocumentName(temporaryDocumentName(source.name))));
+  }
+
+  function uniqueDocumentName(name) {
+    const names = new Set(state.docs.map((doc) => String(doc.name || "").toLocaleLowerCase()));
+    if (!names.has(name.toLocaleLowerCase())) return name;
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const extension = dot > 0 ? name.slice(dot) : "";
+    for (let index = 2; ; index += 1) {
+      const candidate = `${stem} ${index}${extension}`;
+      if (!names.has(candidate.toLocaleLowerCase())) return candidate;
     }
   }
 
@@ -832,6 +900,8 @@ export function createDocumentController({
     isTextLikeFile,
     isTextLikePath,
     loadFixture,
+    newTable,
+    duplicateTemporary,
     openBrowserFiles,
     openDroppedNativePaths,
     openFile,
@@ -842,6 +912,14 @@ export function createDocumentController({
     saveFile,
     wireCloseHandler
   };
+}
+
+function temporaryDocumentName(name) {
+  const value = String(name || "Untitled.txt");
+  const dot = value.lastIndexOf(".");
+  return dot > 0
+    ? `${value.slice(0, dot)} [Temporary]${value.slice(dot)}`
+    : `${value} [Temporary]`;
 }
 
 function yieldToUi() {

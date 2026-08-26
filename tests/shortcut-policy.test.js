@@ -28,6 +28,8 @@ function makeStorage() {
 test("shortcut defaults preserve command aliases and requested grid scrolling keys", () => {
   const shortcuts = defaultShortcutBindings();
 
+  assert.deepEqual(shortcuts["new-table"], []);
+  assert.deepEqual(shortcuts["duplicate-temporary"], []);
   assert.equal(globalShortcutAction({ key: "s", ctrlKey: true }, { shortcuts }), "save-file");
   assert.equal(globalShortcutAction({ key: "z", ctrlKey: true, shiftKey: true }, { shortcuts }), "redo");
   assert.equal(globalShortcutAction({ key: "+", ctrlKey: true, shiftKey: true }, { shortcuts }), "zoom-in");
@@ -43,10 +45,12 @@ test("shortcut defaults preserve command aliases and requested grid scrolling ke
 test("remapped shortcuts replace defaults at runtime", () => {
   const shortcuts = defaultShortcutBindings();
   shortcuts["save-file"] = ["Ctrl+K"];
+  shortcuts["new-table"] = ["Ctrl+N"];
   shortcuts["scroll-page-down"] = ["Ctrl+PageDown"];
 
   assert.equal(globalShortcutAction({ key: "s", ctrlKey: true }, { shortcuts }), null);
   assert.equal(globalShortcutAction({ key: "k", ctrlKey: true }, { shortcuts }), "save-file");
+  assert.equal(globalShortcutAction({ key: "n", ctrlKey: true }, { shortcuts }), "new-table");
   assert.equal(gridScrollShortcutAction({ key: "PageDown" }, { shortcuts }), null);
   assert.equal(gridScrollShortcutAction({ key: "PageDown", ctrlKey: true }, { shortcuts }), "scroll-page-down");
   assert.equal(shortcutActionForEvent({ key: "k", ctrlKey: true }, shortcuts), "save-file");
