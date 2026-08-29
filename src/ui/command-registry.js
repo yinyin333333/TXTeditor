@@ -1,6 +1,7 @@
 import { tText } from "../core/i18n.js";
 
 export const COMMAND_LABELS_BASE = [
+  ["new-table", "command.new-table"], ["duplicate-temporary", "command.duplicate-temporary"],
   ["open-file", "command.open-file"], ["open-folder", "command.open-folder"], ["close-all", "toolbar.closeAll"], ["save-file", "command.save-file"], ["save-as", "command.save-as"],
   ["search", "command.search"], ["find-next", "command.find-next"], ["find-previous", "command.find-previous"], ["replace", "command.replace"],
   ["go-to-row", "command.go-to-row"], ["next-tab", "command.next-tab"], ["previous-tab", "command.previous-tab"], ["undo", "command.undo"], ["redo", "command.redo"],
@@ -20,6 +21,7 @@ export const DEVELOPMENT_COMMAND_LABELS = [
 ];
 
 export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
+  "new-table",
   "open-file",
   "open-folder",
   "close-all",
@@ -42,6 +44,8 @@ export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
 ]);
 
 const COMMAND_ACTIONS = new Map([
+  ["new-table", { type: "handler", name: "newTable" }],
+  ["duplicate-temporary", { type: "handler", name: "duplicateTemporary" }],
   ["open-file", { type: "handler", name: "openFile" }],
   ["open-folder", { type: "handler", name: "openFolder" }],
   ["close-all", { type: "handler", name: "closeAll" }],
@@ -160,7 +164,7 @@ export function mathCommandItems() {
 }
 
 const JSON_DOCUMENT_COMMANDS = new Set([
-  "open-file", "open-folder", "close-all", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
+  "new-table", "open-file", "open-folder", "close-all", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
   "next-tab", "previous-tab",
   "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",
   "open-app-settings", "open-shortcut-settings", "open-settings",

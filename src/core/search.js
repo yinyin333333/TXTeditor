@@ -30,11 +30,6 @@ export function findInTable(doc, query, start = { row: 0, column: 0 }, options =
   return null;
 }
 
-
-export function searchMatchRange(value, query, options = {}) {
-  return searchMatchRanges(value, query, options)[0] ?? null;
-}
-
 export function searchMatchRanges(value, query, options = {}) {
   if (!query) return [];
   const source = String(value);

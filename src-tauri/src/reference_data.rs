@@ -1,6 +1,6 @@
 use crate::config::AppConfigState;
 use crate::file_io::decode_text;
-use crate::lsp_service::find_vector_lsp_binary;
+use crate::lsp_launch::find_vector_lsp_binary;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;

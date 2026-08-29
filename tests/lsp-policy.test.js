@@ -828,6 +828,174 @@ test("TXTeditor LSP controller routes runtime operations through the Tauri bound
   }
 });
 
+test("go-to-definition ignores responses whose source tab, URI, version, or context is stale", async () => {
+  const source = TableDocument.fromText("source.txt", "id\tref\n1\tTARGET", { path: "E:\\Data\\source.txt" });
+  const other = TableDocument.fromText("other.txt", "id\n2", { path: "E:\\Data\\other.txt" });
+  ensureLspDocumentVersion(source);
+  const state = {
+    docs: [source, other],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, version: 0, status: "", diagnostics: [] },
+    lsp: { started: true, generation: 7, readiness: "ready", openFileCount: 1 },
+    lspLogs: [],
+    contextHit: null,
+    selection: {
+      focus: { row: 1, column: 1 },
+      set(row, column) { this.focus = { row, column }; }
+    }
+  };
+  const pendingDefinitions = [];
+  const navigationCalls = [];
+  const definitionResult = () => ({ uri: docToUri(source), line: 0, character: 0 });
+  const requestDefinition = () => new Promise((resolve) => pendingDefinitions.push(resolve));
+  const controller = createLspController({
+    state,
+    els: { logList: null, host: { focus: () => navigationCalls.push("focus") } },
+    grid: {
+      clearLspHovers() {},
+      setLspHover() {},
+      visibleRowIndexes: () => [],
+      visibleColumnIndexes: () => [],
+      setDocument: () => navigationCalls.push("set-document"),
+      scrollCellIntoView: () => navigationCalls.push("scroll"),
+      draw: () => navigationCalls.push("draw")
+    },
+    activeDoc: () => state.docs[state.active],
+    isVectorLintEngine: () => true,
+    effectiveVectorLspHoverEnabled: () => false,
+    recordLintEngineEvent() {},
+    perfNow: () => 0,
+    showToast: () => navigationCalls.push("toast"),
+    showError(error) { throw error; },
+    setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+    updateGridDiagnostics: () => navigationCalls.push("diagnostics"),
+    renderChrome: () => navigationCalls.push("render"),
+    addDocument: async () => {},
+    applyFreezeToDoc() {},
+    updateActiveProblemHighlight: () => navigationCalls.push("active-problem"),
+    lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase(),
+    lspDefinitionRequest: requestDefinition
+  });
+
+  try {
+    const staleTab = controller.goToDefinition();
+    state.active = 1;
+    pendingDefinitions.shift()(definitionResult());
+    await staleTab;
+
+    state.active = 0;
+    const staleVersion = controller.goToDefinition();
+    nextLspDocumentVersion(source);
+    pendingDefinitions.shift()(definitionResult());
+    await staleVersion;
+
+    const staleContext = controller.goToDefinition();
+    state.selection.focus = { row: 0, column: 0 };
+    pendingDefinitions.shift()(definitionResult());
+    await staleContext;
+
+    state.selection.focus = { row: 1, column: 1 };
+    const staleUri = controller.goToDefinition();
+    const originalPath = source.path;
+    source.path = "E:\\Data\\renamed-source.txt";
+    pendingDefinitions.shift()({ uri: docToUri({ path: originalPath }), line: 0, character: 0 });
+    await staleUri;
+    source.path = originalPath;
+
+    assert.deepEqual(navigationCalls, []);
+    assert.deepEqual(state.selection.focus, { row: 1, column: 1 });
+  } finally {
+    resetLspDocumentState(source);
+    resetLspDocumentState(other);
+  }
+});
+
+test("go-to-definition does not navigate a different tab after a slow target add loses focus", async () => {
+  const originalWindow = globalThis.window;
+  const source = TableDocument.fromText("source.txt", "id\tref\n1\tTARGET", { path: "E:\\Data\\source.txt" });
+  const other = TableDocument.fromText("other.txt", "id\n2", { path: "E:\\Data\\other.txt" });
+  const targetPath = "E:\\Data\\target.txt";
+  ensureLspDocumentVersion(source);
+  const state = {
+    docs: [source, other],
+    active: 0,
+    lint: { enabled: true, engine: LINT_ENGINE_VECTOR, version: 0, status: "", diagnostics: [] },
+    lsp: { started: true, generation: 9, readiness: "ready", openFileCount: 1 },
+    lspLogs: [],
+    contextHit: null,
+    selection: {
+      focus: { row: 1, column: 1 },
+      set(row, column) { this.focus = { row, column }; }
+    }
+  };
+  const navigationCalls = [];
+  let releaseAdd;
+  let markAddStarted;
+  const addGate = new Promise((resolve) => { releaseAdd = resolve; });
+  const addStarted = new Promise((resolve) => { markAddStarted = resolve; });
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          assert.equal(command, "read_text_files");
+          return [{ Ok: { path: targetPath, name: "target.txt", text: "id\nTARGET", encoding: "utf-8" } }];
+        }
+      }
+    }
+  };
+  const controller = createLspController({
+    state,
+    els: { logList: null, host: { focus: () => navigationCalls.push("focus") } },
+    grid: {
+      clearLspHovers() {},
+      setLspHover() {},
+      visibleRowIndexes: () => [],
+      visibleColumnIndexes: () => [],
+      setDocument: () => navigationCalls.push("set-document"),
+      scrollCellIntoView: () => navigationCalls.push("scroll"),
+      draw: () => navigationCalls.push("draw")
+    },
+    activeDoc: () => state.docs[state.active],
+    isVectorLintEngine: () => true,
+    effectiveVectorLspHoverEnabled: () => false,
+    recordLintEngineEvent() {},
+    perfNow: () => 0,
+    showToast: () => navigationCalls.push("toast"),
+    showError(error) { throw error; },
+    setLintDiagnostics: (diagnostics) => { state.lint.diagnostics = diagnostics; },
+    updateGridDiagnostics: () => navigationCalls.push("diagnostics"),
+    renderChrome: () => navigationCalls.push("render"),
+    addDocument: async (doc) => {
+      state.docs.push(doc);
+      state.active = state.docs.indexOf(doc);
+      markAddStarted();
+      await addGate;
+      return doc;
+    },
+    applyFreezeToDoc() {},
+    updateActiveProblemHighlight: () => navigationCalls.push("active-problem"),
+    lintPathKey: (pathValue) => String(pathValue || "").replace(/\\/g, "/").toLowerCase(),
+    lspDefinitionRequest: async () => ({ uri: docToUri({ path: targetPath }), line: 1, character: 0 })
+  });
+
+  try {
+    const navigation = controller.goToDefinition();
+    await addStarted;
+    state.active = 1;
+    releaseAdd();
+    await navigation;
+
+    assert.equal(state.active, 1);
+    assert.deepEqual(navigationCalls, []);
+    assert.deepEqual(state.selection.focus, { row: 1, column: 1 });
+  } finally {
+    resetLspDocumentState(source);
+    resetLspDocumentState(other);
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("Vector-LSP tooltip removes duplicate value titles only", () => {
   assert.deepEqual(
     normalizeVectorLspTooltip("StrClassOnly", "StrClassOnly\r\n\r\nLookup column used by string class filters."),

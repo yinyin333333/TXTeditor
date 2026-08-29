@@ -3,6 +3,7 @@ import { JsonDocument } from "../../core/json-document.js";
 import { LARGE_FILE_THRESHOLDS } from "../../core/large-file-policy.js";
 import {
   documentTextSnapshot,
+  isAnimDataDocument,
   isJsonDocument,
   isTableDocument,
   markDocumentSaved
@@ -14,7 +15,7 @@ import {
 } from "../../core/json-document-policy.js";
 import { normalizePath } from "../../core/lint-paths.js";
 import { docToUri, lspStandaloneParentPath, pathFromUri } from "../../core/lsp-uri-policy.js";
-import { isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
+import { isAnimDataPath, isSupportedTablePath, isTextLikeFile, isTextLikePath } from "../../core/text-file-policy.js";
 import {
   closeWindow,
   downloadText,
@@ -42,6 +43,35 @@ import { tText } from "../../core/i18n.js";
 
 export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
 export const WORKSPACE_RELOAD_STORAGE_KEY = "txteditor.workspaceReload";
+export const DEFAULT_NEW_TABLE_ROWS = 3;
+export const DEFAULT_NEW_TABLE_COLUMNS = 10;
+
+export function createEmptyTableDocument(name = "Untitled.txt", rowCount = DEFAULT_NEW_TABLE_ROWS, columnCount = DEFAULT_NEW_TABLE_COLUMNS) {
+  const rows = Math.max(1, Math.floor(Number(rowCount) || DEFAULT_NEW_TABLE_ROWS));
+  const columns = Math.max(1, Math.floor(Number(columnCount) || DEFAULT_NEW_TABLE_COLUMNS));
+  return new TableDocument(
+    name,
+    Array.from({ length: rows }, () => Array.from({ length: columns }, () => "")),
+    { dirty: true, serializedColumnCount: columns, autoFitInitialColumns: false }
+  );
+}
+
+export function createTemporaryTableDocument(source, name) {
+  return new TableDocument(name, source.rows.map((row) => row.slice()), {
+    encoding: source.encoding,
+    lineEnding: source.lineEnding,
+    finalNewline: source.finalNewline,
+    dirty: true,
+    fileSizeBytes: source.fileSizeBytes,
+    serializedColumnCount: source.serializedColumnCount,
+    columnWidths: source.columnWidths,
+    rowHeights: source.rowHeights,
+    defaultColumnWidth: source.defaultColumnWidth,
+    defaultRowHeight: source.defaultRowHeight,
+    hasCustomRowHeights: source.hasCustomRowHeights,
+    autoFitInitialColumns: false
+  });
+}
 
 export function createDocumentController({
   state,
@@ -58,6 +88,7 @@ export function createDocumentController({
   renderChrome,
   showError,
   showToast = () => {},
+  promptNumber = async () => null,
   reportWindowCloseFailure,
   lspOpenDoc,
   lspUpdateDoc = async () => {},
@@ -94,7 +125,9 @@ export function createDocumentController({
   let pendingExternalResolve = null;
   let pendingExternal = null;
   const queuedExternalChanges = new Map();
+  const latestSuccessfulWatchEpochByPath = new Map();
   const pendingSaves = new WeakMap();
+  let nextWatchedFileEpoch = 0;
 
   function hasOpenDocument() {
     return state.docs.length > 0 && state.active >= 0;
@@ -200,6 +233,7 @@ export function createDocumentController({
   }
 
   async function syncOpenedTable(doc) {
+    if (isAnimDataDocument(doc)) return;
     if (documentOpenSyncRoute(state.lint.engine, state.lint.enabled) === "vector-open") {
       const referenceRootPath = state.workspace?.path ?? "";
       const siblingParent = isTauriRuntime()
@@ -250,9 +284,47 @@ export function createDocumentController({
     }
   }
 
+  async function newTable() {
+    commitActiveEditor();
+    const rowCount = await promptNumber({
+      title: tText("command.new-table"),
+      message: tText("prompt.rowsToAdd"),
+      defaultValue: DEFAULT_NEW_TABLE_ROWS,
+      min: 1
+    });
+    if (rowCount == null) return null;
+    const columnCount = await promptNumber({
+      title: tText("command.new-table"),
+      message: tText("prompt.columnsToAdd"),
+      defaultValue: DEFAULT_NEW_TABLE_COLUMNS,
+      min: 1
+    });
+    if (columnCount == null) return null;
+    return addDocument(createEmptyTableDocument(uniqueDocumentName("Untitled.txt"), rowCount, columnCount));
+  }
+
+  async function duplicateTemporary() {
+    commitActiveEditor();
+    const source = activeDoc();
+    if (!state.docs.length || !isTableDocument(source)) return null;
+    return addDocument(createTemporaryTableDocument(source, uniqueDocumentName(temporaryDocumentName(source.name))));
+  }
+
+  function uniqueDocumentName(name) {
+    const names = new Set(state.docs.map((doc) => String(doc.name || "").toLocaleLowerCase()));
+    if (!names.has(name.toLocaleLowerCase())) return name;
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const extension = dot > 0 ? name.slice(dot) : "";
+    for (let index = 2; ; index += 1) {
+      const candidate = `${stem} ${index}${extension}`;
+      if (!names.has(candidate.toLocaleLowerCase())) return candidate;
+    }
+  }
+
   async function openNativeDocumentPaths(paths, { requireCurrentJsonMode = false } = {}) {
-    const candidates = Array.from(paths ?? []).filter((path) => isTextLikePath(path) || isJsonPath(path));
-    const tablePaths = candidates.filter(isTextLikePath);
+    const candidates = Array.from(paths ?? []).filter((path) => isSupportedTablePath(path) || isJsonPath(path));
+    const tablePaths = candidates.filter(isSupportedTablePath);
     const jsonPaths = candidates.filter(isJsonPath);
     if (tablePaths.length) {
       const documentsByPath = new Map(state.docs
@@ -541,10 +613,18 @@ export function createDocumentController({
   }
 
   function validateSaveTarget(doc, path) {
-    if (!isJsonDocument(doc)) return true;
-    return isEditableLocalizationJsonPath(path)
-      && (normalizePath(path) === normalizePath(doc.path)
-        || isLocalizationJsonPathInCurrentMode(path, state));
+    const target = normalizePath(path);
+    if (target && state.docs.some((candidate) => candidate !== doc
+      && normalizePath(candidate?.path || "") === target)) {
+      throw new Error(tText("error.saveTargetAlreadyOpen"));
+    }
+    if (isJsonDocument(doc)) {
+      return isEditableLocalizationJsonPath(path)
+        && (target === normalizePath(doc.path)
+          || isLocalizationJsonPathInCurrentMode(path, state));
+    }
+    if (isAnimDataDocument(doc)) return isAnimDataPath(path);
+    return !isAnimDataPath(path);
   }
 
   async function loadFixture(size) {
@@ -608,26 +688,54 @@ export function createDocumentController({
 
   async function handleWatchedFilesChanged(payload = {}) {
     if (Number(payload.generation) !== Number(state.lsp.generation)) return;
+    const watchedChanges = [];
     for (const change of payload.changes ?? []) {
       const path = pathFromUri(change.uri);
       if (!path || !isJsonPath(path)) continue;
+      const pathKey = normalizePath(path);
+      watchedChanges.push({
+        change,
+        path,
+        pathKey,
+        watchEpoch: ++nextWatchedFileEpoch
+      });
+    }
+    for (const { change, path, pathKey, watchEpoch } of watchedChanges) {
       const doc = state.docs.find((candidate) => isJsonDocument(candidate)
-        && normalizePath(candidate.path) === normalizePath(path));
+        && normalizePath(candidate.path) === pathKey);
       if (!doc) continue;
       if (Number(change.type) === 3) {
         const replacement = await readReplacementAfterDelete(path);
+        if (!isCurrentWatchedDocument(doc, pathKey)) continue;
         if (replacement) {
+          if (!claimSuccessfulWatchEpoch(pathKey, watchEpoch)) continue;
           await processExternalPayload(doc, replacement);
           continue;
         }
+        if (!claimSuccessfulWatchEpoch(pathKey, watchEpoch)) continue;
         if (doc.pendingWriteText != null) continue;
         await resolveExternalConflict(doc, { path, deleted: true, text: null, encoding: doc.encoding });
         continue;
       }
       const [result] = await readTextFilesNative([path]);
       if (!result || result.error) continue;
+      if (!isCurrentWatchedDocument(doc, pathKey)) continue;
+      if (!claimSuccessfulWatchEpoch(pathKey, watchEpoch)) continue;
       await processExternalPayload(doc, result.payload);
     }
+  }
+
+  function isCurrentWatchedDocument(doc, pathKey) {
+    return state.docs.some((candidate) => candidate === doc
+      && isJsonDocument(candidate)
+      && normalizePath(candidate.path) === pathKey);
+  }
+
+  function claimSuccessfulWatchEpoch(pathKey, watchEpoch) {
+    const latestSuccessful = latestSuccessfulWatchEpochByPath.get(pathKey) ?? 0;
+    if (watchEpoch < latestSuccessful) return false;
+    latestSuccessfulWatchEpochByPath.set(pathKey, watchEpoch);
+    return true;
   }
 
   function externalDiskObservation(doc, payload = {}) {
@@ -640,6 +748,8 @@ export function createDocumentController({
   }
 
   async function processExternalPayload(doc, payload) {
+    const pathKey = normalizePath(payload.path || doc.path);
+    if (!isCurrentWatchedDocument(doc, pathKey)) return;
     const observation = externalDiskObservation(doc, payload);
     const { text, encoding } = observation;
     if (doc.matchesObservedDiskState(observation)) return;
@@ -660,7 +770,9 @@ export function createDocumentController({
     if (!doc.dirty) {
       doc.reloadFromDisk(text, { encoding });
       await jsonEditorController?.reloadActiveDocument(doc);
+      if (!isCurrentWatchedDocument(doc, pathKey)) return;
       await syncReloadedJsonToLsp(doc, "external-clean-reload");
+      if (!isCurrentWatchedDocument(doc, pathKey)) return;
       renderChrome();
       showToast(tText("toast.externalReload", { file: doc.name }));
       return;
@@ -669,7 +781,7 @@ export function createDocumentController({
   }
 
   async function syncReloadedJsonToLsp(doc, context) {
-    if (!isJsonDocument(doc) || !isVectorLintEngine()) return;
+    if (!isJsonDocument(doc) || !state.docs.includes(doc) || !isVectorLintEngine()) return;
     try {
       await lspUpdateDoc(doc, { kind: "json", changes: [] });
     } catch (error) {
@@ -687,6 +799,8 @@ export function createDocumentController({
   }
 
   async function resolveExternalConflict(doc, payload) {
+    const pathKey = normalizePath(payload.path || doc.path);
+    if (!isCurrentWatchedDocument(doc, pathKey)) return;
     const observation = externalDiskObservation(doc, payload);
     if (doc.matchesObservedDiskState(observation)) return;
     doc.noteExternalChange(payload);
@@ -697,14 +811,18 @@ export function createDocumentController({
     pendingExternal = { doc, payload };
     try {
       const choice = await askExternalChangeChoice(doc, payload);
-      if (choice === "reload" && !payload.deleted) {
-        doc.reloadFromDisk(payload.text, { encoding: payload.encoding });
-        await jsonEditorController?.reloadActiveDocument(doc);
-        await syncReloadedJsonToLsp(doc, "external-conflict-reload");
-      } else {
-        doc.keepLocalAfterExternalChange(payload);
+      if (isCurrentWatchedDocument(doc, pathKey)) {
+        if (choice === "reload" && !payload.deleted) {
+          doc.reloadFromDisk(payload.text, { encoding: payload.encoding });
+          await jsonEditorController?.reloadActiveDocument(doc);
+          if (isCurrentWatchedDocument(doc, pathKey)) {
+            await syncReloadedJsonToLsp(doc, "external-conflict-reload");
+          }
+        } else {
+          doc.keepLocalAfterExternalChange(payload);
+        }
+        if (isCurrentWatchedDocument(doc, pathKey)) renderChrome();
       }
-      renderChrome();
     } finally {
       pendingExternal = null;
     }
@@ -782,6 +900,8 @@ export function createDocumentController({
     isTextLikeFile,
     isTextLikePath,
     loadFixture,
+    newTable,
+    duplicateTemporary,
     openBrowserFiles,
     openDroppedNativePaths,
     openFile,
@@ -792,6 +912,14 @@ export function createDocumentController({
     saveFile,
     wireCloseHandler
   };
+}
+
+function temporaryDocumentName(name) {
+  const value = String(name || "Untitled.txt");
+  const dot = value.lastIndexOf(".");
+  return dot > 0
+    ? `${value.slice(0, dot)} [Temporary]${value.slice(dot)}`
+    : `${value} [Temporary]`;
 }
 
 function yieldToUi() {

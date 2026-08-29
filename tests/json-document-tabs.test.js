@@ -300,6 +300,94 @@ test("clean external JSON reload resynchronizes the live LSP buffer", async () =
   }
 });
 
+test("newer successful watched-file reads cannot be overwritten by an older batch", async () => {
+  const originalWindow = globalThis.window;
+  const path = "E:\\mod\\data\\local\\lng\\strings\\skills.json";
+  const doc = JsonDocument.fromText("skills.json", "[0]", {
+    path,
+    encoding: "utf-8",
+    dirty: false
+  });
+  const state = {
+    docs: [doc],
+    active: 0,
+    lint: { engine: "vector-lsp" },
+    lsp: { generation: 11 },
+    workspace: null
+  };
+  const pendingReads = [];
+  const updates = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: (command) => {
+          assert.equal(command, "read_text_files");
+          return new Promise((resolve) => pendingReads.push(resolve));
+        }
+      }
+    }
+  };
+  const controller = createDocumentController({
+    state,
+    els: {},
+    grid: {},
+    emptyDoc: JsonDocument.fromText("empty.json", ""),
+    activeDoc: () => doc,
+    saveSelectionState() {},
+    applyFreezeToDoc() {},
+    renderChrome() {},
+    showError(error) { throw error; },
+    reportWindowCloseFailure() {},
+    lspOpenDoc: async () => {},
+    lspUpdateDoc: async (candidate, change) => updates.push({ candidate, change }),
+    handleLspUpdateError(_candidate, error) { throw error; },
+    reportLspOpenFailure() {},
+    lspCloseDoc: async () => {},
+    reportLspCloseFailure() {},
+    lspStartWorkspace: async () => {},
+    scheduleHoverPrewarm() {},
+    resetUndoManagerForDocument() {},
+    resetLegacyWorkspaceIndex() {},
+    scheduleLegacyLintForOpen() {},
+    scheduleLegacyLintFull() {},
+    cancelLegacyLintJobs() {},
+    isVectorLintEngine: () => true,
+    isLegacyLintEngine: () => false,
+    updateGridDiagnostics() {},
+    scrollProblemsToActiveFile() {}
+  });
+  const change = { uri: docToUri(doc), type: 2 };
+
+  try {
+    const older = controller.handleWatchedFilesChanged({ generation: 11, changes: [change, change] });
+    while (pendingReads.length < 1) await new Promise((resolve) => setImmediate(resolve));
+    const newer = controller.handleWatchedFilesChanged({ generation: 11, changes: [change] });
+    while (pendingReads.length < 2) await new Promise((resolve) => setImmediate(resolve));
+
+    pendingReads[1]([{ Ok: { path, name: "skills.json", text: "[new]", encoding: "utf-8" } }]);
+    await newer;
+    pendingReads[0]([{ Ok: { path, name: "skills.json", text: "[old-first]", encoding: "utf-8" } }]);
+    while (pendingReads.length < 3) await new Promise((resolve) => setImmediate(resolve));
+    pendingReads[2]([{ Ok: { path, name: "skills.json", text: "[old-second]", encoding: "utf-8" } }]);
+    await older;
+
+    assert.equal(doc.text, "[new]");
+    assert.equal(doc.dirty, false);
+    assert.equal(updates.length, 1);
+
+    const closedRead = controller.handleWatchedFilesChanged({ generation: 11, changes: [change] });
+    while (pendingReads.length < 4) await new Promise((resolve) => setImmediate(resolve));
+    state.docs = [];
+    pendingReads[3]([{ Ok: { path, name: "skills.json", text: "[closed]", encoding: "utf-8" } }]);
+    await closedRead;
+    assert.equal(doc.text, "[new]", "a read completing after close cannot mutate the detached document");
+    assert.equal(updates.length, 1, "a read completing after close cannot reopen the URI in LSP");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
 test("Keep suppresses duplicate watched-file conflicts until the disk identity changes", async () => {
   const originalWindow = globalThis.window;
   const path = "E:\\mod\\data\\local\\lng\\strings\\skills.json";

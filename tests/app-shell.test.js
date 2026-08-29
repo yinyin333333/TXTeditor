@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  isAnimDataPath,
+  isSupportedTablePath,
   isTextLikeFile,
   isTextLikePath
 } from "../src/core/text-file-policy.js";
@@ -278,6 +280,9 @@ test("text-like path policy is shared by document loading and legacy workspace l
   assert.equal(isTextLikePath("notes.txt.bak"), false);
   assert.equal(isTextLikePath("config.json"), false);
   assert.equal(isTextLikeFile({ name: "misc.CSV" }), true);
+  assert.equal(isAnimDataPath("E:/Game/data/global/ANIMDATA.D2"), true);
+  assert.equal(isAnimDataPath("E:/Game/data/global/other.d2"), false);
+  assert.equal(isSupportedTablePath("E:/Game/data/global/animdata.d2"), true);
 });
 
 test("Explorer, Problems, and sidebar commands dispatch to available handlers without an open document", () => {

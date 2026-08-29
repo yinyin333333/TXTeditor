@@ -73,14 +73,16 @@ fn normalize_launch_argument(argument: OsString) -> Option<String> {
 }
 
 fn is_text_file_path(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(|extension| {
-            TEXT_FILE_EXTENSIONS
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
+    let path = Path::new(path);
+    crate::animdata::is_animdata_path(path)
+        || path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| {
+                TEXT_FILE_EXTENSIONS
+                    .iter()
+                    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+            })
 }
 
 #[cfg(test)]
@@ -128,6 +130,23 @@ mod tests {
                 r"C:\D2 Mods\objects.tbl".to_string(),
                 r"C:\D2 Mods\export.csv".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn accepts_animdata_binary_but_not_other_d2_files() {
+        let paths = launch_text_paths(
+            [
+                OsString::from("TXTeditor.exe"),
+                OsString::from(r"C:\D2 Mod\data\global\animdata.d2"),
+                OsString::from(r"C:\D2 Mod\data\global\other.d2"),
+            ],
+            Path::new(""),
+        );
+
+        assert_eq!(
+            paths,
+            vec![r"C:\D2 Mod\data\global\animdata.d2".to_string()]
         );
     }
 

@@ -1,9 +1,11 @@
+mod animdata;
 mod app_bootstrap;
 mod clipboard;
 mod config;
 mod file_io;
 mod launch_paths;
 mod lsp_file_watcher;
+mod lsp_launch;
 mod lsp_protocol;
 mod lsp_service;
 mod native_paths;
@@ -43,6 +45,7 @@ pub fn run() {
             lsp_service::lsp_reserve_generation,
             lsp_service::lsp_start,
             lsp_service::lsp_stop,
+            lsp_service::lsp_change_locale,
             lsp_service::lsp_open_file,
             lsp_service::lsp_update_file,
             lsp_service::lsp_update_file_incremental,

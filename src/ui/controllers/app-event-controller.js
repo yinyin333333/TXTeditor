@@ -125,7 +125,7 @@ export function createAppEventController({
     if (editingCell && !shortcutAction) return;
     if (!editingCell && jsonEditorOwnsTarget(event.target)) {
       const appOwned = new Set([
-        "open-file", "save-file", "save-as", "toggle-sidebar", "toggle-problems",
+        "new-table", "duplicate-temporary", "open-file", "save-file", "save-as", "toggle-sidebar", "toggle-problems",
         "show-palette", "close-tab", "next-tab", "previous-tab",
         "search", "find-next", "find-previous", "replace"
       ]);
@@ -163,6 +163,8 @@ export function createAppEventController({
   }
 
   function runGlobalShortcutAction(event, action) {
+    if (action === "new-table") return prevent(event, () => runCommand("new-table"));
+    if (action === "duplicate-temporary") return prevent(event, () => runCommand("duplicate-temporary"));
     if (action === "zoom-in") return prevent(event, () => runCommand("zoom-in"));
     if (action === "zoom-out") return prevent(event, () => runCommand("zoom-out"));
     if (action === "zoom-reset") return prevent(event, () => runCommand("zoom-reset"));

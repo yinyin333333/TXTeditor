@@ -24,6 +24,11 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+test("app diagnostics wiring forwards the preserve-version option", () => {
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /function setLintDiagnostics\(diagnostics, options\)\s*\{\s*return diagnosticsController\.setLintDiagnostics\(diagnostics, options\);\s*\}/);
+});
+
 test("Stage 1-B derived diagnostics cache preserves the flat source and avoids global filters", () => {
   const active = TableDocument.fromText("a.txt", "id\n1\n2", { path: "E:\\Data\\a.txt" });
   const other = TableDocument.fromText("b.txt", "id\n1", { path: "E:\\Data\\b.txt" });
@@ -110,6 +115,101 @@ test("Stage 1-B derived diagnostics cache preserves the flat source and avoids g
   assert.equal(controller.docHasDiagnostics(active), false);
   assert.equal(gridSnapshots.at(-1).size, 0);
   assert.equal(controller.lintSummaryText(), "No problems (2 files linted)");
+});
+
+test("active Problems highlighting updates only IDs changed by the selection", () => {
+  const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const { document } = installFakeAppStartupDom({ indexHtml });
+  const rows = ["id\tvalue", ...Array.from({ length: 60 }, (_, index) => `row-${index}\t${index}`)];
+  const doc = TableDocument.fromText("items.txt", rows.join("\n"), { path: "E:\\Data\\items.txt" });
+  const fileKey = pathKey(doc.path);
+  const diagnostics = [
+    { id: "first-a", fileKey, fileName: doc.name, rowIndex: 1, columnIndex: 0, severity: "warning", message: "first a" },
+    { id: "first-b", fileKey, fileName: doc.name, rowIndex: 1, columnIndex: 0, severity: "info", message: "first b" },
+    { id: "second", fileKey, fileName: doc.name, rowIndex: 2, columnIndex: 0, severity: "error", message: "second" },
+    ...Array.from({ length: 50 }, (_, index) => ({
+      id: `inactive-${index}`,
+      fileKey,
+      fileName: doc.name,
+      rowIndex: index + 3,
+      columnIndex: 0,
+      severity: "warning",
+      message: `inactive ${index}`
+    }))
+  ];
+  const state = {
+    docs: [doc],
+    active: 0,
+    selection: { focus: { row: 1, column: 0 } },
+    problemsVisible: true,
+    bottomTab: "problems",
+    config: {},
+    lint: {
+      diagnostics,
+      enabled: true,
+      engine: LINT_ENGINE_VECTOR,
+      status: "",
+      version: 1,
+      legacy: {
+        status: "",
+        rulesOpen: false,
+        settings: { profile: "basic" },
+        workspaceDocs: [],
+        workspaceLoad: { status: "ready" }
+      }
+    },
+    lsp: { started: true, openFileCount: 1 }
+  };
+  const problemsList = document.getElementById("problemsList");
+  const originalQuerySelectorAll = problemsList.querySelectorAll.bind(problemsList);
+  let buttonIndexScans = 0;
+  problemsList.querySelectorAll = (selector) => {
+    if (selector === "[data-diagnostic-id]") buttonIndexScans += 1;
+    return originalQuerySelectorAll(selector);
+  };
+  const controller = createDiagnosticsController({
+    state,
+    els: { overviewRuler: null, problemsList, host: document.getElementById("gridHost") },
+    grid: { editingCell: () => null, setDiagnostics() {} },
+    activeDoc: () => doc,
+    hasOpenDocument: () => true,
+    addDocument: async () => {},
+    renderChrome: () => {},
+    recordUiPerf: () => {},
+    showError: (error) => { throw error; },
+    lintDocKey: (value) => pathKey(value?.path || value?.name),
+    lintPathKey: pathKey,
+    escapeHtml,
+    storage: { setItem() {} }
+  });
+
+  controller.renderProblemsPanelIfNeeded();
+  assert.equal(buttonIndexScans, 1);
+  const buttons = originalQuerySelectorAll("[data-diagnostic-id]");
+  assert.equal(buttons.length, diagnostics.length);
+  const buttonById = new Map(buttons.map((button) => [button.dataset.diagnosticId, button]));
+  let toggles = 0;
+  for (const button of buttons) {
+    const toggle = button.classList.toggle.bind(button.classList);
+    button.classList.toggle = (...args) => {
+      toggles += 1;
+      return toggle(...args);
+    };
+  }
+
+  state.selection.focus = { row: 2, column: 0 };
+  controller.handleSelectionChanged();
+
+  assert.equal(buttonIndexScans, 1, "selection changes reuse the render-time button index");
+  assert.equal(toggles, 3, "only two previous IDs and one next ID are updated");
+  assert.equal(buttonById.get("first-a").classList.contains("problem-item-active-cell"), false);
+  assert.equal(buttonById.get("first-b").getAttribute("aria-current"), null);
+  assert.equal(buttonById.get("second").classList.contains("problem-item-active-cell"), true);
+  assert.equal(buttonById.get("second").getAttribute("aria-current"), "location");
+  assert.equal(buttonById.get("inactive-0").classList.contains("problem-item-active-cell"), false);
+
+  controller.handleSelectionChanged();
+  assert.equal(toggles, 3, "an unchanged active cell performs no button mutations");
 });
 
 test("Stage 1-E diagnostics-only refresh preserves tab and file DOM while patching badges", () => {

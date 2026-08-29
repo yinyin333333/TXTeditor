@@ -12,6 +12,8 @@ import { LARGE_FILE_THRESHOLDS } from "../src/core/large-file-policy.js";
 import { fillSelectedCellsCommand } from "../src/core/operations.js";
 import { createAppEventController } from "../src/ui/controllers/app-event-controller.js";
 import {
+  DEFAULT_NEW_TABLE_COLUMNS,
+  DEFAULT_NEW_TABLE_ROWS,
   createDocumentController,
   WORKSPACE_PATH_STORAGE_KEY,
   WORKSPACE_RELOAD_STORAGE_KEY
@@ -211,11 +213,14 @@ test("command registry preserves public command labels and availability policy",
   assert.deepEqual(calls, ["open-file", "show-problems"]);
 
   assert.equal(canRunCommandWithoutDocument("open-file"), true);
+  assert.equal(canRunCommandWithoutDocument("new-table"), true);
   assert.equal(canRunCommandWithoutDocument("close-all"), true);
   assert.equal(canRunCommandWithoutDocument("show-problems"), true);
   assert.equal(canRunCommandWithoutDocument("save-file"), false);
   assert.equal(canRunCommandWithoutDocument("go-to-definition"), false);
   assert.deepEqual(commandActionForId("open-file"), { type: "handler", name: "openFile" });
+  assert.deepEqual(commandActionForId("new-table"), { type: "handler", name: "newTable" });
+  assert.deepEqual(commandActionForId("duplicate-temporary"), { type: "handler", name: "duplicateTemporary" });
   assert.deepEqual(commandActionForId("close-all"), { type: "handler", name: "closeAll" });
   assert.deepEqual(commandActionForId("load-fixture-20k"), { type: "fixture", size: 20000 });
   assert.deepEqual(commandActionForId("insert-row"), { type: "handler", name: "insertRows" });
@@ -225,6 +230,46 @@ test("command registry preserves public command labels and availability policy",
   assert.deepEqual(commandActionForId("resize-selected-fit"), { type: "resize", useSelection: true });
   assert.deepEqual(commandActionForId("go-to-definition"), { type: "handler", name: "goToDefinition" });
   assert.deepEqual(commandActionForId("missing-command"), { type: "unknown", id: "missing-command" });
+});
+
+test("new table creates an unsaved table with default 3 x 10 dimensions", async () => {
+  const prompts = [];
+  const { controller, state } = testDocumentController([], {}, {
+    promptNumber: async (options) => {
+      prompts.push(options);
+      return options.defaultValue;
+    }
+  });
+
+  const doc = await controller.newTable();
+
+  assert.equal(doc.rowCount, DEFAULT_NEW_TABLE_ROWS);
+  assert.equal(doc.columnCount, DEFAULT_NEW_TABLE_COLUMNS);
+  assert.equal(doc.path, "");
+  assert.equal(doc.dirty, true);
+  assert.equal(doc.name, "Untitled.txt");
+  assert.equal(state.docs.length, 1);
+  assert.deepEqual(prompts.map(({ defaultValue }) => defaultValue), [DEFAULT_NEW_TABLE_ROWS, DEFAULT_NEW_TABLE_COLUMNS]);
+});
+
+test("temporary duplicate is independent from the active source document", async () => {
+  const source = TableDocument.fromText("items.txt", "id\tvalue\n1\toriginal", {
+    path: "E:\\Data\\items.txt",
+    dirty: false
+  });
+  const { controller, state } = testDocumentController(source);
+
+  const copy = await controller.duplicateTemporary();
+
+  assert.notEqual(copy, source);
+  assert.equal(copy.name, "items [Temporary].txt");
+  assert.equal(copy.path, "");
+  assert.equal(copy.dirty, true);
+  assert.equal(copy.toText(), source.toText());
+  assert.equal(state.active, 1);
+  copy.setCell(1, 1, "changed");
+  assert.equal(source.getCell(1, 1), "original");
+  assert.equal(copy.getCell(1, 1), "changed");
 });
 
 test("document lifecycle policy preserves open, unsaved, and close-tab decisions", () => {
@@ -459,6 +504,117 @@ test("document native save as cancel keeps committed edit dirty", async () => {
     assert.equal(await controller.saveAs(), false);
     assert.equal(doc.toText(), "id\nnew");
     assert.equal(doc.dirty, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("Save As enforces the AnimData document format boundary in both directions", async () => {
+  const originalWindow = globalThis.window;
+  let selectedTarget = "";
+  const calls = [];
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          if (command === "save_file_dialog") return selectedTarget;
+          return { path: args.path, name: args.path.split(/[/\\]/).at(-1) };
+        }
+      }
+    }
+  };
+
+  const runSaveAs = async (doc, target) => {
+    selectedTarget = target;
+    calls.length = 0;
+    const errors = [];
+    const { controller } = testDocumentController(doc, {}, {
+      showError: (error) => errors.push(String(error?.message ?? error))
+    });
+    const saved = await controller.saveAs();
+    return { saved, errors, calls: calls.map((entry) => [...entry]) };
+  };
+
+  try {
+    for (const target of ["E:\\foo.d2", "E:\\foo.txt"]) {
+      const animData = TableDocument.fromText("animdata.d2", "CofName\n", {
+        encoding: "animdata-d2",
+        dirty: true
+      });
+      const result = await runSaveAs(animData, target);
+      assert.equal(result.saved, false);
+      assert.deepEqual(result.calls.map(([command]) => command), ["save_file_dialog"]);
+      assert.deepEqual(result.errors, ["The selected path is not valid for this document format."]);
+    }
+
+    const textResult = await runSaveAs(
+      TableDocument.fromText("items.txt", "id\n1", { dirty: true }),
+      "E:\\ANIMDATA.D2"
+    );
+    assert.equal(textResult.saved, false);
+    assert.deepEqual(textResult.calls.map(([command]) => command), ["save_file_dialog"]);
+    assert.deepEqual(textResult.errors, ["The selected path is not valid for this document format."]);
+
+    const allowed = await runSaveAs(
+      TableDocument.fromText("animdata.d2", "CofName\n", {
+        encoding: "animdata-d2",
+        dirty: true
+      }),
+      "E:\\ANIMDATA.D2"
+    );
+    assert.equal(allowed.saved, true);
+    assert.deepEqual(allowed.calls.map(([command]) => command), [
+      "save_file_dialog",
+      "write_text_file_safe"
+    ]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("document native Save As rejects another open document path but allows its own path", async () => {
+  const originalWindow = globalThis.window;
+  const active = TableDocument.fromText("active.txt", "id\nactive", {
+    path: "E:\\Mods\\active.txt",
+    dirty: true
+  });
+  const other = TableDocument.fromText("other.txt", "id\nother", {
+    path: "E:\\Mods\\other.txt",
+    dirty: false
+  });
+  const errors = [];
+  const writes = [];
+  let target = "e:/mods/OTHER.txt";
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        async invoke(command, args) {
+          if (command === "save_file_dialog") return target;
+          assert.equal(command, "write_text_file_chunk_safe");
+          writes.push(args);
+          return { path: args.path, name: "active.txt" };
+        }
+      }
+    }
+  };
+
+  try {
+    const { controller } = testDocumentController([active, other], {}, {
+      showError: (error) => errors.push(String(error?.message ?? error))
+    });
+
+    assert.equal(await controller.saveAs(), false);
+    assert.equal(writes.length, 0);
+    assert.equal(active.path, "E:\\Mods\\active.txt");
+    assert.deepEqual(errors, ["The selected path is already open in another document."]);
+
+    target = "e:/mods/ACTIVE.txt";
+    assert.equal(await controller.saveAs(), true);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, target);
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
@@ -1932,6 +2088,7 @@ function testDocumentController(docOrDocs, gridOverrides = {}, options = {}) {
     applyFreezeToDoc: () => {},
     renderChrome: options.renderChrome ?? (() => {}),
     showError: options.showError ?? ((error) => { throw error; }),
+    promptNumber: options.promptNumber,
     reportWindowCloseFailure: () => {},
     lspOpenDoc: options.lspOpenDoc ?? (() => {}),
     reportLspOpenFailure: () => {},
