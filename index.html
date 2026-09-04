@@ -8,11 +8,6 @@
   </head>
   <body>
     <div id="app" class="shell">
-      <aside class="activity" aria-label="Activity" data-i18n-aria-label="aria.activity">
-        <button class="activity-button active" data-command="show-explorer" data-i18n-title="activity.explorer" title="Explorer">E</button>
-        <button class="activity-button" data-command="show-problems" data-i18n-title="activity.problems" title="Problems">P</button>
-      </aside>
-
       <div id="layoutRoot" class="layout-root">
         <section id="dockTop" class="dock dock-top" data-dock-edge="top" aria-label="Top dock" data-i18n-aria-label="aria.topDock"></section>
 
@@ -36,6 +31,10 @@
         <main class="main">
           <div id="tabs" class="tabs"></div>
           <section class="toolbar">
+            <div class="panel-toggles" role="group" aria-label="Activity" data-i18n-aria-label="aria.activity">
+              <button class="activity-button toggle-button active" data-command="show-explorer" data-i18n-title="activity.explorer" data-i18n-aria-label="activity.explorer" aria-label="Explorer" aria-pressed="true" title="Explorer">E</button>
+              <button class="activity-button toggle-button" data-command="show-problems" data-i18n-title="activity.problems" data-i18n-aria-label="activity.problems" aria-label="Problems" aria-pressed="false" title="Problems">P</button>
+            </div>
             <button data-command="open-file" data-i18n="toolbar.open">Open</button>
             <button data-command="save-file" data-i18n="toolbar.save">Save</button>
             <button data-command="save-as" data-i18n="toolbar.saveAs">Save As</button>

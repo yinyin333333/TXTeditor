@@ -2,6 +2,8 @@ import { isJsonDocument, isTableDocument } from "../../core/document-file-state.
 import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
 import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
 import { tText } from "../../core/i18n.js";
+import { revealActiveDocumentTab } from "../document-tab-visibility.js";
+import { showButtonClickFeedback } from "../button-feedback-policy.js";
 
 export function createShellController({
   state,
@@ -38,6 +40,10 @@ export function createShellController({
 }) {
   const collapsedFileGroups = new Set();
   let explorerSearchActiveIndex = 0;
+  // The shell and its observer live for the lifetime of the app.
+  const tabResizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => revealActiveDocumentTab(els.tabs)) : null;
+  if (els.tabs) tabResizeObserver?.observe(els.tabs);
 
   function updateDiagnosticIndicators({ fileBadges = false } = {}) {
     updateGridDiagnostics();
@@ -103,9 +109,11 @@ export function createShellController({
     updateDiagnosticIndicators();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
       button.classList.toggle("active", state.sidebarVisible);
+      button.setAttribute("aria-pressed", String(state.sidebarVisible));
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
+      button.setAttribute("aria-pressed", String(state.problemsVisible));
     }
     for (const button of documentRef.querySelectorAll("[data-command='close-all']")) {
       button.disabled = !state.workspace && !state.docs.length;
@@ -138,9 +146,10 @@ export function createShellController({
         const titleClass = severity ? `tab-title tab-title-${severity}` : "tab-title";
         const kindClass = isJsonDocument(doc) ? "tab-json" : "tab-table";
         const dirty = doc.dirty ? `<span class="tab-dirty-dot" title="${tText("tab.unsavedChanges")}">●</span>` : "";
-        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
+        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}" aria-pressed="${index === state.active}" title="${escapeHtml(doc.path || doc.name)}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
       })
       .join("");
+    revealActiveDocumentTab(els.tabs);
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
       docs: state.docs,
@@ -156,7 +165,10 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
-        selectTab(Number(button.dataset.tab)).catch(showError);
+        selectTab(Number(button.dataset.tab)).then(() => {
+          // renderChrome replaces the clicked element, so animate its replacement.
+          showButtonClickFeedback(els.tabs.querySelector("button.active[data-tab]"));
+        }).catch(showError);
       });
     }
     for (const button of documentRef.querySelectorAll("[data-close-tab]")) {
