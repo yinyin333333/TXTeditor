@@ -17,6 +17,7 @@ import {
 import { syncDockChildren } from "../dock-sync.js";
 import {
   DOCK_LAYOUT_KEY,
+  ACTIVITY_BAR_VISIBILITY_KEY,
   MIN_PROBLEMS_HEIGHT,
   MIN_SIDEBAR_WIDTH,
   PROBLEMS_HEIGHT_KEY,
@@ -350,6 +351,13 @@ export function createDockController({
     toggleExplorerPane();
   }
 
+  function toggleActivityBar() {
+    state.activityBarVisible = state.activityBarVisible === false;
+    localStorage.setItem(ACTIVITY_BAR_VISIBILITY_KEY, panelVisibilityStorageValue(state.activityBarVisible));
+    renderChrome();
+    layoutGrid();
+  }
+
   return {
     dockForPanel,
     resetDockLayout,
@@ -359,6 +367,7 @@ export function createDockController({
     toggleExplorerPane,
     toggleProblemsPanel,
     toggleSidebar,
+    toggleActivityBar,
     wirePaneResizers
   };
 }

@@ -579,6 +579,7 @@ function validateSkillSummode(index, ctx, table, monModes = index.monModes, opti
     if (!summon) return;
     const summode = String(row.get("summode") ?? "");
     const skill = clean(row.get("skill"));
+    if (!clean(summode) && skill === "DiabPrison") return;
     if (!monModes.has(asciiLower(summode))) {
       const message = legacyMessage("basic.unknownSummode", { summode, skill });
       ctx.add(table, row.rowIndex, "summode", message, {

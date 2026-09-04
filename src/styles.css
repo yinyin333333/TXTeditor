@@ -44,6 +44,8 @@
   --buttonFocusRing: rgba(94, 177, 255, .42);
   --buttonHoverShadow: 0 1px 3px rgba(0, 0, 0, .28);
   --buttonPressedShadow: inset 0 1px 3px rgba(0, 0, 0, .36);
+  --chromeSelectedBg: #34414c;
+  --chromeSelectedBorder: #667b8d;
   --columnTextA: #9ccff0;
   --columnTextB: #a8cfa5;
   --columnTextC: #d7ba7d;
@@ -150,6 +152,8 @@
 }
 
 :root[data-theme="light"] {
+  --chromeSelectedBg: #dfe7ee;
+  --chromeSelectedBorder: #879caf;
   color-scheme: light;
   --appBg: #f7f8fb;
   --surfaceBg: #f4f6f9;
@@ -422,6 +426,14 @@ button.button-click-feedback {
   align-items: center;
   padding-top: 8px;
   gap: 6px;
+}
+
+.shell.activity-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.shell.activity-hidden .activity {
+  display: none;
 }
 
 .layout-root {
@@ -791,27 +803,34 @@ button.button-click-feedback {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 34px auto auto minmax(0, 1fr);
+  grid-template-rows: 44px auto auto minmax(0, 1fr);
 }
 
 .tabs {
   display: flex;
-  align-items: end;
+  align-items: start;
+  gap: 0;
+  padding: 0;
   background: var(--surface-1);
   border-bottom: 1px solid var(--line);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .tabs button {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
+  flex: 0 0 auto;
+  height: 34px;
   min-width: 130px;
   max-width: 220px;
   padding: 0 12px;
+  border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
+  background: transparent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -830,6 +849,7 @@ button.button-click-feedback {
 .tab-title-warning { color: #cca700; }
 
 .tab-close {
+  flex: 0 0 18px;
   width: 18px;
   height: 18px;
   border-radius: 4px;
@@ -844,10 +864,31 @@ button.button-click-feedback {
   background: var(--hover);
 }
 
-.tabs button.active {
-  background: var(--bg);
-  border-top: 1px solid var(--accent);
+.tabs button.active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--chromeSelectedBg);
+  border-color: var(--chromeSelectedBorder);
+  box-shadow: inset 0 2px 0 var(--chromeSelectedBorder);
   color: var(--text-strong);
+}
+
+.tabs button.active .tab-title {
+  font-weight: 600;
+}
+
+.tabs button.active:not(:disabled):not([aria-disabled="true"]):hover {
+  background: var(--buttonPressedBg);
+  box-shadow: var(--buttonHoverShadow);
+}
+
+.tabs button:not(:disabled):not([aria-disabled="true"]):active,
+.tabs button.button-click-feedback:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--buttonPressedBg);
+  border-color: var(--buttonPressedBorder);
+  box-shadow: var(--buttonPressedShadow);
+}
+
+.tabs button:focus-visible {
+  outline-offset: -3px;
 }
 
 .toolbar {
