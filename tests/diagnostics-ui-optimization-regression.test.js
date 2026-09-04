@@ -336,7 +336,10 @@ test("Stage 1-E diagnostics-only refresh preserves tab and file DOM while patchi
     const openBadge = openButton.querySelector(".file-problem-badge");
     assert.equal(openBadge.textContent, "2");
     assert.equal(workspaceButton.querySelector(".file-problem-badge").textContent, "3");
-    assert.equal(document.querySelector("[data-command='show-explorer']").dataset.badge, "5");
+    assert.equal(document.querySelector("[data-command='show-explorer']").dataset.badge, undefined);
+    assert.equal(document.querySelector("[data-command='show-explorer']").title, "Explorer");
+    assert.equal(document.querySelector("[data-command='show-problems']").dataset.badge, "5");
+    assert.equal(document.querySelector("[data-command='show-problems']").textContent, "P");
     assert.equal(document.querySelector("[data-command='show-problems']").title, "Problems (5)");
     assert.equal(els.lintSummary.textContent, summary);
 
@@ -363,6 +366,7 @@ test("Stage 1-E diagnostics-only refresh preserves tab and file DOM while patchi
     assert.equal(els.fileList.querySelector("[data-problem-path]"), openButton);
     assert.equal(els.fileList.querySelector("[data-open-path]"), workspaceButton);
     assert.equal(document.querySelector("[data-command='show-explorer']").dataset.badge, undefined);
+    assert.equal(document.querySelector("[data-command='show-problems']").dataset.badge, undefined);
     assert.equal(document.querySelector("[data-command='show-problems']").title, "Problems");
     assert.equal(els.lintSummary.textContent, "No problems");
     assert.deepEqual(counters, {

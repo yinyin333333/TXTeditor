@@ -31,10 +31,6 @@
         <main class="main">
           <div id="tabs" class="tabs"></div>
           <section class="toolbar">
-            <div class="panel-toggles" role="group" aria-label="Activity" data-i18n-aria-label="aria.activity">
-              <button class="activity-button toggle-button active" data-command="show-explorer" data-i18n-title="activity.explorer" data-i18n-aria-label="activity.explorer" aria-label="Explorer" aria-pressed="true" title="Explorer">E</button>
-              <button class="activity-button toggle-button" data-command="show-problems" data-i18n-title="activity.problems" data-i18n-aria-label="activity.problems" aria-label="Problems" aria-pressed="false" title="Problems">P</button>
-            </div>
             <button data-command="open-file" data-i18n="toolbar.open">Open</button>
             <button data-command="save-file" data-i18n="toolbar.save">Save</button>
             <button data-command="save-as" data-i18n="toolbar.saveAs">Save As</button>
@@ -46,6 +42,10 @@
             <button class="toggle-button" data-command="toggle-freeze-column" data-i18n="toolbar.freezeColumn">Freeze Column</button>
             <button data-command="open-shortcut-settings" data-i18n="toolbar.shortcuts">Shortcuts</button>
             <button data-command="open-app-settings" data-i18n="toolbar.settings">Settings</button>
+            <div class="panel-toggles" role="group" aria-label="Activity" data-i18n-aria-label="aria.activity">
+              <button class="activity-button toggle-button active" data-command="show-explorer" data-i18n-title="activity.explorer" data-i18n-aria-label="activity.explorer" aria-label="Explorer" aria-pressed="true" title="Explorer">E</button>
+              <button class="activity-button toggle-button" data-command="show-problems" data-i18n-title="activity.problems" data-i18n-aria-label="activity.problems" aria-label="Problems" aria-pressed="false" title="Problems">P</button>
+            </div>
           </section>
           <section id="cellInputBar" class="cell-input-bar hidden" aria-label="Active cell input" data-i18n-aria-label="cellInput.aria">
             <output id="cellInputAddress" class="cell-input-address" aria-live="polite"></output>
