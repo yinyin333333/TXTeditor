@@ -48,6 +48,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     workspace: null,
     search: initialSearchState(),
     sidebarVisible: savedPanelState.sidebarVisible,
+    activityBarVisible: savedPanelState.activityBarVisible,
     sidebarWidth: savedPanelState.sidebarWidth,
     sidebarHeight: savedPanelState.sidebarHeight,
     problemsVisible: savedPanelState.problemsVisible,

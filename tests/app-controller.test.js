@@ -1392,6 +1392,7 @@ test("app source has real Explorer and Problems toggles with persisted resize st
     sizes: { explorerHeight: 310, problemsWidth: 450 }
   });
   assert.deepEqual(panelStateFromStorage(storage, savedDockLayout), {
+    activityBarVisible: true,
     sidebarVisible: false,
     sidebarWidth: MAX_SIDEBAR_WIDTH,
     sidebarHeight: 310,

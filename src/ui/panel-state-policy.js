@@ -1,4 +1,5 @@
 export const SIDEBAR_VISIBILITY_KEY = "txteditor.sidebar";
+export const ACTIVITY_BAR_VISIBILITY_KEY = "txteditor.activityBar";
 export const PROBLEMS_VISIBILITY_KEY = "txteditor.problems";
 export const SIDEBAR_WIDTH_KEY = "txteditor.sidebarWidth";
 export const PROBLEMS_HEIGHT_KEY = "txteditor.problemsHeight";
@@ -23,6 +24,7 @@ export function nextPanelVisibility(visible) {
 
 export function panelStateFromStorage(storage, savedDockLayout) {
   return {
+    activityBarVisible: storage.getItem(ACTIVITY_BAR_VISIBILITY_KEY) !== "hidden",
     sidebarVisible: storage.getItem(SIDEBAR_VISIBILITY_KEY) !== "hidden",
     sidebarWidth: clampValue(Number(storage.getItem(SIDEBAR_WIDTH_KEY)) || MIN_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
     sidebarHeight: savedDockLayout.sizes.explorerHeight,

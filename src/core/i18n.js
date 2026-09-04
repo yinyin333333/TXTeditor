@@ -33,6 +33,7 @@ let activeLocale = DEFAULT_LOCALE;
 const CATALOG_ROWS = {
   "app.title": ["TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor", "TXTeditor"],
   "activity.explorer": ["Explorer", "檔案總管", "Datei-Explorer", "Explorador", "Explorateur", "Esplora risorse", "탐색기", "Eksplorator", "Explorador", "エクスプローラー", "Explorador", "Проводник", "资源管理器"],
+  "command.toggle-activity-bar": ["Toggle E/P Sidebar", "切換 E/P 側邊欄", "E/P-Seitenleiste umschalten", "Alternar barra lateral E/P", "Afficher/masquer la barre latérale E/P", "Mostra/nascondi barra laterale E/P", "E/P 사이드바 표시/숨기기", "Przełącz pasek boczny E/P", "Alternar barra lateral E/P", "E/P サイドバーの表示切替", "Alternar barra lateral E/P", "Показать/скрыть боковую панель E/P", "切换 E/P 侧边栏"],
   "activity.problems": ["Problems", "問題", "Probleme", "Problemas", "Problèmes", "Problemi", "문제", "Problemy", "Problemas", "問題", "Problemas", "Проблемы", "问题"],
   "toolbar.open": ["Open", "開啟", "Öffnen", "Abrir", "Ouvrir", "Apri", "열기", "Otwórz", "Abrir", "開く", "Abrir", "Открыть", "打开"],
   "toolbar.openFile": ["Open File", "開啟檔案", "Datei öffnen", "Abrir archivo", "Ouvrir un fichier", "Apri file", "파일 열기", "Otwórz plik", "Abrir archivo", "ファイルを開く", "Abrir arquivo", "Открыть файл", "打开文件"],

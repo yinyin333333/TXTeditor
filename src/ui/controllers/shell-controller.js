@@ -48,17 +48,18 @@ export function createShellController({
   function updateDiagnosticIndicators({ fileBadges = false } = {}) {
     updateGridDiagnostics();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
-      delete button.dataset.badge;
-      button.title = tText("activity.explorer");
-    }
-    const count = lintNotificationCount();
-    for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
-      button.textContent = "P";
+      const count = lintNotificationCount();
       if (count) {
         button.dataset.badge = String(count);
+        button.title = `${tText("activity.explorer")} (${count} ${tText("activity.problems").toLowerCase()})`;
       } else {
         delete button.dataset.badge;
+        button.title = tText("activity.explorer");
       }
+    }
+    for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
+      delete button.dataset.badge;
+      button.textContent = "P";
       button.title = state.lint.diagnostics.length ? `${tText("activity.problems")} (${state.lint.diagnostics.length})` : tText("activity.problems");
     }
     if (els.lintSummary) els.lintSummary.textContent = lintSummaryText();
@@ -95,6 +96,7 @@ export function createShellController({
     const started = perfNow();
     const documentOpen = hasOpenDocument();
     bindExplorerFilter();
+    els.shell.classList.toggle("activity-hidden", state.activityBarVisible === false);
     syncDockLayout();
     els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
     els.shell.classList.toggle("problems-open", state.problemsVisible);

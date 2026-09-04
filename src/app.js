@@ -129,6 +129,7 @@ const {
   toggleExplorerPane,
   toggleProblemsPanel,
   toggleSidebar,
+  toggleActivityBar,
   wirePaneResizers
 } = dockController;
 const legacyLintController = createLegacyLintController({
@@ -406,6 +407,7 @@ const commandController = createCommandController({
     toggleProblemsPanel,
     resetRowHeights,
     toggleSidebar,
+    toggleActivityBar,
     toggleTheme: settingsController.toggleTheme,
     showAppSettings: settingsController.showAppSettings,
     showShortcutSettings: shortcutSettingsController.showShortcutSettings,
