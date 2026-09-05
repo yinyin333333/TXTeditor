@@ -2242,6 +2242,90 @@ test("#120 saving a profile writes versioned UTF-8 JSON and preserves dirty docu
   } finally { globalThis.window = previousWindow; }
 });
 
+test("workspace profile restoration excludes concurrent close-all until restoration finishes", async () => {
+  const previousWindow = globalThis.window;
+  const starting = deferred();
+  let starts = 0;
+  const errors = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "read_text_files") return args.paths.map(path => ({ Ok: {
+      path, name: path.split("/").at(-1), encoding: "utf-8",
+      text: path.endsWith(".txtworkspace")
+        ? JSON.stringify({ version: 1, folder: "E:/Mod", openFiles: ["skills.txt"], activeFile: "skills.txt", hiddenFiles: [] })
+        : "name\tvalue\na\t1"
+    } }));
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      lintEngine: "vector-lsp", isVectorLintEngine: () => true, isLegacyLintEngine: () => false,
+      lspStartWorkspace: async () => { starts++; await starting.promise; },
+      lspOpenDoc: async () => {}, showError: error => errors.push(String(error))
+    });
+    const opening = controller.openWorkspaceProfile("E:/profile.txtworkspace");
+    await waitFor(() => starts === 1);
+    assert.equal(await controller.saveWorkspaceProfile(), false);
+    assert.equal(await controller.closeAll(), false);
+    assert.equal(state.workspace.path, "E:/Mod");
+    starting.resolve();
+    assert.equal(await opening, true);
+    assert.deepEqual(state.docs.map(doc => doc.name), ["skills.txt"]);
+    assert.equal(await controller.closeAll(), true);
+    assert.equal(state.workspace, null);
+    assert.equal(state.docs.length, 0);
+    assert.deepEqual(errors, []);
+  } finally { starting.resolve(); globalThis.window = previousWindow; }
+});
+
+test("a delayed profile save never relabels a newly opened workspace", async () => {
+  const previousWindow = globalThis.window;
+  const writing = deferred();
+  let writes = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "save_file_dialog") return "E:/Old.txtworkspace";
+    if (command === "write_text_file_safe") {
+      assert.equal(JSON.parse(args.text).folder, "E:/Old");
+      writes++;
+      return writing.promise;
+    }
+    if (command === "read_text_files") return [{ Ok: { path: args.paths[0], encoding: "utf-8",
+      text: JSON.stringify({ version: 1, folder: "E:/New", openFiles: [], activeFile: null, hiddenFiles: [] })
+    } }];
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, { workspace: { path: "E:/Old", files: [] } });
+    const saving = controller.saveWorkspaceProfile();
+    await waitFor(() => writes === 1);
+    assert.equal(await controller.openWorkspaceProfile("E:/New.txtworkspace"), true);
+    writing.resolve({});
+    assert.equal(await saving, true);
+    assert.equal(state.workspace.path, "E:/New");
+    assert.equal(state.workspaceProfilePath, "E:/New.txtworkspace");
+    assert.ok(state.recentWorkspaceProfiles.includes("E:/Old.txtworkspace"));
+  } finally { writing.resolve({}); globalThis.window = previousWindow; }
+});
+
+test("close-all holds the workspace switch lock while awaiting an unsaved choice", { timeout: 1000 }, async () => {
+  const doc = TableDocument.fromText("old.txt", "a", { path: "E:/Old/old.txt", dirty: true });
+  const errors = [];
+  const { controller, state } = testDocumentController([doc], {}, {
+    showError: error => errors.push(String(error))
+  });
+  const closing = controller.closeAll();
+  assert.equal(await controller.openWorkspaceProfile("E:/profile.txtworkspace"), false);
+  assert.equal(await controller.closeAll(), false);
+  controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+  assert.equal(await closing, false);
+  assert.equal(state.docs[0], doc);
+  const retry = controller.closeAll();
+  controller.handleCloseDialogClick(closeChoiceEvent("discard"));
+  assert.equal(await retry, true);
+  assert.deepEqual(errors, []);
+});
+
 test("#120 recent profile paths switch an already open workspace without another picker and survive controller restart", async () => {
   const previousWindow = globalThis.window;
   const values = new Map();

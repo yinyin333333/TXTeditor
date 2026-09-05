@@ -31,10 +31,16 @@ export function parseWorkspaceProfile(text) {
 }
 
 export function workspaceRelativePath(folder, path) {
-  const root = String(folder).replaceAll("\\", "/").replace(/\/+$/, "");
-  const file = String(path || "").replaceAll("\\", "/");
+  const root = profileComparablePath(folder).replace(/\/+$/, "");
+  const file = profileComparablePath(path || "");
   if (!normalizePath(file).startsWith(`${normalizePath(root)}/`)) return null;
   return relativePath(file.slice(root.length + 1));
+}
+
+function profileComparablePath(path) {
+  return String(path).replaceAll("\\", "/")
+    .replace(/^\/\/\?\/UNC\//i, "//")
+    .replace(/^\/\/\?\//, "");
 }
 
 export function workspaceProfilePath(folder, relative) {

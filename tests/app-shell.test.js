@@ -26,7 +26,7 @@ function pathKey(path) {
 
 const INDEX_HTML = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
-function explorerHarness({ docs = [], workspace = null } = {}) {
+function explorerHarness({ docs = [], workspace = null, actions = {} } = {}) {
   const originalDocument = globalThis.document;
   const originalWindow = globalThis.window;
   const { document } = installFakeAppStartupDom({ indexHtml: INDEX_HTML });
@@ -81,6 +81,7 @@ function explorerHarness({ docs = [], workspace = null } = {}) {
     syncDockLayout: () => {},
     syncProblemsHeaderLayout: () => {},
     scheduleHoverPrewarm: () => {},
+    ...actions,
     recordUiPerf: () => {},
     perfNow: () => 0,
     showError: (error) => { throw error; },
@@ -132,6 +133,53 @@ test("workspace Explorer rendering preserves open-file suppression, grouping, ba
   assert.match(html, /data-file-group="quoted&quot;dir"/);
   assert.ok(html.indexOf("Data Files") < html.indexOf("monsters"));
   assert.ok(html.indexOf("monsters") < html.indexOf("quoted&quot;dir"));
+});
+
+test("workspace menus hide and restore files without changing the workspace and keep recent profile actions", async () => {
+  let menu;
+  const profiles = [];
+  let saves = 0;
+  const workspace = { path: "E:/Mod", files: [
+    { name: "skills.txt", path: "E:/Mod/skills.txt" },
+    { name: "missiles.txt", path: "E:/Mod/missiles.txt" }
+  ] };
+  const harness = explorerHarness({ workspace, actions: {
+    showActionContextMenu: options => { menu = options; },
+    openWorkspaceProfile: async path => profiles.push(path),
+    saveWorkspaceProfile: async () => { saves++; }
+  } });
+  const { controller, state, els, document } = harness;
+  const original = structuredClone(workspace);
+  try {
+    state.recentWorkspaceProfiles = ["E:/Profiles/My Mod.txtworkspace"];
+    controller.renderChrome();
+    const contextMenu = target => els.fileList.oncontextmenu({ target, clientX: 50, clientY: 80, preventDefault() {} });
+    contextMenu(els.fileList.querySelector('[data-open-path="E:/Mod/skills.txt"]'));
+    menu.entries.find(entry => entry.id === "visibility").action();
+    assert.deepEqual(state.workspaceHiddenFiles, ["E:/Mod/skills.txt"]);
+    assert.equal(els.fileList.querySelector('[data-open-path="E:/Mod/skills.txt"]'), null);
+    const overflow = () => document.querySelector("[data-workspace-menu]").onclick({ stopPropagation() {} });
+    overflow();
+    menu.entries.find(entry => entry.id === "hidden-files").action();
+    assert.equal(menu.entries.find(entry => entry.id === "restore-0").title, "E:/Mod/skills.txt");
+    menu.entries.find(entry => entry.id === "restore-0").action();
+    assert.ok(els.fileList.querySelector('[data-open-path="E:/Mod/skills.txt"]'));
+    state.workspaceHiddenFiles = workspace.files.map(file => file.path);
+    controller.renderChrome();
+    contextMenu(els.fileList.querySelector(".explorer-workspace"));
+    menu.entries.find(entry => entry.id === "hidden-files").action();
+    menu.entries.find(entry => entry.id === "restore-all").action();
+    assert.deepEqual(state.workspaceHiddenFiles, []);
+    assert.deepEqual(workspace, original);
+    overflow();
+    assert.equal(menu.entries.find(entry => entry.id === "recent-0").label, "My Mod");
+    await menu.entries.find(entry => entry.id === "recent-0").action();
+    await menu.entries.find(entry => entry.id === "open-workspace").action();
+    await menu.entries.find(entry => entry.id === "save-workspace").action();
+    assert.deepEqual(profiles, ["E:/Profiles/My Mod.txtworkspace", undefined]);
+    assert.equal(saves, 1);
+    assert.equal(menu.entries.find(entry => entry.id === "hidden-files").disabled, true);
+  } finally { harness.restore(); }
 });
 
 test("Explorer search Enter opens the best matching workspace file and clears the query", async () => {

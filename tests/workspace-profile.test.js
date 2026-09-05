@@ -28,6 +28,23 @@ test("invalid profiles and escaping file paths are rejected before session chang
   assert.throws(() => createWorkspaceProfile({ docs: [] }));
 });
 
+test("profile paths round-trip mixed Windows extended and ordinary path forms", () => {
+  for (const [ordinary, extended] of [
+    ["D:/Mod", "//?/D:/Mod"],
+    ["//server/share/Mod", "//?/UNC/server/share/Mod"]
+  ]) {
+    for (const [folder, fileRoot] of [[ordinary, extended], [extended, ordinary]]) {
+      const profile = createWorkspaceProfile({
+        workspace: { path: folder }, docs: [{ path: `${fileRoot}/Skills.txt` }], active: 0,
+        workspaceHiddenFiles: [`${fileRoot}/sub/Hidden.txt`]
+      });
+      assert.deepEqual(profile.openFiles, ["Skills.txt"]);
+      assert.equal(profile.activeFile, "Skills.txt");
+      assert.deepEqual(profile.hiddenFiles, ["sub/Hidden.txt"]);
+    }
+  }
+});
+
 test("Explorer hiding changes only rendered rows and can reveal hidden files for restoration", () => {
   const workspace = { path: "D:/Mod", files: [
     { name: "skills.txt", path: "D:/Mod/skills.txt" },

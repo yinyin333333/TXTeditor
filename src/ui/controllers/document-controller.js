@@ -423,7 +423,7 @@ export function createDocumentController({
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
-      if ((state.workspace || state.docs.length) && !await closeAll()) return;
+      if ((state.workspace || state.docs.length) && !await closeAllNow()) return;
       await activateWorkspace(workspace, includeSubfolders, true);
     } catch (error) {
       showError(error);
@@ -433,12 +433,21 @@ export function createDocumentController({
   }
 
   async function saveWorkspaceProfile() {
+    if (switchingWorkspace) {
+      showToast(tText("workspace.switchBusy"));
+      return false;
+    }
     try {
       if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
       commitActiveEditor();
+      const workspace = state.workspace;
       const profile = createWorkspaceProfile(state);
       return await saveTextNative(`Workspace${WORKSPACE_PROFILE_EXTENSION}`, `${JSON.stringify(profile, null, 2)}\n`, {
-        onSaved: (path) => { state.workspaceProfilePath = path; rememberWorkspaceProfile(path); renderChrome(); }
+        onSaved: (path) => {
+          if (state.workspace === workspace) state.workspaceProfilePath = path;
+          rememberWorkspaceProfile(path);
+          renderChrome();
+        }
       });
     } catch (error) { showError(error); return false; }
   }
@@ -459,7 +468,7 @@ export function createDocumentController({
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       // Validate the root before asking to discard any existing documents.
       const workspace = await listWorkspaceNative(profile.folder, null, { includeSubfolders });
-      if ((state.workspace || state.docs.length) && !await closeAll()) return false;
+      if ((state.workspace || state.docs.length) && !await closeAllNow()) return false;
       state.workspaceHiddenFiles = profile.hiddenFiles.map((file) => workspaceProfilePath(profile.folder, file));
       state.workspaceProfilePath = path;
       await activateWorkspace(workspace, includeSubfolders, true);
@@ -539,6 +548,16 @@ export function createDocumentController({
   }
 
   async function closeAll() {
+    if (switchingWorkspace) {
+      showToast(tText("workspace.switchBusy"));
+      return false;
+    }
+    switchingWorkspace = true;
+    try { return await closeAllNow(); }
+    finally { switchingWorkspace = false; }
+  }
+
+  async function closeAllNow() {
     if (!state.workspace?.path && !state.docs.length) return false;
 
     if (state.docs.length) {
