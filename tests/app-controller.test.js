@@ -2235,6 +2235,7 @@ test("#120 saving a profile writes versioned UTF-8 JSON and preserves dirty docu
     const { controller, state } = testDocumentController([doc], {}, { workspace: { path: "E:/Mod", files: [] } });
     state.workspaceHiddenFiles = ["E:/Mod/charstats.txt"];
     assert.equal(await controller.saveWorkspaceProfile(), true);
+    assert.equal(state.workspaceProfilePath, "E:/saved.txtworkspace");
     assert.equal(written.encoding, "utf-8");
     assert.deepEqual(JSON.parse(written.text), { version: 1, folder: "E:/Mod", openFiles: ["skills.txt"], activeFile: "skills.txt", hiddenFiles: ["charstats.txt"] });
     assert.equal(doc.dirty, true);

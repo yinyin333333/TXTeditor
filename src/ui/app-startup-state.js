@@ -47,6 +47,7 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     selection: new SelectionModel(),
     workspace: null,
     workspaceHiddenFiles: [],
+    workspaceProfilePath: "",
     showHiddenWorkspaceFiles: false,
     search: initialSearchState(),
     sidebarVisible: savedPanelState.sidebarVisible,

@@ -1,6 +1,6 @@
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
-import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
+import { renderWorkspaceFileList, renderExplorerSections } from "../workspace-file-list-policy.js";
 import { tText } from "../../core/i18n.js";
 import { revealActiveDocumentTab } from "../document-tab-visibility.js";
 import { showButtonClickFeedback } from "../button-feedback-policy.js";
@@ -162,9 +162,10 @@ export function createShellController({
       escapeHtml,
       problemBadgeForPath
     });
-    els.fileList.innerHTML = state.docs
+    const openEditors = state.docs
       .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
-      .join("") + (state.workspace ? `<div class="separator"></div><button data-show-hidden-files aria-pressed="${Boolean(state.showHiddenWorkspaceFiles)}">${state.showHiddenWorkspaceFiles ? tText("workspace.hideHidden") : tText("workspace.showHidden")}</button>${workspaceFiles}` : "");
+      .join("");
+    els.fileList.innerHTML = renderExplorerSections({ state, openEditors, workspaceFiles, escapeHtml, pathKey: lintPathKey });
     els.fileList.querySelector("[data-show-hidden-files]")?.addEventListener("click", () => {
       state.showHiddenWorkspaceFiles = !state.showHiddenWorkspaceFiles;
       renderChrome();

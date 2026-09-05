@@ -428,7 +428,9 @@ export function createDocumentController({
       if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
       commitActiveEditor();
       const profile = createWorkspaceProfile(state);
-      return await saveTextNative(`Workspace${WORKSPACE_PROFILE_EXTENSION}`, `${JSON.stringify(profile, null, 2)}\n`);
+      return await saveTextNative(`Workspace${WORKSPACE_PROFILE_EXTENSION}`, `${JSON.stringify(profile, null, 2)}\n`, {
+        onSaved: (path) => { state.workspaceProfilePath = path; renderChrome(); }
+      });
     } catch (error) { showError(error); return false; }
   }
 
@@ -447,6 +449,7 @@ export function createDocumentController({
       const workspace = await listWorkspaceNative(profile.folder, null, { includeSubfolders });
       if ((state.workspace || state.docs.length) && !await closeAll()) return false;
       state.workspaceHiddenFiles = profile.hiddenFiles.map((file) => workspaceProfilePath(profile.folder, file));
+      state.workspaceProfilePath = path;
       await activateWorkspace(workspace, includeSubfolders, true);
       for (const file of profile.openFiles) {
         try { await openNativeDocumentPaths([workspaceProfilePath(profile.folder, file)]); }
@@ -561,6 +564,7 @@ export function createDocumentController({
     state.lint.status = "";
     state.workspace = null;
     state.workspaceHiddenFiles = [];
+    state.workspaceProfilePath = "";
     state.showHiddenWorkspaceFiles = false;
     writeWorkspacePath("");
     resetWorkspaceView();

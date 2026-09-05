@@ -31,6 +31,11 @@ let activeLocale = DEFAULT_LOCALE;
 
 // Each row has one independently translated value per supported locale, in SUPPORTED_LOCALES order.
 const CATALOG_ROWS = {
+  "workspace.openEditors": ["Open Editors", "已開啟的編輯器", "Geöffnete Editoren", "Editores abiertos", "Éditeurs ouverts", "Editor aperti", "열린 편집기", "Otwarte edytory", "Editores abiertos", "開いているエディター", "Editores abertos", "Открытые редакторы", "打开的编辑器"],
+  "workspace.section": ["Workspace", "工作區", "Arbeitsbereich", "Área de trabajo", "Espace de travail", "Area di lavoro", "작업 공간", "Obszar roboczy", "Área de trabajo", "ワークスペース", "Área de trabalho", "Рабочая область", "工作区"],
+  "workspace.hide": ["Hide", "隱藏", "Ausblenden", "Ocultar", "Masquer", "Nascondi", "숨기기", "Ukryj", "Ocultar", "非表示", "Ocultar", "Скрыть", "隐藏"],
+  "workspace.restore": ["Restore", "還原", "Einblenden", "Restaurar", "Restaurer", "Ripristina", "복원", "Przywróć", "Restaurar", "再表示", "Restaurar", "Восстановить", "恢复"],
+  "workspace.hidden": ["Hidden", "已隱藏", "Ausgeblendet", "Oculto", "Masqué", "Nascosto", "숨김", "Ukryty", "Oculto", "非表示", "Oculto", "Скрыт", "已隐藏"],
   "workspace.openProfile": ["Open Workspace Profile…", "開啟工作區設定檔…", "Arbeitsbereichsprofil öffnen…", "Abrir perfil de trabajo…", "Ouvrir un profil de travail…", "Apri profilo di lavoro…", "작업 공간 프로필 열기…", "Otwórz profil obszaru roboczego…", "Abrir perfil de trabajo…", "ワークスペースプロファイルを開く…", "Abrir perfil de trabalho…", "Открыть профиль рабочей области…", "打开工作区配置…"],
   "workspace.saveProfile": ["Save Workspace Profile As…", "另存工作區設定檔…", "Arbeitsbereichsprofil speichern unter…", "Guardar perfil de trabajo como…", "Enregistrer le profil de travail sous…", "Salva profilo di lavoro come…", "작업 공간 프로필 다른 이름으로 저장…", "Zapisz profil obszaru roboczego jako…", "Guardar perfil de trabajo como…", "ワークスペースプロファイルを名前を付けて保存…", "Salvar perfil de trabalho como…", "Сохранить профиль рабочей области как…", "工作区配置另存为…"],
   "workspace.hideFile": ["Hide from Explorer", "在檔案總管中隱藏", "Im Explorer ausblenden", "Ocultar del explorador", "Masquer dans l’explorateur", "Nascondi da Esplora risorse", "탐색기에서 숨기기", "Ukryj w eksploratorze", "Ocultar del explorador", "エクスプローラーで非表示", "Ocultar no explorador", "Скрыть в проводнике", "在资源管理器中隐藏"],

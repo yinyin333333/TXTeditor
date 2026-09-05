@@ -126,8 +126,8 @@ test("workspace Explorer rendering preserves open-file suppression, grouping, ba
 
   assert.doesNotMatch(html, /data-open-path="E:\/Game\/Data\/armor\.txt"/);
   assert.match(html, /<details class="file-group" open data-file-group="Data Files">/);
-  assert.match(html, /data-open-path="E:\/Game\/Data\/weapons\.txt">weapons\.txt <span class="file-problem-badge">2<\/span>/);
-  assert.match(html, /data-open-path="E:\/Game\/Data\/skills&lt;bad&gt;\.txt">skills&lt;bad&gt;\.txt/);
+  assert.match(html, /data-open-path="E:\/Game\/Data\/weapons\.txt"[^>]*><span class="workspace-file-name">weapons\.txt<\/span> <span class="file-problem-badge">2<\/span>/);
+  assert.match(html, /data-open-path="E:\/Game\/Data\/skills&lt;bad&gt;\.txt"[^>]*><span class="workspace-file-name">skills&lt;bad&gt;\.txt/);
   assert.match(html, /<details class="file-group" data-file-group="monsters">/);
   assert.match(html, /data-file-group="quoted&quot;dir"/);
   assert.ok(html.indexOf("Data Files") < html.indexOf("monsters"));

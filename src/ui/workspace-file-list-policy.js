@@ -37,7 +37,11 @@ export function renderWorkspaceFileList({
     }
   }
 
-  const fileButton = (file) => `<div class="workspace-file-row"><button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button><button data-toggle-hidden-path="${escapeHtml(file.path)}" title="${hiddenKeys.has(pathKey(file.path)) ? tText("workspace.showFile") : tText("workspace.hideFile")}" aria-label="${hiddenKeys.has(pathKey(file.path)) ? tText("workspace.showFile") : tText("workspace.hideFile")}">${hiddenKeys.has(pathKey(file.path)) ? "+" : "−"}</button></div>`;
+  const fileButton = (file) => {
+    const hidden = hiddenKeys.has(pathKey(file.path));
+    const action = tText(hidden ? "workspace.showFile" : "workspace.hideFile");
+    return `<div class="workspace-file-row${hidden ? " is-hidden" : ""}"><button data-open-path="${escapeHtml(file.path)}" title="${escapeHtml(file.path)}"><span class="workspace-file-name">${escapeHtml(file.name)}</span>${hidden ? `<span class="workspace-hidden-badge">${tText("workspace.hidden")}</span>` : ""}${problemBadgeForPath(file.path)}</button><button class="workspace-visibility-action" data-toggle-hidden-path="${escapeHtml(file.path)}" title="${escapeHtml(action)}" aria-label="${escapeHtml(action + ': ' + file.name)}">${tText(hidden ? "workspace.restore" : "workspace.hide")}</button></div>`;
+  };
   if (subDirMap.size === 0) return rootFiles.map(fileButton).join("");
 
   const group = (label, files) => {
@@ -47,4 +51,17 @@ export function renderWorkspaceFileList({
 
   return (rootFiles.length ? group("Data Files", rootFiles) : "")
     + [...subDirMap.entries()].map(([dir, files]) => group(dir, files)).join("");
+}
+
+export function renderExplorerSections({ state, openEditors, workspaceFiles, escapeHtml, pathKey = defaultPathKey }) {
+  const sectionTitle = (label, count) => `<h3 class="explorer-section-title">${label}<span class="explorer-section-count">${count}</span></h3>`;
+  const editors = `<section class="explorer-section explorer-open-editors" aria-label="${tText("workspace.openEditors")}">${sectionTitle(tText("workspace.openEditors"), state.docs.length)}${openEditors}</section>`;
+  if (!state.workspace) return editors;
+  const folder = state.workspace.path;
+  const basename = (path) => String(path).replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1) || path;
+  const profile = state.workspaceProfilePath || "";
+  const hidden = new Set((state.workspaceHiddenFiles ?? []).map(pathKey));
+  const hiddenCount = (state.workspace.files ?? []).filter(file => hidden.has(pathKey(file.path))).length;
+  const showing = Boolean(state.showHiddenWorkspaceFiles);
+  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}">${sectionTitle(tText("workspace.section"), state.workspace.files?.length ?? 0)}<div class="workspace-identity"><strong title="${escapeHtml(profile || folder)}">${escapeHtml(basename(profile || folder))}</strong>${profile ? `<span class="workspace-folder-name" title="${escapeHtml(folder)}">${escapeHtml(basename(folder))}</span>` : ""}</div><button class="workspace-hidden-toggle" data-show-hidden-files aria-pressed="${showing}" title="${tText(showing ? "workspace.hideHidden" : "workspace.showHidden")}"><span class="workspace-toggle-check" aria-hidden="true">${showing ? "✓" : ""}</span><span>${tText("workspace.showHidden")}</span><span class="explorer-section-count">${hiddenCount}</span></button>${workspaceFiles}</section>`;
 }
