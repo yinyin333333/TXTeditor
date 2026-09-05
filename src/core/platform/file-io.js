@@ -154,7 +154,7 @@ export async function saveDocumentNative(doc, saveAs = false, { validateTarget =
   return true;
 }
 
-export async function saveTextNative(defaultName, text) {
+export async function saveTextNative(defaultName, text, { onSaved = () => {} } = {}) {
   const api = await tauriApi();
   const target = await api.invoke("save_file_dialog", { defaultName });
   if (!target) return false;
@@ -163,6 +163,7 @@ export async function saveTextNative(defaultName, text) {
     text,
     encoding: "utf-8"
   }));
+  onSaved(target);
   return true;
 }
 

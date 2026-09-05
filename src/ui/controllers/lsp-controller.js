@@ -94,6 +94,7 @@ export function createLspController({
   const lspReadiness = createLspReadinessState();
   const lspTraffic = createLspTrafficState();
   let startReservationSequence = 0;
+  let pendingWorkspaceStart = null;
   let definitionRequestSequence = 0;
   const readyGenerations = new Set();
   const stoppedGenerations = new Set();
@@ -220,7 +221,24 @@ export function createLspController({
       includeSubfolders
     );
   }
-  async function startWorkspace(workspacePath, {
+  function startWorkspace(workspacePath, options = {}) {
+    const key = JSON.stringify([
+      String(workspacePath).replaceAll("\\", "/").toLowerCase(),
+      options.contextMode ?? "workspace",
+      String(options.referenceRootPath ?? "").replaceAll("\\", "/").toLowerCase(),
+      options.includeSubfolders ?? !state.excludeWorkspaceSubfolders,
+      state.locale
+    ]);
+    if (!options.forceRestart && pendingWorkspaceStart?.key === key) return pendingWorkspaceStart.promise;
+    const pending = { key, promise: null };
+    pending.promise = startWorkspaceNow(workspacePath, options).finally(() => {
+      if (pendingWorkspaceStart === pending) pendingWorkspaceStart = null;
+    });
+    pendingWorkspaceStart = pending;
+    return pending.promise;
+  }
+
+  async function startWorkspaceNow(workspacePath, {
     forceRestart = false,
     contextMode = "workspace",
     referenceRootPath = "",
@@ -631,6 +649,7 @@ export function createLspController({
     return trackedPromise;
   }
   function stopSession(reason = "lint-disabled") {
+    pendingWorkspaceStart = null;
     startReservationSequence += 1;
     return stopLspSession({ state, reason, readyGenerations, stoppedGenerations,
       diagnosticsEventController, hoverController, pendingCloses });
