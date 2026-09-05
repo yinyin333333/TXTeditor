@@ -935,9 +935,10 @@ pub(crate) async fn lsp_start(
         });
     }
 
+    let resource_dir = crate::lsp_launch::resource_dir(&app_handle);
     let launch_spec = {
         let config = config_state.config.lock().unwrap();
-        EditorLaunchSpec::resolve(&config)?
+        EditorLaunchSpec::resolve(&config, resource_dir.as_deref())?
     };
     let _ = app_handle.emit("lsp-log", launch_spec.summary());
 
