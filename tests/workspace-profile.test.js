@@ -38,7 +38,8 @@ test("Explorer hiding changes only rendered rows and can reveal hidden files for
   assert.doesNotMatch(renderWorkspaceFileList(options), /skills.txt/);
   const shown = renderWorkspaceFileList({ ...options, showHiddenFiles: true });
   assert.match(shown, /data-open-path="D:\/Mod\/skills.txt"/);
-  assert.match(shown, /Show in Explorer/);
+  assert.match(shown, /workspace-hidden-badge/);
+  assert.doesNotMatch(shown, /data-toggle-hidden-path/);
   assert.deepEqual(workspace, original, "all files remain available to lint reference indexing");
   assert.doesNotMatch(renderWorkspaceFileList({ ...options, docs: [{ path: "D:/Mod/skills.txt" }], showHiddenFiles: true }), /skills.txt/);
 });

@@ -53,7 +53,17 @@ export function createLegacyLintController({
     markLegacyLintDocumentChanged(doc);
   }
 
-  function scheduleForOpen(reason = "file-opened") {
+  function scheduleForOpen(reason = "file-opened", doc = null) {
+    const legacy = state.lint.legacy;
+    if (doc && !doc.dirty && legacy.workspaceLoad.status === "ready"
+      && legacy.lastPublishedVersion === legacy.version
+      && !legacy.running && !legacy.workspaceRefreshRequired) {
+      const cached = legacy.workspaceDocs.find(candidate => documentKey(candidate) === documentKey(doc));
+      if (cached && cached.toText() === doc.toText()) {
+        updateGridDiagnostics();
+        return;
+      }
+    }
     const schedule = legacyLintOpenSchedule(reason);
     scheduleFull(schedule.reason, schedule.delay);
   }
@@ -169,6 +179,7 @@ export function createLegacyLintController({
       timings.diagnosticsApplyMs = elapsedMs(applyStarted);
       timings.diagnosticCount = diagnostics.length;
       state.lint.legacy.lastRunAt = Date.now();
+      state.lint.legacy.lastPublishedVersion = version;
       published = true;
     } finally {
       if (version === state.lint.legacy.version) {

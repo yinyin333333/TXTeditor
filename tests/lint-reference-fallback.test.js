@@ -1080,3 +1080,28 @@ async function waitFor(predicate) {
   }
   assert.fail("Timed out waiting for asynchronous Legacy lint state.");
 }
+
+test("clean workspace opens reuse published Legacy diagnostics, changed disk content still schedules lint", async () => {
+  const file = { name: "skills.txt", path: "E:/Mod/skills.txt" };
+  const cached = doc(file.name, "skill\tId\nTest\t1", file.path);
+  const state = { docs: [], workspace: { path: "E:/Mod", files: [file] }, config: {}, lint: { legacy: {
+    settings: createDefaultLintSettings(), timer: 0, version: 0, running: false, workspaceDocs: [],
+    workspaceLoad: { status: "not-started", files: [], signature: "" }, workspaceIndexCache: { signature: "", profile: "", index: null }
+  } } };
+  let published = 0;
+  const controller = createLegacyLintController({ state, renderChrome() {}, setLintDiagnostics() { published++; }, updateGridDiagnostics() {},
+    legacyLintDisplayActive: () => true, docHasDiagnostics: () => false, recordLintEngineEvent() {}, perfNow: () => Date.now(), elapsedMs: () => 0,
+    lintDocKey: value => value.path, openPathsBulk: async () => [{ doc: cached }], loadReferenceDataset: async () => null });
+  controller.scheduleFull("workspace-opened", 0);
+  await waitFor(() => published === 1 && !state.lint.legacy.running);
+  const version = state.lint.legacy.version;
+  const opened = doc(file.name, cached.toText(), file.path);
+  state.docs.push(opened);
+  controller.scheduleForOpen("file-opened", opened);
+  assert.equal(state.lint.legacy.version, version);
+  assert.equal(published, 1);
+  const changed = doc(file.name, "skill\tId\nChanged\t2", file.path);
+  controller.scheduleForOpen("file-opened", changed);
+  assert.ok(state.lint.legacy.version > version);
+  controller.cancelJobs();
+});

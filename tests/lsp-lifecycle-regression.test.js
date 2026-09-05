@@ -1664,3 +1664,33 @@ test("reopening the same URI waits for the in-flight didClose", async () => {
     else globalThis.window = originalWindow;
   }
 });
+
+test("tab activation shares a pending workspace start instead of restarting its generation", async () => {
+  const previousWindow = globalThis.window;
+  const starting = deferred();
+  const doc = TableDocument.fromText("skills.txt", "skill\tId\nTest\t1", { path: "E:/Mod/skills.txt" });
+  const state = { docs: [], active: 0, workspace: { path: "E:/Mod", files: [] },
+    lint: { engine: "vector-lsp", enabled: true, diagnostics: [], status: "" },
+    lsp: { started: false, generation: 0, openFileCount: 0 }, lspLogs: [] };
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command) => {
+    calls.push(command);
+    if (command === "lsp_start") return starting.promise;
+  } } } };
+  try {
+    const controller = createLspHarness(state, doc);
+    const first = controller.startWorkspace("E:/Mod");
+    await new Promise(resolve => setImmediate(resolve));
+    const activation = controller.ensureStandaloneSession(doc);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.filter(call => call === "lsp_start").length, 1);
+    assert.equal(state.lsp.generation, 1);
+    starting.resolve({ installed: true });
+    await Promise.all([first, activation]);
+    state.docs.push(doc);
+    await controller.ensureStandaloneSession(doc);
+    await controller.ensureStandaloneSession(doc);
+    assert.equal(calls.filter(call => call === "lsp_start").length, 1);
+    assert.equal(calls.filter(call => call === "lsp_open_file").length, 1);
+  } finally { globalThis.window = previousWindow; }
+});

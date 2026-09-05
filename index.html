@@ -21,15 +21,7 @@
             <div id="sidebarResizer" class="sidebar-resizer pane-resizer" aria-hidden="true"></div>
             <header class="sidebar-header">
               <span data-i18n="app.title">TXTeditor</span>
-              <details class="workspace-menu" data-workspace-entry-menu>
-                <summary aria-label="Workspace" data-i18n-aria-label="workspace.section">⋯</summary>
-                <div class="workspace-menu-items">
-                  <button data-command="open-workspace-profile" data-i18n="workspace.openProfile">Open Workspace…</button>
-                  <button data-command="save-workspace-profile" data-i18n="workspace.saveProfile">Save Workspace As…</button>
-                  <button data-show-hidden-files aria-pressed="false"></button>
-                  <div data-recent-workspaces></div>
-                </div>
-              </details>
+              <button class="workspace-menu-trigger" data-workspace-menu aria-label="Workspace" data-i18n-aria-label="workspace.section" aria-haspopup="menu">⋯</button>
             </header>
             <div class="sidebar-actions">
               <button data-command="open-file" data-i18n="toolbar.openFile">Open File</button>

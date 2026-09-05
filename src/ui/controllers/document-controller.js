@@ -267,7 +267,7 @@ export function createDocumentController({
       lspOpenDoc(doc).catch((error) => reportLspOpenFailure(doc, error, "document-open"));
       scheduleHoverPrewarm("document-opened");
     } else {
-      scheduleLegacyLintForOpen("file-opened");
+      scheduleLegacyLintForOpen("file-opened", doc);
     }
   }
 

@@ -43,11 +43,6 @@ export function createAppEventController({
     document.addEventListener("click", (event) => {
       showButtonClickFeedback(event.target);
       const command = event.target.closest("[data-command]")?.dataset.command;
-      const workspacePath = event.target.closest("[data-open-workspace-path]")?.dataset.openWorkspacePath;
-      if (workspacePath) documentController.openWorkspaceProfile(workspacePath).catch(showError);
-      for (const menu of document.querySelectorAll?.(".workspace-menu[open]") ?? []) {
-        if (command || workspacePath || event.target.closest("[data-show-hidden-files]") || !menu.contains(event.target)) menu.open = false;
-      }
       if (command) Promise.resolve(commands[command]?.()).catch(showError);
       const bottomTab = event.target.closest("[data-bottom-tab]")?.dataset.bottomTab;
       if (bottomTab) switchBottomTab(bottomTab);
@@ -104,15 +99,6 @@ export function createAppEventController({
   }
 
   function handleGlobalKeydown(event) {
-    if (event.key === "Escape") {
-      const menu = document.querySelector?.(".workspace-menu[open]");
-      if (menu) {
-        menu.open = false;
-        menu.querySelector("summary")?.focus();
-        event.preventDefault();
-        return;
-      }
-    }
     if (event.defaultPrevented) return;
     const editingCell = els.editor.classList.contains("active");
     if (event.key === "Escape" && !els.contextMenu.classList.contains("hidden")) {

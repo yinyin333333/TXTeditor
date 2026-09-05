@@ -39,8 +39,7 @@ export function renderWorkspaceFileList({
 
   const fileButton = (file) => {
     const hidden = hiddenKeys.has(pathKey(file.path));
-    const action = tText(hidden ? "workspace.showFile" : "workspace.hideFile");
-    return `<div class="workspace-file-row${hidden ? " is-hidden" : ""}"><button data-open-path="${escapeHtml(file.path)}" title="${escapeHtml(file.path)}"><span class="workspace-file-name">${escapeHtml(file.name)}</span>${hidden ? `<span class="workspace-hidden-badge">${tText("workspace.hidden")}</span>` : ""}${problemBadgeForPath(file.path)}</button><button class="workspace-visibility-action" data-toggle-hidden-path="${escapeHtml(file.path)}" title="${escapeHtml(action)}" aria-label="${escapeHtml(action + ': ' + file.name)}">${tText(hidden ? "workspace.restore" : "workspace.hide")}</button></div>`;
+    return `<div class="workspace-file-row${hidden ? " is-hidden" : ""}"><button data-open-path="${escapeHtml(file.path)}" title="${escapeHtml(file.path)}"><span class="workspace-file-name">${escapeHtml(file.name)}</span>${hidden ? `<span class="workspace-hidden-badge">${tText("workspace.hidden")}</span>` : ""}${problemBadgeForPath(file.path)}</button></div>`;
   };
   if (subDirMap.size === 0) return rootFiles.map(fileButton).join("");
 

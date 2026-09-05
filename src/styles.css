@@ -812,74 +812,21 @@ button.button-click-feedback {
   white-space: nowrap;
 }
 
-.workspace-menu {
-  position: relative;
-  flex-shrink: 0;
+.workspace-menu-trigger {
   margin-left: auto;
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.workspace-menu summary {
-  width: 24px;
+  width: 26px;
   height: 26px;
-  line-height: 24px;
-  text-align: center;
-  list-style: none;
-  cursor: pointer;
-  border-radius: 4px;
+  padding: 0;
   font-size: 18px;
-}
-
-.workspace-menu summary::-webkit-details-marker { display: none; }
-.workspace-menu summary:hover, .workspace-menu[open] summary { background: var(--surface-2); }
-
-.workspace-menu-items {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  width: max-content;
-  max-width: 260px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--menuBg);
-  box-shadow: 0 4px 12px #0003;
-}
-
-.workspace-menu-items button {
-  min-height: 28px;
-  text-align: left;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-[data-recent-workspaces]:not(:empty) {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--line);
-  margin-top: 4px;
-  padding-top: 4px;
-}
-
-.workspace-recent-label {
-  padding: 4px 10px;
-  font-size: 11px;
   color: var(--muted);
 }
 
-[data-recent-workspaces] button {
+.context-menu [data-diagnostic-copy] > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.workspace-menu-items [aria-pressed="true"] { font-weight: 600; }
-.workspace-menu-items [data-show-hidden-files] > span { display: inline-block; width: 14px; }
 
 .workspace-file-name {
   overflow: hidden;
@@ -948,35 +895,6 @@ button.button-click-feedback {
   gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.workspace-file-row > [data-toggle-hidden-path] {
-  max-width: 45%;
-  text-align: center;
-  padding: 0 7px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.workspace-visibility-action {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.workspace-file-row:hover .workspace-visibility-action,
-.workspace-file-row:focus-within .workspace-visibility-action {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-@media (hover: none) {
-  .workspace-visibility-action { opacity: 1; pointer-events: auto; }
-}
-
-.workspace-visibility-action:hover,
-.workspace-visibility-action:focus-visible {
-  color: var(--text-strong);
-  background: var(--surface-2);
 }
 
 .file-group-content > button,
