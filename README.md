@@ -23,7 +23,7 @@ Zip archives for Windows are available from the [GitHub Releases page](https://g
 
 - Open individual `.txt` files, `animdata.d2`, supported D2R JSON string files, or a whole data folder.
 - Include or exclude subfolders when opening a workspace.
-- Save a single-folder Workspace Profile (`.txtworkspace`) from the File menu and reopen it to restore saved tabs, the active file, and Explorer hidden files.
+- Save a single-folder Workspace Profile (`.txtworkspace`) from the Workspace ⋯ menu and reopen it to restore saved tabs, the active file, and Explorer hidden files.
 - Open file paths passed to TXTeditor at startup.
 - Work with multiple open documents in tabs and filter files in the Explorer panel.
 - Search forward or backward, find all matches, replace one or all matches, limit searches to row or column titles, and jump directly to a displayed row number.
@@ -46,11 +46,11 @@ Zip archives for Windows are available from the [GitHub Releases page](https://g
 
 ## Workspace Profiles
 
-Open a folder, arrange your tabs, then choose **File → Save Workspace Profile As…**. The profile records the absolute folder path and relative paths for saved documents inside that folder. It stores session layout, not document contents: save edits and untitled documents separately. Files outside the folder are not included.
+Open a folder, arrange your tabs, then choose **Workspace ⋯ → Save Workspace As…**. The profile records the absolute folder path and relative paths for saved documents inside that folder. It stores session layout, not document contents: save edits and untitled documents separately. Files outside the folder are not included.
 
-Use the **Hide** button beside a workspace file to hide it from Explorer. **Show Hidden Files** reveals hidden entries; **Restore** restores an entry. Hidden files remain available to both lint engines and can still be opened directly as tabs. Save the profile again after changing tabs or hidden files to capture the new state.
+Hover over a workspace file (or focus it with the keyboard) and use **Hide** to hide it from Explorer. **Show Hidden Files** in the Workspace ⋯ menu reveals hidden entries; **Restore** restores an entry. Hidden files remain available to both lint engines and can still be opened directly as tabs. Save the profile again after changing tabs or hidden files to capture the new state.
 
-Choose **File → Open Workspace Profile…** after restarting to restore a saved profile. Opening a profile or another folder replaces the current session, with Save / Discard / Cancel for unsaved documents. A missing root or invalid profile leaves the current session intact. Missing individual files are reported while the remaining files are restored. Each switch stops the previous Vector-LSP session and clears Legacy Lint jobs, diagnostics, and workspace/sibling caches before activating the new root. The existing include/exclude subfolders preference still applies.
+Choose **Workspace ⋯ → Open Workspace…** after restarting to restore a saved profile. Before a folder is open, use the ⋯ menu beside the TXTeditor sidebar title. Opening a profile or another folder replaces the current session, with Save / Discard / Cancel for unsaved documents. A missing root or invalid profile leaves the current session intact. Missing individual files are reported while the remaining files are restored. Each switch stops the previous Vector-LSP session and clears Legacy Lint jobs, diagnostics, and workspace/sibling caches before activating the new root. The existing include/exclude subfolders preference still applies.
 
 ## JSON Editing
 

@@ -794,46 +794,72 @@ button.button-click-feedback {
   color: var(--muted);
 }
 
-.workspace-identity {
+.workspace-section-header {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 3px 10px 10px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 6px 4px 10px;
 }
 
-.workspace-identity > * {
+.workspace-section-header h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workspace-folder-name {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.file-list .workspace-hidden-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  font-size: 11px;
-}
-
-.workspace-toggle-check {
-  width: 13px;
-  height: 13px;
+.workspace-menu {
+  position: relative;
   flex-shrink: 0;
-  border: 1px solid var(--muted);
-  border-radius: 3px;
-  line-height: 11px;
-  text-align: center;
+  margin-left: auto;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
 }
 
-.workspace-hidden-toggle[aria-pressed="true"] {
-  background: var(--surface-2);
-  font-weight: 600;
+.workspace-menu summary {
+  width: 24px;
+  height: 26px;
+  line-height: 24px;
+  text-align: center;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 18px;
 }
+
+.workspace-menu summary::-webkit-details-marker { display: none; }
+.workspace-menu summary:hover, .workspace-menu[open] summary { background: var(--surface-2); }
+
+.workspace-menu-items {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: 260px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--menuBg);
+  box-shadow: 0 4px 12px #0003;
+}
+
+.workspace-menu-items button {
+  min-height: 28px;
+  text-align: left;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.workspace-menu-items [aria-pressed="true"] { font-weight: 600; }
+.workspace-menu-items [data-show-hidden-files] > span { display: inline-block; width: 14px; }
 
 .workspace-file-name {
   overflow: hidden;
@@ -910,6 +936,21 @@ button.button-click-feedback {
   padding: 0 7px;
   font-size: 11px;
   color: var(--muted);
+}
+
+.workspace-visibility-action {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace-file-row:hover .workspace-visibility-action,
+.workspace-file-row:focus-within .workspace-visibility-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .workspace-visibility-action { opacity: 1; pointer-events: auto; }
 }
 
 .workspace-visibility-action:hover,

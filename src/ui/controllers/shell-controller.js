@@ -152,6 +152,9 @@ export function createShellController({
       })
       .join("");
     revealActiveDocumentTab(els.tabs);
+    for (const menu of documentRef.querySelectorAll("[data-workspace-entry-menu]")) {
+      menu.classList.toggle("hidden", Boolean(state.workspace));
+    }
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
       docs: state.docs,
