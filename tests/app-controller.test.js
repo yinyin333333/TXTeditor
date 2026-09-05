@@ -2241,3 +2241,28 @@ test("#120 saving a profile writes versioned UTF-8 JSON and preserves dirty docu
     assert.equal(doc.dirty, true);
   } finally { globalThis.window = previousWindow; }
 });
+
+test("#120 recent profile paths switch an already open workspace without another picker and survive controller restart", async () => {
+  const previousWindow = globalThis.window;
+  const values = new Map();
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  let picks = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "pick_file_path") { picks++; throw new Error("Recent profiles must bypass picker"); }
+    if (command === "read_text_files") return args.paths.map(path => ({ Ok: { path, text: JSON.stringify({ version: 1, folder: path.includes("One") ? "E:/One" : "E:/Two", openFiles: [], activeFile: null, hiddenFiles: [] }), encoding: "utf-8" } }));
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, { workspace: { path: "E:/Old", files: [] }, storage });
+    assert.equal(await controller.openWorkspaceProfile("E:/Profiles/One.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/One");
+    assert.equal(await controller.openWorkspaceProfile("D:/Other/Two.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/Two");
+    assert.equal(await controller.openWorkspaceProfile("E:/Profiles/One.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/One");
+    assert.equal(picks, 0);
+    assert.deepEqual(state.recentWorkspaceProfiles, ["E:/Profiles/One.txtworkspace", "D:/Other/Two.txtworkspace"]);
+    assert.deepEqual(testDocumentController([], {}, { storage }).state.recentWorkspaceProfiles, state.recentWorkspaceProfiles);
+  } finally { globalThis.window = previousWindow; }
+});

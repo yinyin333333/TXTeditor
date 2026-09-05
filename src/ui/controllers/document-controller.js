@@ -131,6 +131,15 @@ export function createDocumentController({
   const pendingSaves = new WeakMap();
   let nextWatchedFileEpoch = 0;
   let switchingWorkspace = false;
+  try {
+    const recent = JSON.parse(storage?.getItem("txteditor.recentWorkspaceProfiles") || "[]");
+    state.recentWorkspaceProfiles = Array.isArray(recent) ? recent.filter(path => typeof path === "string").slice(0, 8) : [];
+  } catch { state.recentWorkspaceProfiles = []; }
+
+  function rememberWorkspaceProfile(path) {
+    state.recentWorkspaceProfiles = [path, ...state.recentWorkspaceProfiles.filter(item => normalizePath(item) !== normalizePath(path))].slice(0, 8);
+    try { storage?.setItem("txteditor.recentWorkspaceProfiles", JSON.stringify(state.recentWorkspaceProfiles)); } catch {}
+  }
 
   function hasOpenDocument() {
     return state.docs.length > 0 && state.active >= 0;
@@ -429,17 +438,20 @@ export function createDocumentController({
       commitActiveEditor();
       const profile = createWorkspaceProfile(state);
       return await saveTextNative(`Workspace${WORKSPACE_PROFILE_EXTENSION}`, `${JSON.stringify(profile, null, 2)}\n`, {
-        onSaved: (path) => { state.workspaceProfilePath = path; renderChrome(); }
+        onSaved: (path) => { state.workspaceProfilePath = path; rememberWorkspaceProfile(path); renderChrome(); }
       });
     } catch (error) { showError(error); return false; }
   }
 
-  async function openWorkspaceProfile() {
-    if (switchingWorkspace) return false;
+  async function openWorkspaceProfile(selectedPath = null) {
+    if (switchingWorkspace) {
+      showToast(tText("workspace.switchBusy"));
+      return false;
+    }
     switchingWorkspace = true;
     try {
       if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
-      const path = await pickFilePath();
+      const path = selectedPath || await pickFilePath({ workspaceProfile: true });
       if (!path) return false;
       const [result] = await readTextFilesNative([path]);
       if (!result?.payload || result.error) throw new Error(result?.error || "Could not read workspace profile.");
@@ -461,6 +473,7 @@ export function createDocumentController({
         state.active = index;
         await activateDocument(activeDoc(), { focus: false });
       }
+      rememberWorkspaceProfile(path);
       renderChrome();
       return true;
     } catch (error) { showError(error); return false; }

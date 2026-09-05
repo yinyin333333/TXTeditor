@@ -152,8 +152,20 @@ export function createShellController({
       })
       .join("");
     revealActiveDocumentTab(els.tabs);
-    for (const menu of documentRef.querySelectorAll("[data-workspace-entry-menu]")) {
-      menu.classList.toggle("hidden", Boolean(state.workspace));
+    for (const button of documentRef.querySelectorAll("[data-command='save-workspace-profile']")) {
+      button.disabled = !state.workspace;
+    }
+    for (const button of documentRef.querySelectorAll("[data-show-hidden-files]")) {
+      button.disabled = !state.workspace;
+      button.setAttribute("aria-pressed", String(Boolean(state.showHiddenWorkspaceFiles)));
+      const label = (state.showHiddenWorkspaceFiles ? "✓ " : "") + tText("workspace.showHidden") + " (" + (state.workspaceHiddenFiles?.length ?? 0) + ")";
+      if (button.textContent !== label) button.textContent = label;
+      button.onclick = () => { state.showHiddenWorkspaceFiles = !state.showHiddenWorkspaceFiles; renderChrome(); };
+    }
+    for (const list of documentRef.querySelectorAll("[data-recent-workspaces]")) {
+      const entries = (state.recentWorkspaceProfiles ?? []).map(path => `<button data-open-workspace-path="${escapeHtml(path)}" title="${escapeHtml(path)}">${escapeHtml(path)}</button>`).join("");
+      const html = entries ? `<span class="workspace-recent-label">${tText("workspace.recent")}</span>${entries}` : "";
+      if (list.innerHTML !== html) list.innerHTML = html;
     }
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
@@ -169,10 +181,6 @@ export function createShellController({
       .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
       .join("");
     els.fileList.innerHTML = renderExplorerSections({ state, openEditors, workspaceFiles, escapeHtml, pathKey: lintPathKey });
-    els.fileList.querySelector("[data-show-hidden-files]")?.addEventListener("click", () => {
-      state.showHiddenWorkspaceFiles = !state.showHiddenWorkspaceFiles;
-      renderChrome();
-    });
     for (const button of els.fileList.querySelectorAll("[data-toggle-hidden-path]")) {
       button.addEventListener("click", () => {
         const path = button.dataset.toggleHiddenPath;

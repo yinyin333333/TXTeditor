@@ -60,9 +60,5 @@ export function renderExplorerSections({ state, openEditors, workspaceFiles, esc
   const folder = state.workspace.path;
   const basename = (path) => String(path).replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1) || path;
   const profile = state.workspaceProfilePath || "";
-  const hidden = new Set((state.workspaceHiddenFiles ?? []).map(pathKey));
-  const hiddenCount = (state.workspace.files ?? []).filter(file => hidden.has(pathKey(file.path))).length;
-  const showing = Boolean(state.showHiddenWorkspaceFiles);
-  const menu = `<details class="workspace-menu"><summary aria-label="${tText("workspace.section")}" title="${tText("workspace.section")}">⋯</summary><div class="workspace-menu-items"><button data-command="open-workspace-profile">${tText("workspace.openProfile")}</button><button data-command="save-workspace-profile">${tText("workspace.saveProfile")}</button><button data-show-hidden-files aria-pressed="${showing}"><span aria-hidden="true">${showing ? "✓" : ""}</span>${tText("workspace.showHidden")} (${hiddenCount})</button></div></details>`;
-  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}"><header class="workspace-section-header"><h3 title="${escapeHtml(profile ? profile + "\n" + folder : folder)}">${escapeHtml(basename(profile || folder))}</h3><span class="explorer-section-count">${state.workspace.files?.length ?? 0}</span>${menu}</header>${workspaceFiles}</section>`;
+  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}"><header class="workspace-section-header"><h3 title="${escapeHtml(profile ? profile + "\n" + folder : folder)}">${escapeHtml(basename(profile || folder))}</h3><span class="explorer-section-count">${state.workspace.files?.length ?? 0}</span></header>${workspaceFiles}</section>`;
 }

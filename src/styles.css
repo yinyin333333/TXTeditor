@@ -858,6 +858,26 @@ button.button-click-feedback {
   font-size: 12px;
 }
 
+[data-recent-workspaces]:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.workspace-recent-label {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+[data-recent-workspaces] button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace-menu-items [aria-pressed="true"] { font-weight: 600; }
 .workspace-menu-items [data-show-hidden-files] > span { display: inline-block; width: 14px; }
 

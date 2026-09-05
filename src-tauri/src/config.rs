@@ -214,9 +214,14 @@ pub(crate) fn save_config(
 }
 
 #[tauri::command]
-pub(crate) async fn pick_file_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    app.dialog()
-        .file()
+pub(crate) async fn pick_file_path(app: tauri::AppHandle, workspace_profile: Option<bool>) -> Result<Option<String>, String> {
+    let dialog = app.dialog().file();
+    let dialog = if workspace_profile.unwrap_or(false) {
+        dialog.set_title("Open Workspace Profile (.txtworkspace)")
+            .add_filter("Workspace Profile", &["txtworkspace"])
+            .add_filter("All files", &["*"])
+    } else { dialog };
+    dialog
         .blocking_pick_file()
         .map(file_path_to_string)
         .transpose()

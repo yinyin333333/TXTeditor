@@ -23,7 +23,7 @@ Zip archives for Windows are available from the [GitHub Releases page](https://g
 
 - Open individual `.txt` files, `animdata.d2`, supported D2R JSON string files, or a whole data folder.
 - Include or exclude subfolders when opening a workspace.
-- Save a single-folder Workspace Profile (`.txtworkspace`) from the Workspace ⋯ menu and reopen it to restore saved tabs, the active file, and Explorer hidden files.
+- Save a single-folder Workspace Profile (`.txtworkspace`) from the sidebar title ⋯ menu and reopen it to restore saved tabs, the active file, and Explorer hidden files.
 - Open file paths passed to TXTeditor at startup.
 - Work with multiple open documents in tabs and filter files in the Explorer panel.
 - Search forward or backward, find all matches, replace one or all matches, limit searches to row or column titles, and jump directly to a displayed row number.
@@ -46,11 +46,11 @@ Zip archives for Windows are available from the [GitHub Releases page](https://g
 
 ## Workspace Profiles
 
-Open a folder, arrange your tabs, then choose **Workspace ⋯ → Save Workspace As…**. The profile records the absolute folder path and relative paths for saved documents inside that folder. It stores session layout, not document contents: save edits and untitled documents separately. Files outside the folder are not included.
+Open a folder, arrange your tabs, then choose **sidebar title ⋯ → Save Workspace As…**. The profile records the absolute folder path and relative paths for saved documents inside that folder. It stores session layout, not document contents: save edits and untitled documents separately. Files outside the folder are not included.
 
-Hover over a workspace file (or focus it with the keyboard) and use **Hide** to hide it from Explorer. **Show Hidden Files** in the Workspace ⋯ menu reveals hidden entries; **Restore** restores an entry. Hidden files remain available to both lint engines and can still be opened directly as tabs. Save the profile again after changing tabs or hidden files to capture the new state.
+Hover over a workspace file (or focus it with the keyboard) and use **Hide** to hide it from Explorer. **Show Hidden Files** in the sidebar title ⋯ menu reveals hidden entries; **Restore** restores an entry. Hidden files remain available to both lint engines and can still be opened directly as tabs. Save the profile again after changing tabs or hidden files to capture the new state.
 
-Choose **Workspace ⋯ → Open Workspace…** after restarting to restore a saved profile. Before a folder is open, use the ⋯ menu beside the TXTeditor sidebar title. Opening a profile or another folder replaces the current session, with Save / Discard / Cancel for unsaved documents. A missing root or invalid profile leaves the current session intact. Missing individual files are reported while the remaining files are restored. Each switch stops the previous Vector-LSP session and clears Legacy Lint jobs, diagnostics, and workspace/sibling caches before activating the new root. The existing include/exclude subfolders preference still applies.
+Choose **sidebar title ⋯ → Open Workspace…** after restarting to restore a saved profile. The same menu beside the TXTeditor title is always available, including while another workspace is open. Select a saved `.txtworkspace` file, not its data folder. Profiles can be stored anywhere: the folder recorded inside the profile determines the workspace root. Successfully saved/opened profiles appear under Recent Workspaces with their full paths and can be reopened directly; this list persists between runs. Older profiles must be opened once to add them to the list. Opening a profile or another folder replaces the current session, with Save / Discard / Cancel for unsaved documents. A missing root or invalid profile leaves the current session intact. Missing individual files are reported while the remaining files are restored. Each switch stops the previous Vector-LSP session and clears Legacy Lint jobs, diagnostics, and workspace/sibling caches before activating the new root. The existing include/exclude subfolders preference still applies.
 
 ## JSON Editing
 

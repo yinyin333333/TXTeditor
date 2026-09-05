@@ -31,6 +31,8 @@ let activeLocale = DEFAULT_LOCALE;
 
 // Each row has one independently translated value per supported locale, in SUPPORTED_LOCALES order.
 const CATALOG_ROWS = {
+  "workspace.switchBusy": ["Workspace is still opening. Please try again shortly.", "工作區仍在開啟，請稍後再試。", "Der Arbeitsbereich wird noch geöffnet. Bitte kurz warten.", "El área de trabajo se está abriendo. Inténtalo en breve.", "L’espace de travail s’ouvre. Réessayez dans un instant.", "Apertura in corso. Riprova tra poco.", "작업 공간을 여는 중입니다. 잠시 후 다시 시도하세요.", "Obszar roboczy jest otwierany. Spróbuj za chwilę.", "El área de trabajo se está abriendo. Inténtalo en breve.", "ワークスペースを開いています。少し待って再試行してください。", "Abrindo área de trabalho. Tente novamente em breve.", "Рабочая область открывается. Повторите чуть позже.", "工作区正在打开，请稍后重试。"],
+  "workspace.recent": ["Recent Workspaces", "最近的工作區", "Zuletzt verwendete Arbeitsbereiche", "Áreas de trabajo recientes", "Espaces de travail récents", "Aree di lavoro recenti", "최근 작업 공간", "Ostatnie obszary robocze", "Áreas de trabajo recientes", "最近のワークスペース", "Áreas de trabalho recentes", "Недавние рабочие области", "最近的工作区"],
   "workspace.openEditors": ["Open Editors", "已開啟的編輯器", "Geöffnete Editoren", "Editores abiertos", "Éditeurs ouverts", "Editor aperti", "열린 편집기", "Otwarte edytory", "Editores abiertos", "開いているエディター", "Editores abertos", "Открытые редакторы", "打开的编辑器"],
   "workspace.section": ["Workspace", "工作區", "Arbeitsbereich", "Área de trabajo", "Espace de travail", "Area di lavoro", "작업 공간", "Obszar roboczy", "Área de trabajo", "ワークスペース", "Área de trabalho", "Рабочая область", "工作区"],
   "workspace.hide": ["Hide", "隱藏", "Ausblenden", "Ocultar", "Masquer", "Nascondi", "숨기기", "Ukryj", "Ocultar", "非表示", "Ocultar", "Скрыть", "隐藏"],
