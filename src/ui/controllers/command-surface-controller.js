@@ -55,6 +55,7 @@ export function createCommandSurfaceController({
   }
 
   function showContextMenu({ x, y, hit }) {
+    els.contextMenu.classList.remove("compact-action-menu");
     diagnosticContextMenu = null;
     state.contextHit = hit;
     state.contextMenuActiveGroup = "";
@@ -118,6 +119,7 @@ export function createCommandSurfaceController({
   }
 
   function showDiagnosticContextMenu({ x, y, onCopyMessage, onCopyFull, entries: actionEntries, alignRight = false }) {
+    els.contextMenu.classList.toggle("compact-action-menu", Boolean(actionEntries));
     diagnosticContextMenu = { x, y, onCopyMessage, onCopyFull, entries: actionEntries, alignRight };
     state.contextHit = null;
     state.contextMenuActiveGroup = "";
@@ -130,7 +132,8 @@ export function createCommandSurfaceController({
       `<button data-diagnostic-copy="${escapeHtml(entry.id)}" title="${escapeHtml(entry.title || entry.label)}"${entry.disabled ? " disabled" : ""}><span>${escapeHtml(entry.label)}</span></button>`
     )).join("");
     for (const button of els.contextMenu.querySelectorAll("button[data-diagnostic-copy]")) {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
         const entry = entries.find(item => item.id === button.dataset.diagnosticCopy);
         const callback = actionEntries ? entry?.action : button.dataset.diagnosticCopy === "message" ? onCopyMessage : onCopyFull;
         hideContextMenu();

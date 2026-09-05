@@ -1,6 +1,6 @@
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
-import { renderWorkspaceFileList, renderExplorerSections } from "../workspace-file-list-policy.js";
+import { renderWorkspaceFileList, renderExplorerSections, workspaceProfileLabel } from "../workspace-file-list-policy.js";
 import { tText } from "../../core/i18n.js";
 import { revealActiveDocumentTab } from "../document-tab-visibility.js";
 import { showButtonClickFeedback } from "../button-feedback-policy.js";
@@ -159,14 +159,14 @@ export function createShellController({
       button.onclick = (event) => {
         event.stopPropagation();
         const rect = button.getBoundingClientRect();
-        showActionContextMenu({ x: rect.right, y: rect.bottom + 4, alignRight: true, entries: workspaceMenuEntries() });
+        showActionContextMenu({ x: rect.right, y: rect.bottom + 4, alignRight: true, entries: workspaceMenuEntries(rect.right, rect.bottom + 4) });
       };
     }
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
       docs: state.docs,
       hiddenFiles: state.workspaceHiddenFiles,
-      showHiddenFiles: state.showHiddenWorkspaceFiles,
+      showHiddenFiles: false,
       collapsedFileGroups,
       pathKey: lintPathKey,
       escapeHtml,
@@ -190,7 +190,7 @@ export function createShellController({
           renderChrome();
         } });
       }
-      entries.push(hiddenFilesMenuEntry());
+      entries.push(hiddenFilesMenuEntry(event.clientX, event.clientY));
       showActionContextMenu({ x: event.clientX, y: event.clientY, entries });
     };
     renderProblemsPanelIfNeeded();
@@ -225,21 +225,36 @@ export function createShellController({
     recordUiPerf("render-chrome", started, { docs: state.docs.length });
   }
 
-  function hiddenFilesMenuEntry() {
-    return { id: "hidden-files", label: (state.showHiddenWorkspaceFiles ? "✓ " : "") + tText("workspace.showHidden"), disabled: !state.workspace,
-      action: () => { state.showHiddenWorkspaceFiles = !state.showHiddenWorkspaceFiles; renderChrome(); } };
+  function hiddenFilesMenuEntry(x, y, alignRight = false) {
+    const hidden = state.workspaceHiddenFiles ?? [];
+    return { id: "hidden-files", label: tText("workspace.restoreHidden") + " (" + hidden.length + ")", disabled: !hidden.length,
+      action: () => {
+        const entries = [{ id: "restore-all", label: tText("workspace.restoreAll"), action: () => {
+          state.workspaceHiddenFiles = [];
+          renderChrome();
+        } }];
+        hidden.forEach((path, index) => entries.push({ id: "restore-" + index,
+          label: path.replaceAll("\\", "/").split("/").at(-1), title: path,
+          action: () => {
+            state.workspaceHiddenFiles = (state.workspaceHiddenFiles ?? []).filter(item => lintPathKey(item) !== lintPathKey(path));
+            renderChrome();
+          }
+        }));
+        showActionContextMenu({ x, y, entries, alignRight });
+      }
+    };
   }
 
-  function workspaceMenuEntries() {
+  function workspaceMenuEntries(x, y) {
     const entries = [
       { id: "open-workspace", label: tText("workspace.openProfile"), action: () => openWorkspaceProfile() },
       { id: "save-workspace", label: tText("workspace.saveProfile"), disabled: !state.workspace, action: saveWorkspaceProfile },
-      hiddenFilesMenuEntry()
+      hiddenFilesMenuEntry(x, y, true)
     ];
     const recent = state.recentWorkspaceProfiles ?? [];
     if (recent.length) entries.push({ id: "recent-label", label: tText("workspace.recent"), disabled: true });
     recent.forEach((path, index) => entries.push({ id: "recent-" + index,
-      label: path.replaceAll("\\", "/").split("/").at(-1), title: path, action: () => openWorkspaceProfile(path) }));
+      label: workspaceProfileLabel(path), title: path, action: () => openWorkspaceProfile(path) }));
     return entries;
   }
 

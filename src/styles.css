@@ -1803,6 +1803,17 @@ details:not([open]) .problem-file-header::before {
   display: none;
 }
 
+.context-menu.compact-action-menu {
+  min-width: 0;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  overflow-y: auto;
+}
+
+.context-menu.compact-action-menu button {
+  gap: 0;
+}
+
 .context-menu button {
   display: flex;
   width: 100%;

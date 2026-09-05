@@ -1,5 +1,9 @@
 import { tText } from "../core/i18n.js";
 
+export function workspaceProfileLabel(path) {
+  return String(path).replaceAll("\\", "/").split("/").at(-1).replace(/\.txtworkspace$/i, "");
+}
+
 function defaultPathKey(path) {
   return String(path || "").replace(/\\/g, "/").toLowerCase();
 }
@@ -59,5 +63,5 @@ export function renderExplorerSections({ state, openEditors, workspaceFiles, esc
   const folder = state.workspace.path;
   const basename = (path) => String(path).replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1) || path;
   const profile = state.workspaceProfilePath || "";
-  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}"><header class="workspace-section-header"><h3 title="${escapeHtml(profile ? profile + "\n" + folder : folder)}">${escapeHtml(basename(profile || folder))}</h3><span class="explorer-section-count">${state.workspace.files?.length ?? 0}</span></header>${workspaceFiles}</section>`;
+  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}"><header class="workspace-section-header"><h3 title="${escapeHtml(profile ? profile + "\n" + folder : folder)}">${escapeHtml(profile ? workspaceProfileLabel(profile) : basename(folder))}</h3><span class="explorer-section-count">${state.workspace.files?.length ?? 0}</span></header>${workspaceFiles}</section>`;
 }
