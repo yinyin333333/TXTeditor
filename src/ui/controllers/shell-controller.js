@@ -155,6 +155,8 @@ export function createShellController({
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
       docs: state.docs,
+      hiddenFiles: state.workspaceHiddenFiles,
+      showHiddenFiles: state.showHiddenWorkspaceFiles,
       collapsedFileGroups,
       pathKey: lintPathKey,
       escapeHtml,
@@ -162,7 +164,20 @@ export function createShellController({
     });
     els.fileList.innerHTML = state.docs
       .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
-      .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
+      .join("") + (state.workspace ? `<div class="separator"></div><button data-show-hidden-files aria-pressed="${Boolean(state.showHiddenWorkspaceFiles)}">${state.showHiddenWorkspaceFiles ? tText("workspace.hideHidden") : tText("workspace.showHidden")}</button>${workspaceFiles}` : "");
+    els.fileList.querySelector("[data-show-hidden-files]")?.addEventListener("click", () => {
+      state.showHiddenWorkspaceFiles = !state.showHiddenWorkspaceFiles;
+      renderChrome();
+    });
+    for (const button of els.fileList.querySelectorAll("[data-toggle-hidden-path]")) {
+      button.addEventListener("click", () => {
+        const path = button.dataset.toggleHiddenPath;
+        const hidden = state.workspaceHiddenFiles ?? [];
+        state.workspaceHiddenFiles = hidden.some((item) => lintPathKey(item) === lintPathKey(path))
+          ? hidden.filter((item) => lintPathKey(item) !== lintPathKey(path)) : [...hidden, path];
+        renderChrome();
+      });
+    }
     renderProblemsPanelIfNeeded();
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {

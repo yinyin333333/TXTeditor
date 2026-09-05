@@ -46,6 +46,8 @@ export function createInitialAppState({ storage = localStorage } = {}) {
     active: 0,
     selection: new SelectionModel(),
     workspace: null,
+    workspaceHiddenFiles: [],
+    showHiddenWorkspaceFiles: false,
     search: initialSearchState(),
     sidebarVisible: savedPanelState.sidebarVisible,
     activityBarVisible: savedPanelState.activityBarVisible,

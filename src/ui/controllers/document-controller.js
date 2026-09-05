@@ -40,6 +40,8 @@ import {
   unsavedDocuments
 } from "../document-lifecycle-policy.js";
 import { tText } from "../../core/i18n.js";
+import { createWorkspaceProfile, parseWorkspaceProfile, workspaceProfilePath, WORKSPACE_PROFILE_EXTENSION } from "../../core/workspace-profile.js";
+import { pickFilePath, saveTextNative } from "../../core/io.js";
 
 export const WORKSPACE_PATH_STORAGE_KEY = "txteditor.workspacePath";
 export const WORKSPACE_RELOAD_STORAGE_KEY = "txteditor.workspaceReload";
@@ -128,6 +130,7 @@ export function createDocumentController({
   const latestSuccessfulWatchEpochByPath = new Map();
   const pendingSaves = new WeakMap();
   let nextWatchedFileEpoch = 0;
+  let switchingWorkspace = false;
 
   function hasOpenDocument() {
     return state.docs.length > 0 && state.active >= 0;
@@ -404,15 +407,61 @@ export function createDocumentController({
   }
 
   async function openFolder() {
+    if (switchingWorkspace) return;
+    switchingWorkspace = true;
     try {
       if (!isTauriRuntime()) return showError(tText("error.openFolderDesktop"));
       const includeSubfolders = !state.excludeWorkspaceSubfolders;
       const workspace = await openWorkspaceNative({ includeSubfolders });
       if (!workspace) return;
-      activateWorkspace(workspace, includeSubfolders, true);
+      if ((state.workspace || state.docs.length) && !await closeAll()) return;
+      await activateWorkspace(workspace, includeSubfolders, true);
     } catch (error) {
       showError(error);
+    } finally {
+      switchingWorkspace = false;
     }
+  }
+
+  async function saveWorkspaceProfile() {
+    try {
+      if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
+      commitActiveEditor();
+      const profile = createWorkspaceProfile(state);
+      return await saveTextNative(`Workspace${WORKSPACE_PROFILE_EXTENSION}`, `${JSON.stringify(profile, null, 2)}\n`);
+    } catch (error) { showError(error); return false; }
+  }
+
+  async function openWorkspaceProfile() {
+    if (switchingWorkspace) return false;
+    switchingWorkspace = true;
+    try {
+      if (!isTauriRuntime()) throw new Error(tText("error.openFolderDesktop"));
+      const path = await pickFilePath();
+      if (!path) return false;
+      const [result] = await readTextFilesNative([path]);
+      if (!result?.payload || result.error) throw new Error(result?.error || "Could not read workspace profile.");
+      const profile = parseWorkspaceProfile(result.payload.text);
+      const includeSubfolders = !state.excludeWorkspaceSubfolders;
+      // Validate the root before asking to discard any existing documents.
+      const workspace = await listWorkspaceNative(profile.folder, null, { includeSubfolders });
+      if ((state.workspace || state.docs.length) && !await closeAll()) return false;
+      state.workspaceHiddenFiles = profile.hiddenFiles.map((file) => workspaceProfilePath(profile.folder, file));
+      await activateWorkspace(workspace, includeSubfolders, true);
+      for (const file of profile.openFiles) {
+        try { await openNativeDocumentPaths([workspaceProfilePath(profile.folder, file)]); }
+        catch (error) { showError(error); }
+      }
+      const activePath = profile.activeFile && normalizePath(workspaceProfilePath(profile.folder, profile.activeFile));
+      const index = state.docs.findIndex((doc) => normalizePath(doc.path) === activePath);
+      if (index >= 0) {
+        state.active = index;
+        await activateDocument(activeDoc(), { focus: false });
+      }
+      renderChrome();
+      return true;
+    } catch (error) { showError(error); return false; }
+    finally { switchingWorkspace = false; }
   }
 
   async function restoreWorkspace() {
@@ -427,7 +476,7 @@ export function createDocumentController({
     const includeSubfolders = !state.excludeWorkspaceSubfolders;
     try {
       const workspace = await listWorkspaceNative(path, null, { includeSubfolders });
-      activateWorkspace(workspace, includeSubfolders, false);
+      await activateWorkspace(workspace, includeSubfolders, false);
       return true;
     } catch {
       state.workspace = null;
@@ -436,12 +485,15 @@ export function createDocumentController({
     }
   }
 
-  function activateWorkspace(workspace, includeSubfolders, persist) {
+  async function activateWorkspace(workspace, includeSubfolders, persist) {
     state.workspace = workspace;
     if (persist) writeWorkspacePath(workspace.path);
     resetLegacyWorkspaceIndex();
     if (isVectorLintEngine()) {
-      if (state.lint.enabled) lspStartWorkspace(workspace.path, { includeSubfolders }).catch(showError);
+      if (state.lint.enabled) {
+        try { await lspStartWorkspace(workspace.path, { includeSubfolders }); }
+        catch (error) { showError(error); }
+      }
     } else {
       const schedule = legacyLintImmediateSchedule("workspace-opened");
       scheduleLegacyLintFull(schedule.reason, schedule.delay);
@@ -508,6 +560,8 @@ export function createDocumentController({
     setLintDiagnostics([]);
     state.lint.status = "";
     state.workspace = null;
+    state.workspaceHiddenFiles = [];
+    state.showHiddenWorkspaceFiles = false;
     writeWorkspacePath("");
     resetWorkspaceView();
     for (const doc of state.docs) {
@@ -524,6 +578,7 @@ export function createDocumentController({
       await stopPromise;
     } catch (error) {
       showError(error);
+      return false;
     }
 
     focusActiveEditor();
@@ -906,6 +961,8 @@ export function createDocumentController({
     openDroppedNativePaths,
     openFile,
     openFolder,
+    openWorkspaceProfile,
+    saveWorkspaceProfile,
     restoreWorkspace,
     openJsonDocumentPath,
     saveAs,

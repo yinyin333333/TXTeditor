@@ -378,6 +378,8 @@ const commandController = createCommandController({
     duplicateTemporary: documentController.duplicateTemporary,
     openFile: documentController.openFile,
     openFolder: documentController.openFolder, closeAll: documentController.closeAll,
+    openWorkspaceProfile: documentController.openWorkspaceProfile,
+    saveWorkspaceProfile: documentController.saveWorkspaceProfile,
     saveFile: documentController.saveFile,
     saveAs: documentController.saveAs,
     undo,

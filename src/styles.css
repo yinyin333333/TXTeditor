@@ -793,7 +793,24 @@ button.button-click-feedback {
   transform: rotate(90deg);
 }
 
-.file-group-content > button {
+.workspace-file-row {
+  display: flex;
+  min-width: 0;
+}
+
+.workspace-file-row > [data-open-path] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-file-row > [data-toggle-hidden-path] {
+  width: 28px;
+  text-align: center;
+  padding: 0;
+}
+
+.file-group-content > button,
+.file-group-content > .workspace-file-row > [data-open-path] {
   padding-left: 22px;
 }
 

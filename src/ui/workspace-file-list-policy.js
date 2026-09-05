@@ -1,3 +1,5 @@
+import { tText } from "../core/i18n.js";
+
 function defaultPathKey(path) {
   return String(path || "").replace(/\\/g, "/").toLowerCase();
 }
@@ -5,6 +7,8 @@ function defaultPathKey(path) {
 export function renderWorkspaceFileList({
   workspace,
   docs = [],
+  hiddenFiles = [],
+  showHiddenFiles = false,
   collapsedFileGroups = new Set(),
   pathKey = defaultPathKey,
   escapeHtml,
@@ -12,12 +16,14 @@ export function renderWorkspaceFileList({
 }) {
   if (!workspace?.files?.length) return "";
   const seenKeys = new Set(docs.map((doc) => pathKey(doc.path || "")));
+  const hiddenKeys = new Set(hiddenFiles.map(pathKey));
   const workspaceKey = pathKey(workspace.path).replace(/\/$/, "");
   const rootFiles = [];
   const subDirMap = new Map();
 
   for (const file of workspace.files) {
     const key = pathKey(file.path);
+    if (hiddenKeys.has(key) && !showHiddenFiles) continue;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     const relativePath = key.startsWith(`${workspaceKey}/`) ? key.slice(workspaceKey.length + 1) : file.name;
@@ -31,7 +37,7 @@ export function renderWorkspaceFileList({
     }
   }
 
-  const fileButton = (file) => `<button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button>`;
+  const fileButton = (file) => `<div class="workspace-file-row"><button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button><button data-toggle-hidden-path="${escapeHtml(file.path)}" title="${hiddenKeys.has(pathKey(file.path)) ? tText("workspace.showFile") : tText("workspace.hideFile")}" aria-label="${hiddenKeys.has(pathKey(file.path)) ? tText("workspace.showFile") : tText("workspace.hideFile")}">${hiddenKeys.has(pathKey(file.path)) ? "+" : "−"}</button></div>`;
   if (subDirMap.size === 0) return rootFiles.map(fileButton).join("");
 
   const group = (label, files) => {

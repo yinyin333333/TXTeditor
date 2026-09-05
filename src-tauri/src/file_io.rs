@@ -44,7 +44,9 @@ pub(crate) async fn save_file_dialog(
     default_name: String,
 ) -> Result<Option<String>, String> {
     let dialog = app.dialog().file().set_file_name(default_name.clone());
-    let dialog = if default_name.to_ascii_lowercase().ends_with(".json") {
+    let dialog = if default_name.to_ascii_lowercase().ends_with(".txtworkspace") {
+        dialog.add_filter("Workspace Profile", &["txtworkspace"])
+    } else if default_name.to_ascii_lowercase().ends_with(".json") {
         dialog.add_filter("Localization JSON", &["json"])
     } else if default_name.eq_ignore_ascii_case("animdata.d2") {
         dialog.add_filter("AnimData binary", &["d2"])
