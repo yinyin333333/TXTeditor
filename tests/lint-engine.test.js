@@ -1235,6 +1235,8 @@ test("Problems panel policy renders grouped diagnostics and summary text", () =>
   assert.equal(problemsLintSummaryText({ lintEnabled: true, legacyEngine: true, legacyProfile: "RotW", diagnostics }), "1 errors, 1 warnings, 1 info - RotW");
   assert.equal(problemsLintSummaryText({ lintEnabled: true, vectorEngine: true, lspStarted: false }), "Open a folder to enable linting");
   assert.equal(problemsLintSummaryText({ lintEnabled: true, vectorEngine: true, lspStarted: true, lintStatus: "Vector busy", diagnostics }), "Vector busy");
+  // A dead LSP child sets both, and the status has to win.
+  assert.equal(problemsLintSummaryText({ lintEnabled: true, vectorEngine: true, lspStarted: false, lintStatus: "Vector-LSP stopped." }), "Vector-LSP stopped.");
   assert.equal(problemsLintSummaryText({ lintEnabled: true, vectorEngine: true, lspStarted: true, diagnostics: [], openFileCount: 1 }), "No problems (1 file linted)");
   assert.equal(problemsLintSummaryText({ lintEnabled: true, vectorEngine: true, lspStarted: true, diagnostics, openFileCount: 3 }), "1 errors, 1 warnings, 1 info (3 files)");
 });
