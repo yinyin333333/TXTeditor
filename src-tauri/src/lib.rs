@@ -22,6 +22,9 @@ pub fn run() {
             app_bootstrap::handle_second_instance,
         ))
         .plugin(tauri_plugin_dialog::init())
+        // Restores window size, position and maximized state across restarts.
+        // Desktop only; the dependency is gated to the same targets.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(clipboard::ClipboardService::new())
         .manage(launch_paths::PendingOpenPaths::default())
         .manage(lsp_service::LspManager::new())

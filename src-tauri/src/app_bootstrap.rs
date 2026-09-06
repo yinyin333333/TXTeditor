@@ -28,6 +28,10 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         config_path,
     });
     if let Some(window) = app.get_webview_window("main") {
+        // The window is created hidden so it cannot flash at its default size
+        // before window-state restores the saved geometry. Showing it here
+        // covers the first run, where there is no saved state to restore from.
+        let _ = window.show();
         let win = window.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
