@@ -2150,3 +2150,203 @@ function closeChoiceEvent(choice) {
     }
   };
 }
+
+test("#120 profile switch awaits session stop, restores hidden/open/active files and tolerates a missing file", async () => {
+  const previousWindow = globalThis.window;
+  const profile = { version: 1, folder: "E:/New", openFiles: ["skills.txt", "missing.txt", "missiles.txt"], activeFile: "skills.txt", hiddenFiles: ["skills.txt", "charstats.txt"] };
+  const calls = [];
+  const stopped = deferred();
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "pick_file_path") return "E:/profile.txtworkspace";
+    if (command === "list_workspace_files") return { path: args.path, files: [{ name: "charstats.txt", path: "E:/New/charstats.txt" }] };
+    if (command === "read_text_files") return args.paths.map(path => path.endsWith("missing.txt") ? { Err: "Missing file" } : { Ok: {
+      path, name: path.split("/").at(-1), text: path.endsWith(".txtworkspace") ? JSON.stringify(profile) : "name\tvalue\na\t1", encoding: "utf-8"
+    } });
+    throw new Error(command);
+  } } } };
+  try {
+    const errors = [];
+    const { controller, state } = testDocumentController([TableDocument.fromText("old.txt", "a", { path: "E:/Old/old.txt" })], {}, {
+      workspace: { path: "E:/Old", files: [] }, lintEngine: "vector-lsp", isVectorLintEngine: () => true,
+      isLegacyLintEngine: () => false, showError: error => errors.push(String(error)),
+      cancelLegacyLintJobs: () => calls.push("cancel"), resetLegacyWorkspaceIndex: () => calls.push("reset"),
+      lspStopSession: async () => { calls.push("stop"); await stopped.promise; calls.push("stopped"); },
+      lspStartWorkspace: async path => calls.push(`start:${path}`), lspOpenDoc: async () => {}
+    });
+    state.lint.diagnostics = [{ message: "old diagnostic" }];
+    const opening = controller.openWorkspaceProfile();
+    await waitFor(() => calls.includes("stop"));
+    assert.equal(calls.some(call => call.startsWith("start:")), false);
+    stopped.resolve();
+    assert.equal(await opening, true);
+    assert.ok(calls.indexOf("stopped") < calls.indexOf("start:E:/New"));
+    assert.ok(calls.includes("cancel") && calls.includes("reset"));
+    assert.deepEqual(state.docs.map(doc => doc.name), ["skills.txt", "missiles.txt"]);
+    assert.equal(state.active, 0);
+    assert.deepEqual(state.workspaceHiddenFiles, ["E:/New/skills.txt", "E:/New/charstats.txt"]);
+    assert.equal(state.workspace.files.length, 1);
+    assert.deepEqual(state.lint.diagnostics, []);
+    assert.ok(errors.some(error => error.includes("Missing file")));
+  } finally { globalThis.window = previousWindow; }
+});
+
+test("#120 cancel or invalid profile root preserves the current session", async () => {
+  const previousWindow = globalThis.window;
+  let invalidRoot = false;
+  const doc = TableDocument.fromText("old.txt", "a", { path: "E:/Old/old.txt", dirty: true });
+  const errors = [];
+  let stops = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command) => {
+    if (command === "pick_file_path") return "E:/profile.txtworkspace";
+    if (command === "read_text_files") return [{ Ok: { path: "E:/profile.txtworkspace", text: JSON.stringify({ version: 1, folder: "E:/New", openFiles: [], hiddenFiles: [], activeFile: null }), encoding: "utf-8" } }];
+    if (command === "list_workspace_files") {
+      if (invalidRoot) throw new Error("Missing root");
+      return { path: "E:/New", files: [] };
+    }
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([doc], {}, { workspace: { path: "E:/Old", files: [] },
+      lspStopSession: () => { stops++; }, showError: error => errors.push(String(error)) });
+    const opening = controller.openWorkspaceProfile();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+    assert.equal(await opening, false);
+    assert.equal(state.docs[0], doc);
+    assert.equal(doc.dirty, true);
+    invalidRoot = true;
+    assert.equal(await controller.openWorkspaceProfile(), false);
+    assert.equal(state.workspace.path, "E:/Old");
+    assert.equal(stops, 0);
+    assert.ok(errors.some(error => error.includes("Missing root")));
+  } finally { globalThis.window = previousWindow; }
+});
+
+test("#120 saving a profile writes versioned UTF-8 JSON and preserves dirty document contents", async () => {
+  const previousWindow = globalThis.window;
+  const doc = TableDocument.fromText("skills.txt", "a\tb", { path: "E:/Mod/skills.txt", dirty: true });
+  let written;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "save_file_dialog") { assert.equal(args.defaultName, "Workspace.txtworkspace"); return "E:/saved.txtworkspace"; }
+    if (command === "write_text_file_safe") { written = args; return {}; }
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([doc], {}, { workspace: { path: "E:/Mod", files: [] } });
+    state.workspaceHiddenFiles = ["E:/Mod/charstats.txt"];
+    assert.equal(await controller.saveWorkspaceProfile(), true);
+    assert.equal(state.workspaceProfilePath, "E:/saved.txtworkspace");
+    assert.equal(written.encoding, "utf-8");
+    assert.deepEqual(JSON.parse(written.text), { version: 1, folder: "E:/Mod", openFiles: ["skills.txt"], activeFile: "skills.txt", hiddenFiles: ["charstats.txt"] });
+    assert.equal(doc.dirty, true);
+  } finally { globalThis.window = previousWindow; }
+});
+
+test("workspace profile restoration excludes concurrent close-all until restoration finishes", async () => {
+  const previousWindow = globalThis.window;
+  const starting = deferred();
+  let starts = 0;
+  const errors = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "read_text_files") return args.paths.map(path => ({ Ok: {
+      path, name: path.split("/").at(-1), encoding: "utf-8",
+      text: path.endsWith(".txtworkspace")
+        ? JSON.stringify({ version: 1, folder: "E:/Mod", openFiles: ["skills.txt"], activeFile: "skills.txt", hiddenFiles: [] })
+        : "name\tvalue\na\t1"
+    } }));
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, {
+      lintEngine: "vector-lsp", isVectorLintEngine: () => true, isLegacyLintEngine: () => false,
+      lspStartWorkspace: async () => { starts++; await starting.promise; },
+      lspOpenDoc: async () => {}, showError: error => errors.push(String(error))
+    });
+    const opening = controller.openWorkspaceProfile("E:/profile.txtworkspace");
+    await waitFor(() => starts === 1);
+    assert.equal(await controller.saveWorkspaceProfile(), false);
+    assert.equal(await controller.closeAll(), false);
+    assert.equal(state.workspace.path, "E:/Mod");
+    starting.resolve();
+    assert.equal(await opening, true);
+    assert.deepEqual(state.docs.map(doc => doc.name), ["skills.txt"]);
+    assert.equal(await controller.closeAll(), true);
+    assert.equal(state.workspace, null);
+    assert.equal(state.docs.length, 0);
+    assert.deepEqual(errors, []);
+  } finally { starting.resolve(); globalThis.window = previousWindow; }
+});
+
+test("a delayed profile save never relabels a newly opened workspace", async () => {
+  const previousWindow = globalThis.window;
+  const writing = deferred();
+  let writes = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "save_file_dialog") return "E:/Old.txtworkspace";
+    if (command === "write_text_file_safe") {
+      assert.equal(JSON.parse(args.text).folder, "E:/Old");
+      writes++;
+      return writing.promise;
+    }
+    if (command === "read_text_files") return [{ Ok: { path: args.paths[0], encoding: "utf-8",
+      text: JSON.stringify({ version: 1, folder: "E:/New", openFiles: [], activeFile: null, hiddenFiles: [] })
+    } }];
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, { workspace: { path: "E:/Old", files: [] } });
+    const saving = controller.saveWorkspaceProfile();
+    await waitFor(() => writes === 1);
+    assert.equal(await controller.openWorkspaceProfile("E:/New.txtworkspace"), true);
+    writing.resolve({});
+    assert.equal(await saving, true);
+    assert.equal(state.workspace.path, "E:/New");
+    assert.equal(state.workspaceProfilePath, "E:/New.txtworkspace");
+    assert.ok(state.recentWorkspaceProfiles.includes("E:/Old.txtworkspace"));
+  } finally { writing.resolve({}); globalThis.window = previousWindow; }
+});
+
+test("close-all holds the workspace switch lock while awaiting an unsaved choice", { timeout: 1000 }, async () => {
+  const doc = TableDocument.fromText("old.txt", "a", { path: "E:/Old/old.txt", dirty: true });
+  const errors = [];
+  const { controller, state } = testDocumentController([doc], {}, {
+    showError: error => errors.push(String(error))
+  });
+  const closing = controller.closeAll();
+  assert.equal(await controller.openWorkspaceProfile("E:/profile.txtworkspace"), false);
+  assert.equal(await controller.closeAll(), false);
+  controller.handleCloseDialogClick(closeChoiceEvent("cancel"));
+  assert.equal(await closing, false);
+  assert.equal(state.docs[0], doc);
+  const retry = controller.closeAll();
+  controller.handleCloseDialogClick(closeChoiceEvent("discard"));
+  assert.equal(await retry, true);
+  assert.deepEqual(errors, []);
+});
+
+test("#120 recent profile paths switch an already open workspace without another picker and survive controller restart", async () => {
+  const previousWindow = globalThis.window;
+  const values = new Map();
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  let picks = 0;
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => {
+    if (command === "pick_file_path") { picks++; throw new Error("Recent profiles must bypass picker"); }
+    if (command === "read_text_files") return args.paths.map(path => ({ Ok: { path, text: JSON.stringify({ version: 1, folder: path.includes("One") ? "E:/One" : "E:/Two", openFiles: [], activeFile: null, hiddenFiles: [] }), encoding: "utf-8" } }));
+    if (command === "list_workspace_files") return { path: args.path, files: [] };
+    throw new Error(command);
+  } } } };
+  try {
+    const { controller, state } = testDocumentController([], {}, { workspace: { path: "E:/Old", files: [] }, storage });
+    assert.equal(await controller.openWorkspaceProfile("E:/Profiles/One.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/One");
+    assert.equal(await controller.openWorkspaceProfile("D:/Other/Two.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/Two");
+    assert.equal(await controller.openWorkspaceProfile("E:/Profiles/One.txtworkspace"), true);
+    assert.equal(state.workspace.path, "E:/One");
+    assert.equal(picks, 0);
+    assert.deepEqual(state.recentWorkspaceProfiles, ["E:/Profiles/One.txtworkspace", "D:/Other/Two.txtworkspace"]);
+    assert.deepEqual(testDocumentController([], {}, { storage }).state.recentWorkspaceProfiles, state.recentWorkspaceProfiles);
+  } finally { globalThis.window = previousWindow; }
+});

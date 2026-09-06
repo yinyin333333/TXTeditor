@@ -1,3 +1,9 @@
+import { tText } from "../core/i18n.js";
+
+export function workspaceProfileLabel(path) {
+  return String(path).replaceAll("\\", "/").split("/").at(-1).replace(/\.txtworkspace$/i, "");
+}
+
 function defaultPathKey(path) {
   return String(path || "").replace(/\\/g, "/").toLowerCase();
 }
@@ -5,6 +11,8 @@ function defaultPathKey(path) {
 export function renderWorkspaceFileList({
   workspace,
   docs = [],
+  hiddenFiles = [],
+  showHiddenFiles = false,
   collapsedFileGroups = new Set(),
   pathKey = defaultPathKey,
   escapeHtml,
@@ -12,12 +20,14 @@ export function renderWorkspaceFileList({
 }) {
   if (!workspace?.files?.length) return "";
   const seenKeys = new Set(docs.map((doc) => pathKey(doc.path || "")));
+  const hiddenKeys = new Set(hiddenFiles.map(pathKey));
   const workspaceKey = pathKey(workspace.path).replace(/\/$/, "");
   const rootFiles = [];
   const subDirMap = new Map();
 
   for (const file of workspace.files) {
     const key = pathKey(file.path);
+    if (hiddenKeys.has(key) && !showHiddenFiles) continue;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     const relativePath = key.startsWith(`${workspaceKey}/`) ? key.slice(workspaceKey.length + 1) : file.name;
@@ -31,7 +41,10 @@ export function renderWorkspaceFileList({
     }
   }
 
-  const fileButton = (file) => `<button data-open-path="${escapeHtml(file.path)}">${escapeHtml(file.name)}${problemBadgeForPath(file.path)}</button>`;
+  const fileButton = (file) => {
+    const hidden = hiddenKeys.has(pathKey(file.path));
+    return `<div class="workspace-file-row${hidden ? " is-hidden" : ""}"><button data-open-path="${escapeHtml(file.path)}" title="${escapeHtml(file.path)}"><span class="workspace-file-name">${escapeHtml(file.name)}</span>${hidden ? `<span class="workspace-hidden-badge">${tText("workspace.hidden")}</span>` : ""}${problemBadgeForPath(file.path)}</button></div>`;
+  };
   if (subDirMap.size === 0) return rootFiles.map(fileButton).join("");
 
   const group = (label, files) => {
@@ -41,4 +54,14 @@ export function renderWorkspaceFileList({
 
   return (rootFiles.length ? group("Data Files", rootFiles) : "")
     + [...subDirMap.entries()].map(([dir, files]) => group(dir, files)).join("");
+}
+
+export function renderExplorerSections({ state, openEditors, workspaceFiles, escapeHtml, pathKey = defaultPathKey }) {
+  const sectionTitle = (label, count) => `<h3 class="explorer-section-title">${label}<span class="explorer-section-count">${count}</span></h3>`;
+  const editors = `<section class="explorer-section explorer-open-editors" aria-label="${tText("workspace.openEditors")}">${sectionTitle(tText("workspace.openEditors"), state.docs.length)}${openEditors}</section>`;
+  if (!state.workspace) return editors;
+  const folder = state.workspace.path;
+  const basename = (path) => String(path).replaceAll("\\", "/").replace(/\/+$/, "").split("/").at(-1) || path;
+  const profile = state.workspaceProfilePath || "";
+  return editors + `<section class="explorer-section explorer-workspace" aria-label="${tText("workspace.section")}"><header class="workspace-section-header"><h3 title="${escapeHtml(profile ? profile + "\n" + folder : folder)}">${escapeHtml(profile ? workspaceProfileLabel(profile) : basename(folder))}</h3><span class="explorer-section-count">${state.workspace.files?.length ?? 0}</span></header>${workspaceFiles}</section>`;
 }

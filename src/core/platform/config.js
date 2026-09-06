@@ -18,10 +18,10 @@ export async function loadLintReferenceDataset(gameVersion) {
   return api.invoke("load_lint_reference_dataset", { gameVersion });
 }
 
-export async function pickFilePath() {
+export async function pickFilePath({ workspaceProfile = false } = {}) {
   if (!isTauriRuntime()) return null;
   const api = await tauriApi();
-  return api.invoke("pick_file_path");
+  return workspaceProfile ? api.invoke("pick_file_path", { workspaceProfile: true }) : api.invoke("pick_file_path");
 }
 
 export async function pickFolderPath() {

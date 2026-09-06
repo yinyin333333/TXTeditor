@@ -55,6 +55,7 @@ export function createCommandSurfaceController({
   }
 
   function showContextMenu({ x, y, hit }) {
+    els.contextMenu.classList.remove("compact-action-menu");
     diagnosticContextMenu = null;
     state.contextHit = hit;
     state.contextMenuActiveGroup = "";
@@ -117,23 +118,26 @@ export function createCommandSurfaceController({
     positionContextMenu();
   }
 
-  function showDiagnosticContextMenu({ x, y, onCopyMessage, onCopyFull }) {
-    diagnosticContextMenu = { x, y, onCopyMessage, onCopyFull };
+  function showDiagnosticContextMenu({ x, y, onCopyMessage, onCopyFull, entries: actionEntries, alignRight = false }) {
+    els.contextMenu.classList.toggle("compact-action-menu", Boolean(actionEntries));
+    diagnosticContextMenu = { x, y, onCopyMessage, onCopyFull, entries: actionEntries, alignRight };
     state.contextHit = null;
     state.contextMenuActiveGroup = "";
     setContextMenuOpen(true);
-    const entries = [
+    const entries = actionEntries ?? [
       { id: "message", label: tText("problems.copyMessage") },
       { id: "full", label: tText("problems.copyFull") }
     ];
     els.contextMenu.innerHTML = entries.map((entry) => (
-      `<button data-diagnostic-copy="${entry.id}"><span>${escapeHtml(entry.label)}</span></button>`
+      `<button data-diagnostic-copy="${escapeHtml(entry.id)}" title="${escapeHtml(entry.title || entry.label)}"${entry.disabled ? " disabled" : ""}><span>${escapeHtml(entry.label)}</span></button>`
     )).join("");
     for (const button of els.contextMenu.querySelectorAll("button[data-diagnostic-copy]")) {
-      button.addEventListener("click", () => {
-        const callback = button.dataset.diagnosticCopy === "message" ? onCopyMessage : onCopyFull;
-        Promise.resolve(callback?.()).catch(showError);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const entry = entries.find(item => item.id === button.dataset.diagnosticCopy);
+        const callback = actionEntries ? entry?.action : button.dataset.diagnosticCopy === "message" ? onCopyMessage : onCopyFull;
         hideContextMenu();
+        Promise.resolve(callback?.()).catch(showError);
       });
     }
     els.contextMenu.classList.remove("hidden");
@@ -164,7 +168,7 @@ export function createCommandSurfaceController({
     const requestedY = Number(els.contextMenu.dataset.y);
     const rect = els.contextMenu.getBoundingClientRect();
     const margin = 8;
-    const left = requestedX + rect.width + margin > window.innerWidth ? requestedX - rect.width : requestedX;
+    const left = diagnosticContextMenu?.alignRight || requestedX + rect.width + margin > window.innerWidth ? requestedX - rect.width : requestedX;
     const top = requestedY + rect.height + margin > window.innerHeight ? requestedY - rect.height : requestedY;
     els.contextMenu.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin))}px`;
     els.contextMenu.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin))}px`;
@@ -288,6 +292,7 @@ export function createCommandSurfaceController({
     setContextMenuOpen,
     showContextMenu,
     showDiagnosticContextMenu,
+    showActionContextMenu: showDiagnosticContextMenu,
     showPalette
   };
 }

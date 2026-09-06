@@ -761,6 +761,97 @@ button.button-click-feedback {
   display: block;
 }
 
+.explorer-section {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.explorer-section + .explorer-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.explorer-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.explorer-section-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.workspace-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 6px 4px 10px;
+}
+
+.workspace-section-header h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-menu-trigger {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.context-menu [data-diagnostic-copy] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-file-row.is-hidden {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+.workspace-file-row.is-hidden .workspace-file-name {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.workspace-hidden-badge {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .file-group-content {
   display: flex;
   flex-direction: column;
@@ -793,7 +884,21 @@ button.button-click-feedback {
   transform: rotate(90deg);
 }
 
-.file-group-content > button {
+.workspace-file-row {
+  display: flex;
+  min-width: 0;
+}
+
+.workspace-file-row > [data-open-path] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-group-content > button,
+.file-group-content > .workspace-file-row > [data-open-path] {
   padding-left: 22px;
 }
 
@@ -1696,6 +1801,17 @@ details:not([open]) .problem-file-header::before {
 
 .context-menu.hidden {
   display: none;
+}
+
+.context-menu.compact-action-menu {
+  min-width: 0;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  overflow-y: auto;
+}
+
+.context-menu.compact-action-menu button {
+  gap: 0;
 }
 
 .context-menu button {
