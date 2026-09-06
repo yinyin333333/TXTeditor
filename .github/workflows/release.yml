@@ -115,8 +115,7 @@ jobs:
             --vector-lsp-root "$root" `
             --timeout-ms 120000
 
-      # Portable zip only, so no bundler runs. The cargo bin is lowercase
-      # `txteditor`; staging renames it to match productName.
+      # Portable zip only, so no bundler runs.
       - name: Build TXTeditor executable
         run: npm run tauri -- build --no-bundle
 
@@ -124,7 +123,9 @@ jobs:
         shell: pwsh
         run: |
           $stage = New-Item -ItemType Directory -Force "staging\portable"
-          Copy-Item "src-tauri\target\release\txteditor.exe" "$stage\TXTeditor.exe"
+          # Keep the cargo binary name. Published releases ship txteditor.exe,
+          # and renaming it gives the file a fresh SmartScreen identity.
+          Copy-Item "src-tauri\target\release\txteditor.exe" $stage
           Copy-Item "vector-lsp\target\x86_64-pc-windows-msvc\release\vector-lsp.exe" $stage
           Copy-Item "vector-lsp\contrib" "$stage\contrib" -Recurse
           Compress-Archive -Path "$stage\*" `

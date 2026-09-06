@@ -289,7 +289,8 @@ test("Vector-LSP packaging contract keeps adjacent executable and contrib resour
   // Windows portable zip: editor, LSP and contrib land as siblings.
   const windows = releaseWorkflowJob(releaseWorkflow, "windows");
   const stageZip = releaseWorkflowStepByName(windows, "Stage portable zip");
-  assert.match(stageZip.body, /Copy-Item "src-tauri\\target\\release\\txteditor\.exe" "\$stage\\TXTeditor\.exe"/);
+  // Shipped as txteditor.exe, matching published releases.
+  assert.match(stageZip.body, /Copy-Item "src-tauri\\target\\release\\txteditor\.exe" \$stage/);
   assert.match(stageZip.body, /Copy-Item "vector-lsp\\target\\x86_64-pc-windows-msvc\\release\\vector-lsp\.exe" \$stage/);
   assert.match(stageZip.body, /Copy-Item "vector-lsp\\contrib" "\$stage\\contrib" -Recurse/);
 
