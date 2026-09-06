@@ -172,6 +172,7 @@ Changes involving the Tauri/Rust backend should also be checked with the relevan
 - [d2rlint](https://github.com/eezstreet/d2rlint) by eezstreet: TXTeditor's D2R lint behavior and portions of its live diagnostic logic are based on or adapted from d2rlint, which is licensed under GNU GPLv3.
 - [CodeMirror](https://codemirror.net/) is used for the JSON editor.
 - The table-editing workflows of AFJSheet and D2ExcelPlus influenced parts of TXTeditor's editing UX.
+- Special thanks to [**DazUki**](https://github.com/dazuki) for contributing the Linux release workflow and fixes that made TXTeditor and vector-lsp work correctly on Linux. I am deeply grateful for the help.
 
 Additional attribution and licensing notes are available in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
