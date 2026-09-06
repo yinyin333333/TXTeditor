@@ -32,6 +32,7 @@ export function createShellController({
   showActionContextMenu = () => {},
   openWorkspaceProfile = async () => {},
   saveWorkspaceProfile = async () => {},
+  hideContextMenu = () => {},
   commitActiveEditor = () => {},
   saveSelectionState = () => {},
   recordUiPerf,
@@ -158,6 +159,10 @@ export function createShellController({
     for (const button of documentRef.querySelectorAll("[data-workspace-menu]")) {
       button.onclick = (event) => {
         event.stopPropagation();
+        if (state.contextMenuOpen) {
+          hideContextMenu();
+          return;
+        }
         const rect = button.getBoundingClientRect();
         showActionContextMenu({ x: rect.right, y: rect.bottom + 4, alignRight: true, entries: workspaceMenuEntries(rect.right, rect.bottom + 4) });
       };

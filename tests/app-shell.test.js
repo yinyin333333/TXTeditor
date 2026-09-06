@@ -182,6 +182,35 @@ test("workspace menus hide and restore files without changing the workspace and 
   } finally { harness.restore(); }
 });
 
+test("workspace overflow button toggles its open action menu closed", () => {
+  let shows = 0;
+  let hides = 0;
+  let harness;
+  harness = explorerHarness({ actions: {
+    showActionContextMenu: () => {
+      shows++;
+      harness.state.contextMenuOpen = true;
+    },
+    hideContextMenu: () => {
+      hides++;
+      harness.state.contextMenuOpen = false;
+    }
+  } });
+  try {
+    harness.controller.renderChrome();
+    const overflow = harness.document.querySelector("[data-workspace-menu]");
+    overflow.onclick({ stopPropagation() {} });
+    assert.equal(shows, 1);
+    assert.equal(hides, 0);
+    assert.equal(harness.state.contextMenuOpen, true);
+
+    overflow.onclick({ stopPropagation() {} });
+    assert.equal(shows, 1);
+    assert.equal(hides, 1);
+    assert.equal(harness.state.contextMenuOpen, false);
+  } finally { harness.restore(); }
+});
+
 test("Explorer search Enter opens the best matching workspace file and clears the query", async () => {
   const harness = explorerHarness({
     docs: [{ name: "armor.txt", path: "E:/Game/Data/armor.txt", dirty: false }],

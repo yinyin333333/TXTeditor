@@ -462,6 +462,7 @@ shellController = createShellController({
   scheduleHoverPrewarm,
   ensureDocumentSession: lspController.ensureStandaloneSession, commitActiveEditor,
   showActionContextMenu: (options) => commandSurfaceController.showActionContextMenu(options),
+  hideContextMenu: () => commandSurfaceController.hideContextMenu(),
   openWorkspaceProfile: documentController.openWorkspaceProfile,
   saveWorkspaceProfile: documentController.saveWorkspaceProfile,
   saveSelectionState,
