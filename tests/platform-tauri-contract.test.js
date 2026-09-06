@@ -68,6 +68,16 @@ function releaseWorkflowStepByName(workflow, name) {
   return step;
 }
 
+// Step names repeat across the windows and linux jobs, so ordering assertions
+// have to be scoped to one job rather than run against the whole file.
+function releaseWorkflowJob(workflow, jobName) {
+  const start = workflow.search(new RegExp(`^ {2}${jobName}:$`, "m"));
+  assert.ok(start >= 0, `release workflow job is missing: ${jobName}`);
+  const rest = workflow.slice(start + 1);
+  const next = rest.search(/^ {2}\S+:$/m);
+  return next >= 0 ? workflow.slice(start, start + 1 + next) : workflow.slice(start);
+}
+
 test("Legacy Lint workspace loading uses bulk native reads and cache signatures", async () => {
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const rustFileIo = readFileSync(new URL("../src-tauri/src/file_io.rs", import.meta.url), "utf8");
@@ -265,47 +275,81 @@ test("Vector-LSP packaging contract keeps adjacent executable and contrib resour
   const rustLspLaunch = readFileSync(new URL("../src-tauri/src/lsp_launch.rs", import.meta.url), "utf8");
   const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
+  // The resource dir is probed before the executable sibling, so the Linux
+  // bundle layout and the Windows portable zip both resolve.
+  assert.match(rustLspLaunch, /app\.path\(\)\.resource_dir\(\)/);
   assert.match(rustLspLaunch, /std::env::current_exe\(\)/);
   assert.match(rustLspLaunch, /candidates\.push\(dir\.join\(exe\)\)/);
-  assert.match(releaseWorkflow, /repository:\s+yinyin333333\/vector-lsp/);
-  assert.doesNotMatch(releaseWorkflow, /repository:\s+eezstreet\/vector-lsp/);
-  assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/target\/x86_64-pc-windows-msvc\/release\/vector-lsp\.exe": "vector-lsp\.exe"/);
-  assert.match(releaseWorkflow, /"\.\.\/vector-lsp\/contrib": "contrib"/);
-  assert.match(releaseWorkflow, /Copy-Item \$vlspExe \$portableDir/);
-  assert.match(releaseWorkflow, /\$vlspContrib = "vector-lsp\\contrib"/);
-  assert.match(releaseWorkflow, /Test-Path \$vlspContrib -PathType Container/);
-  assert.match(releaseWorkflow, /Copy-Item \$vlspContrib "\$portableDir\\contrib" -Recurse/);
-  assert.doesNotMatch(releaseWorkflow, /if \(Test-Path "vector-lsp\\contrib"\)/);
+
+  // vector-lsp is built from yinyin's fork by default, never the original
+  // upstream. The repo is a dispatch input, so assert on the default.
+  assert.match(releaseWorkflow, /'yinyin333333\/vector-lsp'/);
+  assert.doesNotMatch(releaseWorkflow, /eezstreet\/vector-lsp/);
+
+  // Windows portable zip: editor, LSP and contrib land as siblings.
+  const windows = releaseWorkflowJob(releaseWorkflow, "windows");
+  const stageZip = releaseWorkflowStepByName(windows, "Stage portable zip");
+  // Shipped as txteditor.exe, matching published releases.
+  assert.match(stageZip.body, /Copy-Item "src-tauri\\target\\release\\txteditor\.exe" \$stage/);
+  assert.match(stageZip.body, /Copy-Item "vector-lsp\\target\\x86_64-pc-windows-msvc\\release\\vector-lsp\.exe" \$stage/);
+  assert.match(stageZip.body, /Copy-Item "vector-lsp\\contrib" "\$stage\\contrib" -Recurse/);
+
+  // Linux AppImage: both mapped into bundle.resources so linuxdeploy places
+  // them together under usr/lib/TXTeditor/, and the build verifies it did.
+  const linux = releaseWorkflowJob(releaseWorkflow, "linux");
+  const bundleConfig = releaseWorkflowStepByName(linux, "Write Linux bundle config");
+  assert.match(bundleConfig.body, /"\.\.\/vector-lsp\/target\/release\/vector-lsp": "vector-lsp"/);
+  assert.match(bundleConfig.body, /"\.\.\/vector-lsp\/contrib": "contrib"/);
+  const verifyBundled = releaseWorkflowStepByName(linux, "Verify vector-lsp is inside the AppImage");
+  assert.match(verifyBundled.body, /usr\/lib\/TXTeditor\/vector-lsp\$/);
+
+  // linuxdeploy's strip cannot read .relr.dyn and Tauri hides its stderr, so
+  // the only symptom of a regression here would be an opaque bundler failure.
+  const buildAppImage = releaseWorkflowStepByName(linux, "Build AppImage");
+  assert.match(buildAppImage.body, /NO_STRIP: "1"/);
 });
 
 test("release workflow requires Vector-LSP smoke before packaging artifacts", () => {
   const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  const runTests = releaseWorkflowStepByName(releaseWorkflow, "Run tests");
-  const buildVectorLsp = releaseWorkflowStepByName(releaseWorkflow, "Build vector-lsp");
-  const smokeGate = releaseWorkflowStepByName(releaseWorkflow, "Required Vector-LSP runtime smoke");
-  const writeTauriConfig = releaseWorkflowStepByName(releaseWorkflow, "Write Tauri resource config");
-  const buildTxteditor = releaseWorkflowStepByName(releaseWorkflow, "Build TXTeditor (Tauri + bundled vector-lsp)");
-  const stageArtifacts = releaseWorkflowStepByName(releaseWorkflow, "Stage release artifacts");
-  const uploadInstaller = releaseWorkflowStepByName(releaseWorkflow, "Upload installer artifact");
+  // Both platforms package vector-lsp, so both need the same gate.
+  const packagingByJob = [
+    ["windows", ["Build TXTeditor executable", "Stage portable zip"]],
+    ["linux", ["Write Linux bundle config", "Build AppImage", "Stage AppImage"]]
+  ];
 
-  assert.ok(runTests.index < buildVectorLsp.index, "portable npm test must run before the CI vector-lsp build");
-  assert.ok(smokeGate.index > buildVectorLsp.index, "smoke gate must run after the CI vector-lsp build");
-  assert.ok(smokeGate.index < writeTauriConfig.index, "smoke gate must run before Tauri resource config is written");
-  assert.ok(smokeGate.index < buildTxteditor.index, "smoke gate must run before Tauri packaging");
-  assert.ok(smokeGate.index < stageArtifacts.index, "smoke gate must run before release artifact staging");
-  assert.ok(smokeGate.index < uploadInstaller.index, "smoke gate must run before installer upload");
-  assert.match(runTests.body, /^\s*run: npm test$/m);
-  assert.match(smokeGate.body, /npm run test:vector-lsp-smoke:required --/);
-  assert.match(smokeGate.body, /\$vlspExe = \(Resolve-Path -LiteralPath "vector-lsp\\target\\x86_64-pc-windows-msvc\\release\\vector-lsp\.exe"\)\.Path/);
-  assert.match(smokeGate.body, /\$vlspRoot = \(Resolve-Path -LiteralPath "vector-lsp"\)\.Path/);
-  assert.match(smokeGate.body, /--vector-lsp-exe "\$vlspExe"/);
-  assert.match(smokeGate.body, /--vector-lsp-root "\$vlspRoot"/);
-  assert.match(smokeGate.body, /--timeout-ms 30000/);
-  assert.doesNotMatch(smokeGate.body, /^\s*if:\s*/m);
-  assert.doesNotMatch(smokeGate.body, /continue-on-error/i);
-  assert.doesNotMatch(smokeGate.body, /npm run test:vector-lsp-smoke(?:\s|$| --)/);
-  assert.doesNotMatch(smokeGate.body, /optional|not-run|missing-contrib|fallback/i);
-  assert.doesNotMatch(smokeGate.body, /if\s*\(.*contrib|Test-Path.*contrib/i);
+  for (const [jobName, packagingSteps] of packagingByJob) {
+    const job = releaseWorkflowJob(releaseWorkflow, jobName);
+    const frontendTests = releaseWorkflowStepByName(job, "Frontend tests");
+    const buildVectorLsp = releaseWorkflowStepByName(job, "Build vector-lsp");
+    const smokeGate = releaseWorkflowStepByName(job, "Required vector-lsp smoke");
+
+    assert.ok(frontendTests.index < buildVectorLsp.index, `${jobName}: npm test must run before the vector-lsp build`);
+    assert.ok(smokeGate.index > buildVectorLsp.index, `${jobName}: smoke gate must run after the vector-lsp build`);
+    for (const stepName of packagingSteps) {
+      const step = releaseWorkflowStepByName(job, stepName);
+      assert.ok(smokeGate.index < step.index, `${jobName}: smoke gate must run before ${stepName}`);
+    }
+
+    assert.match(frontendTests.body, /^\s*run: npm test$/m);
+    assert.match(smokeGate.body, /npm run test:vector-lsp-smoke:required --/);
+    assert.match(smokeGate.body, /--vector-lsp-exe /);
+    assert.match(smokeGate.body, /--vector-lsp-root /);
+    assert.match(smokeGate.body, /--timeout-ms 120000/);
+
+    // The gate is unconditional: no `if:`, no soft failure, and no silent
+    // downgrade to the optional smoke that tolerates a missing binary.
+    assert.doesNotMatch(smokeGate.body, /^\s*if:\s*/m);
+    assert.doesNotMatch(smokeGate.body, /continue-on-error/i);
+    assert.doesNotMatch(smokeGate.body, /npm run test:vector-lsp-smoke(?:\s|$| --)/);
+    assert.doesNotMatch(smokeGate.body, /optional|not-run|missing-contrib|fallback/i);
+    assert.doesNotMatch(smokeGate.body, /if\s*\(.*contrib|Test-Path.*contrib/i);
+  }
+
+  // Each platform points the smoke at the binary it actually just built.
+  const windowsSmoke = releaseWorkflowStepByName(releaseWorkflowJob(releaseWorkflow, "windows"), "Required vector-lsp smoke");
+  assert.match(windowsSmoke.body, /Resolve-Path -LiteralPath "vector-lsp\\target\\x86_64-pc-windows-msvc\\release\\vector-lsp\.exe"/);
+  const linuxSmoke = releaseWorkflowStepByName(releaseWorkflowJob(releaseWorkflow, "linux"), "Required vector-lsp smoke");
+  assert.match(linuxSmoke.body, /vector-lsp\/target\/release\/vector-lsp"/);
 });
 
 test("platform facade preserves Tauri command payload shapes", async () => {
