@@ -1,7 +1,9 @@
 import { isJsonDocument, isTableDocument } from "../../core/document-file-state.js";
 import { cyclicDocumentIndex } from "../document-lifecycle-policy.js";
-import { renderWorkspaceFileList } from "../workspace-file-list-policy.js";
+import { renderWorkspaceFileList, renderExplorerSections, workspaceProfileLabel } from "../workspace-file-list-policy.js";
 import { tText } from "../../core/i18n.js";
+import { revealActiveDocumentTab } from "../document-tab-visibility.js";
+import { showButtonClickFeedback } from "../button-feedback-policy.js";
 
 export function createShellController({
   state,
@@ -27,6 +29,9 @@ export function createShellController({
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
   ensureDocumentSession = async () => {},
+  showActionContextMenu = () => {},
+  openWorkspaceProfile = async () => {},
+  saveWorkspaceProfile = async () => {},
   commitActiveEditor = () => {},
   saveSelectionState = () => {},
   recordUiPerf,
@@ -38,6 +43,10 @@ export function createShellController({
 }) {
   const collapsedFileGroups = new Set();
   let explorerSearchActiveIndex = 0;
+  // The shell and its observer live for the lifetime of the app.
+  const tabResizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => revealActiveDocumentTab(els.tabs)) : null;
+  if (els.tabs) tabResizeObserver?.observe(els.tabs);
 
   function updateDiagnosticIndicators({ fileBadges = false } = {}) {
     updateGridDiagnostics();
@@ -52,6 +61,7 @@ export function createShellController({
       }
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
+      delete button.dataset.badge;
       button.textContent = "P";
       button.title = state.lint.diagnostics.length ? `${tText("activity.problems")} (${state.lint.diagnostics.length})` : tText("activity.problems");
     }
@@ -89,6 +99,7 @@ export function createShellController({
     const started = perfNow();
     const documentOpen = hasOpenDocument();
     bindExplorerFilter();
+    els.shell.classList.toggle("activity-hidden", state.activityBarVisible === false);
     syncDockLayout();
     els.shell.classList.toggle("sidebar-hidden", !state.sidebarVisible);
     els.shell.classList.toggle("problems-open", state.problemsVisible);
@@ -103,9 +114,11 @@ export function createShellController({
     updateDiagnosticIndicators();
     for (const button of documentRef.querySelectorAll("[data-command='show-explorer']")) {
       button.classList.toggle("active", state.sidebarVisible);
+      button.setAttribute("aria-pressed", String(state.sidebarVisible));
     }
     for (const button of documentRef.querySelectorAll("[data-command='show-problems']")) {
       button.classList.toggle("active", state.problemsVisible);
+      button.setAttribute("aria-pressed", String(state.problemsVisible));
     }
     for (const button of documentRef.querySelectorAll("[data-command='close-all']")) {
       button.disabled = !state.workspace && !state.docs.length;
@@ -138,25 +151,56 @@ export function createShellController({
         const titleClass = severity ? `tab-title tab-title-${severity}` : "tab-title";
         const kindClass = isJsonDocument(doc) ? "tab-json" : "tab-table";
         const dirty = doc.dirty ? `<span class="tab-dirty-dot" title="${tText("tab.unsavedChanges")}">●</span>` : "";
-        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
+        return `<button class="${index === state.active ? "active " : ""}${kindClass}" data-tab="${index}" aria-pressed="${index === state.active}" title="${escapeHtml(doc.path || doc.name)}"><span class="${titleClass}">${escapeHtml(doc.name)}</span>${dirty}<span class="tab-close" data-close-tab="${index}" title="${tText("common.close")}">x</span></button>`;
       })
       .join("");
+    revealActiveDocumentTab(els.tabs);
+    for (const button of documentRef.querySelectorAll("[data-workspace-menu]")) {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        const rect = button.getBoundingClientRect();
+        showActionContextMenu({ x: rect.right, y: rect.bottom + 4, alignRight: true, entries: workspaceMenuEntries(rect.right, rect.bottom + 4) });
+      };
+    }
     const workspaceFiles = renderWorkspaceFileList({
       workspace: state.workspace,
       docs: state.docs,
+      hiddenFiles: state.workspaceHiddenFiles,
+      showHiddenFiles: false,
       collapsedFileGroups,
       pathKey: lintPathKey,
       escapeHtml,
       problemBadgeForPath
     });
-    els.fileList.innerHTML = state.docs
+    const openEditors = state.docs
       .map((doc, index) => `<button class="${index === state.active ? "active" : ""}" data-tab="${index}" data-problem-path="${escapeHtml(doc.path || doc.name)}">${escapeHtml(doc.name)}${problemBadgeForPath(doc.path || doc.name)}</button>`)
-      .join("") + (workspaceFiles ? `<div class="separator"></div>${workspaceFiles}` : "");
+      .join("");
+    els.fileList.innerHTML = renderExplorerSections({ state, openEditors, workspaceFiles, escapeHtml, pathKey: lintPathKey });
+    els.fileList.oncontextmenu = (event) => {
+      if (!event.target.closest(".explorer-workspace")) return;
+      event.preventDefault();
+      const path = event.target.closest("[data-open-path]")?.dataset.openPath;
+      const entries = [];
+      if (path) {
+        const hidden = (state.workspaceHiddenFiles ?? []).some(item => lintPathKey(item) === lintPathKey(path));
+        entries.push({ id: "visibility", label: tText(hidden ? "workspace.showFile" : "workspace.hideFile"), action: () => {
+          state.workspaceHiddenFiles = hidden
+            ? state.workspaceHiddenFiles.filter(item => lintPathKey(item) !== lintPathKey(path))
+            : [...(state.workspaceHiddenFiles ?? []), path];
+          renderChrome();
+        } });
+      }
+      entries.push(hiddenFilesMenuEntry(event.clientX, event.clientY));
+      showActionContextMenu({ x: event.clientX, y: event.clientY, entries });
+    };
     renderProblemsPanelIfNeeded();
     for (const button of documentRef.querySelectorAll("[data-tab]")) {
       button.addEventListener("click", (event) => {
         if (event?.target?.closest("[data-close-tab]")) return;
-        selectTab(Number(button.dataset.tab)).catch(showError);
+        selectTab(Number(button.dataset.tab)).then(() => {
+          // renderChrome replaces the clicked element, so animate its replacement.
+          showButtonClickFeedback(els.tabs.querySelector("button.active[data-tab]"));
+        }).catch(showError);
       });
     }
     for (const button of documentRef.querySelectorAll("[data-close-tab]")) {
@@ -179,6 +223,39 @@ export function createShellController({
     }
     renderExplorerSearchResults();
     recordUiPerf("render-chrome", started, { docs: state.docs.length });
+  }
+
+  function hiddenFilesMenuEntry(x, y, alignRight = false) {
+    const hidden = state.workspaceHiddenFiles ?? [];
+    return { id: "hidden-files", label: tText("workspace.restoreHidden") + " (" + hidden.length + ")", disabled: !hidden.length,
+      action: () => {
+        const entries = [{ id: "restore-all", label: tText("workspace.restoreAll"), action: () => {
+          state.workspaceHiddenFiles = [];
+          renderChrome();
+        } }];
+        hidden.forEach((path, index) => entries.push({ id: "restore-" + index,
+          label: path.replaceAll("\\", "/").split("/").at(-1), title: path,
+          action: () => {
+            state.workspaceHiddenFiles = (state.workspaceHiddenFiles ?? []).filter(item => lintPathKey(item) !== lintPathKey(path));
+            renderChrome();
+          }
+        }));
+        showActionContextMenu({ x, y, entries, alignRight });
+      }
+    };
+  }
+
+  function workspaceMenuEntries(x, y) {
+    const entries = [
+      { id: "open-workspace", label: tText("workspace.openProfile"), action: () => openWorkspaceProfile() },
+      { id: "save-workspace", label: tText("workspace.saveProfile"), disabled: !state.workspace, action: saveWorkspaceProfile },
+      hiddenFilesMenuEntry(x, y, true)
+    ];
+    const recent = state.recentWorkspaceProfiles ?? [];
+    if (recent.length) entries.push({ id: "recent-label", label: tText("workspace.recent"), disabled: true });
+    recent.forEach((path, index) => entries.push({ id: "recent-" + index,
+      label: workspaceProfileLabel(path), title: path, action: () => openWorkspaceProfile(path) }));
+    return entries;
   }
 
   function selectTab(index) {

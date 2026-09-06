@@ -1,6 +1,9 @@
 import { tText } from "../core/i18n.js";
 
 export const COMMAND_LABELS_BASE = [
+  ["open-workspace-profile", "workspace.openProfile"],
+  ["save-workspace-profile", "workspace.saveProfile"],
+  ["toggle-activity-bar", "command.toggle-activity-bar"],
   ["new-table", "command.new-table"], ["duplicate-temporary", "command.duplicate-temporary"],
   ["open-file", "command.open-file"], ["open-folder", "command.open-folder"], ["close-all", "toolbar.closeAll"], ["save-file", "command.save-file"], ["save-as", "command.save-as"],
   ["search", "command.search"], ["find-next", "command.find-next"], ["find-previous", "command.find-previous"], ["replace", "command.replace"],
@@ -21,6 +24,8 @@ export const DEVELOPMENT_COMMAND_LABELS = [
 ];
 
 export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
+  "open-workspace-profile", "save-workspace-profile",
+  "toggle-activity-bar",
   "new-table",
   "open-file",
   "open-folder",
@@ -44,6 +49,9 @@ export const COMMANDS_AVAILABLE_WITHOUT_DOCUMENT = new Set([
 ]);
 
 const COMMAND_ACTIONS = new Map([
+  ["open-workspace-profile", { type: "handler", name: "openWorkspaceProfile" }],
+  ["save-workspace-profile", { type: "handler", name: "saveWorkspaceProfile" }],
+  ["toggle-activity-bar", { type: "handler", name: "toggleActivityBar" }],
   ["new-table", { type: "handler", name: "newTable" }],
   ["duplicate-temporary", { type: "handler", name: "duplicateTemporary" }],
   ["open-file", { type: "handler", name: "openFile" }],
@@ -164,6 +172,8 @@ export function mathCommandItems() {
 }
 
 const JSON_DOCUMENT_COMMANDS = new Set([
+  "open-workspace-profile", "save-workspace-profile",
+  "toggle-activity-bar",
   "new-table", "open-file", "open-folder", "close-all", "save-file", "save-as", "search", "find-next", "find-previous", "replace",
   "next-tab", "previous-tab",
   "undo", "redo", "select-all", "toggle-sidebar", "toggle-theme",

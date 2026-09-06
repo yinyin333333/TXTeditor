@@ -179,8 +179,10 @@ export function lintSummaryText({
     if (!diagnostics.length) return tText("lint.noProblemsProfile", { profile: legacyProfile });
     return tText("lint.summaryCountsProfile", { ...summaryCounts, profile: legacyProfile });
   }
-  if (vectorEngine && !lspStarted) return t("lint.openFolderSummary");
+  // A concrete status outranks the generic hint: a stopped session sets both
+  // `lspStarted = false` and a status, and the hint would mask it.
   if (lintStatus) return lintStatus;
+  if (vectorEngine && !lspStarted) return t("lint.openFolderSummary");
   const summaryCounts = counts ?? diagnosticCounts(diagnostics);
   if (!diagnostics.length) return tText(openFileCount === 1 ? "lint.noProblemsOneFile" : "lint.noProblemsFiles", { count: openFileCount });
   return tText("lint.summaryCounts", { ...summaryCounts, count: openFileCount });

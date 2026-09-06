@@ -1,8 +1,17 @@
 use crate::config::{AppConfig, JsonDiagnosticRules};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(crate) fn find_vector_lsp_binary() -> Result<PathBuf, String> {
+/// Tauri's resource directory, where bundled installs place vector-lsp.
+///
+/// The executable's own directory on Windows, but `<exe>/../lib/<product>` on
+/// Linux, which the sibling probe never reaches.
+pub(crate) fn resource_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    app.path().resource_dir().ok()
+}
+
+pub(crate) fn find_vector_lsp_binary(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
     let exe = if cfg!(windows) {
         "vector-lsp.exe"
     } else {
@@ -10,6 +19,9 @@ pub(crate) fn find_vector_lsp_binary() -> Result<PathBuf, String> {
     };
 
     let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join(exe));
+    }
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(dir) = current_exe.parent() {
             candidates.push(dir.join(exe));
@@ -29,7 +41,7 @@ pub(crate) fn find_vector_lsp_binary() -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "vector-lsp binary not found. Set a path in Settings or build it in ../vector-lsp. Tried: {}",
+        "vector-lsp binary not found. Set a path in Settings, install it beside the app resources, or build it in ../vector-lsp. Tried: {}",
         candidates
             .iter()
             .map(|path| path.display().to_string())
@@ -52,7 +64,7 @@ pub(crate) struct EditorLaunchSpec {
 }
 
 impl EditorLaunchSpec {
-    pub(crate) fn resolve(config: &AppConfig) -> Result<Self, String> {
+    pub(crate) fn resolve(config: &AppConfig, resource_dir: Option<&Path>) -> Result<Self, String> {
         let binary = match config
             .vector_lsp_path
             .as_deref()
@@ -60,7 +72,7 @@ impl EditorLaunchSpec {
             .filter(|path| !path.is_empty())
         {
             Some(path) => canonical_existing_path(path, "Configured vector-lsp path")?,
-            None => find_vector_lsp_binary()?,
+            None => find_vector_lsp_binary(resource_dir)?,
         };
         let lint_mode = config
             .lint_mode
@@ -239,6 +251,42 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    // Linux bundles split these: `usr/lib/<product>/` and `usr/bin/`.
+    #[test]
+    fn the_resource_directory_is_probed_before_the_executable_sibling() {
+        let resource_dir =
+            std::env::temp_dir().join(format!("txteditor-resource-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        let exe = if cfg!(windows) {
+            "vector-lsp.exe"
+        } else {
+            "vector-lsp"
+        };
+        let bundled = resource_dir.join(exe);
+        std::fs::write(&bundled, b"").unwrap();
+
+        let found = find_vector_lsp_binary(Some(&resource_dir)).unwrap();
+
+        assert_eq!(found, bundled.canonicalize().unwrap());
+        std::fs::remove_dir_all(&resource_dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_resource_directory_falls_through_to_the_other_candidates() {
+        // Only meaningful when no real binary sits on the fallback paths.
+        let Err(error) =
+            find_vector_lsp_binary(Some(Path::new("/nonexistent/txteditor-resources")))
+        else {
+            return;
+        };
+
+        assert!(
+            error.contains("/nonexistent/txteditor-resources"),
+            "{error}"
+        );
+        assert!(error.contains("../vector-lsp/target/release/"), "{error}");
+    }
+
     #[test]
     fn editor_launch_defaults_match_the_ui_and_resolve_absolute_paths() {
         let binary = std::env::current_exe().unwrap();
@@ -247,7 +295,7 @@ mod tests {
             ..Default::default()
         };
 
-        let spec = EditorLaunchSpec::resolve(&config).unwrap();
+        let spec = EditorLaunchSpec::resolve(&config, None).unwrap();
 
         assert!(spec.binary.is_absolute());
         assert_eq!(spec.lint_mode, "basic");
@@ -398,7 +446,7 @@ mod tests {
             ..Default::default()
         };
 
-        let spec = EditorLaunchSpec::resolve(&config).unwrap();
+        let spec = EditorLaunchSpec::resolve(&config, None).unwrap();
         assert_eq!(spec.lint_mode, "advanced");
         assert!(spec.reference_version.is_none());
 

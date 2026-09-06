@@ -112,6 +112,7 @@ struct ReferenceFilePayload {
 pub(crate) async fn load_lint_reference_dataset(
     game_version: String,
     state: tauri::State<'_, AppConfigState>,
+    app: tauri::AppHandle,
 ) -> Result<ReferenceDatasetPayload, String> {
     let configured_binary = state
         .config
@@ -119,6 +120,7 @@ pub(crate) async fn load_lint_reference_dataset(
         .map_err(|_| "Configuration lock is poisoned.".to_string())?
         .vector_lsp_path
         .clone();
+    let resource_dir = crate::lsp_launch::resource_dir(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let binary = match configured_binary
             .as_deref()
@@ -128,7 +130,7 @@ pub(crate) async fn load_lint_reference_dataset(
             Some(path) => PathBuf::from(path).canonicalize().map_err(|error| {
                 format!("Configured vector-lsp path cannot be resolved: {path}: {error}")
             })?,
-            None => find_vector_lsp_binary()?,
+            None => find_vector_lsp_binary(resource_dir.as_deref())?,
         };
         let contrib_root = binary
             .parent()

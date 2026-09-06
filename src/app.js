@@ -129,6 +129,7 @@ const {
   toggleExplorerPane,
   toggleProblemsPanel,
   toggleSidebar,
+  toggleActivityBar,
   wirePaneResizers
 } = dockController;
 const legacyLintController = createLegacyLintController({
@@ -377,6 +378,8 @@ const commandController = createCommandController({
     duplicateTemporary: documentController.duplicateTemporary,
     openFile: documentController.openFile,
     openFolder: documentController.openFolder, closeAll: documentController.closeAll,
+    openWorkspaceProfile: documentController.openWorkspaceProfile,
+    saveWorkspaceProfile: documentController.saveWorkspaceProfile,
     saveFile: documentController.saveFile,
     saveAs: documentController.saveAs,
     undo,
@@ -406,6 +409,7 @@ const commandController = createCommandController({
     toggleProblemsPanel,
     resetRowHeights,
     toggleSidebar,
+    toggleActivityBar,
     toggleTheme: settingsController.toggleTheme,
     showAppSettings: settingsController.showAppSettings,
     showShortcutSettings: shortcutSettingsController.showShortcutSettings,
@@ -457,6 +461,9 @@ shellController = createShellController({
   syncProblemsHeaderLayout,
   scheduleHoverPrewarm,
   ensureDocumentSession: lspController.ensureStandaloneSession, commitActiveEditor,
+  showActionContextMenu: (options) => commandSurfaceController.showActionContextMenu(options),
+  openWorkspaceProfile: documentController.openWorkspaceProfile,
+  saveWorkspaceProfile: documentController.saveWorkspaceProfile,
   saveSelectionState,
   recordUiPerf,
   perfNow,
