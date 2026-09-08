@@ -1354,13 +1354,13 @@ test("Vector-LSP Problems tooltip preserves plain gameplay and fix explanations"
 });
 
 test("Vector-LSP tooltip does not repeat guidance already present in the message", () => {
-  const decimal = "Decimal values are not supported here. The game reads '-6.25' as '-6' and ignores '.25'. Use an integer expression that matches your intent.";
+  const decimal = "Decimal value '-6.25' may not work as written here. Use an integer expression unless this field is known to support decimals.";
   assert.equal(diagnosticTooltipText({
     severity: "warning",
     message: decimal,
     data: {
       kind: "decimal-policy",
-      hint: "Use an integer expression that matches your intent."
+      hint: "Use an integer expression unless this field is known to support decimals."
     }
   }), decimal);
 
@@ -1385,19 +1385,19 @@ test("Vector-LSP tooltip does not repeat guidance already present in the message
 });
 
 test("localized keyed diagnostics show localized structured guidance", () => {
-  const message = "SkillDesc 계산식에 소수가 포함되어 있습니다 (`-6.25`). 게임은 정수 부분만 사용하고 소수 부분은 무시합니다 (사용: `-6`, 무시: `.25`).";
+  const message = "함수 `min()`의 인수는 2개여야 하지만 1개가 전달되었습니다.";
   assert.equal(diagnosticTooltipText({
-    severity: "warning",
+    severity: "error",
     message,
     data: {
       localizedMessage: true,
       localizedGuidanceHeading: "수정 방법",
-      localizedGuidance: "의도에 맞는 정수 계산식으로 바꾸세요.",
-      messageKey: "plugin.calc.skilldesc-decimal-prefix",
-      kind: "decimal-policy",
-      hint: "Use an integer expression that matches your intent."
+      localizedGuidance: "인수를 정확히 2개 사용하세요.",
+      messageKey: "plugin.calc.wrong-arity",
+      kind: "invalid-argument",
+      hint: "Use exactly 2 arguments."
     }
-  }), `${message}\n\n수정 방법:\n의도에 맞는 정수 계산식으로 바꾸세요.`);
+  }), `${message}\n\n수정 방법:\n인수를 정확히 2개 사용하세요.`);
 });
 
 test("Vector-LSP tooltip uses structured missing-token data for insertion hints", () => {
