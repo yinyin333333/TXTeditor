@@ -308,9 +308,18 @@ fn lock_path_for(target: &Path) -> Result<PathBuf, String> {
     let identity = identity.to_string_lossy().to_lowercase();
     #[cfg(not(windows))]
     let identity = identity.to_string_lossy().into_owned();
+    let directory = save_lock_directory()?;
+    Ok(directory.join(format!("{:x}.lock", Sha256::digest(identity.as_bytes()))))
+}
+
+fn save_lock_directory() -> Result<PathBuf, String> {
     let directory = std::env::temp_dir().join("txteditor-save-locks");
     fs::create_dir_all(&directory).map_err(|err| err.to_string())?;
-    Ok(directory.join(format!("{:x}.lock", Sha256::digest(identity.as_bytes()))))
+    Ok(directory)
+}
+
+fn save_lock_coordinator_path() -> PathBuf {
+    std::env::temp_dir().join("txteditor-save-locks.coordinator")
 }
 
 fn sibling_path(target: &Path, suffix: &str) -> PathBuf {
@@ -408,28 +417,68 @@ fn safe_journal_child(parent: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(parent.join(candidate))
 }
 
-fn with_target_lock<T>(
-    target: &Path,
+// Serializing only lock-file open/remove operations prevents an unlock/unlink/recreate
+// race while allowing saves to different targets to proceed concurrently.
+fn with_save_lock_coordinator<T>(
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let lock_path = lock_path_for(target)?;
-    let lock_file = OpenOptions::new()
+    let coordinator_file = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(&lock_path)
+        .open(save_lock_coordinator_path())
         .map_err(|err| err.to_string())?;
-    lock_file.try_lock().map_err(|err| {
-        format!(
-            "Save target is busy and was not modified: {} ({})",
-            target.display(),
-            err
-        )
-    })?;
+    coordinator_file.lock().map_err(|err| err.to_string())?;
     let result = operation();
-    let unlock_result = lock_file.unlock().map_err(|err| err.to_string());
+    let unlock_result = coordinator_file.unlock().map_err(|err| err.to_string());
     match (result, unlock_result) {
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+fn with_target_lock<T>(
+    target: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let (lock_path, lock_file) = with_save_lock_coordinator(|| {
+        let lock_path = lock_path_for(target)?;
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|err| err.to_string())?;
+        lock_file.try_lock().map_err(|err| {
+            format!(
+                "Save target is busy and was not modified: {} ({})",
+                target.display(),
+                err
+            )
+        })?;
+        Ok((lock_path, lock_file))
+    })?;
+
+    let result = operation();
+    let cleanup_result = with_save_lock_coordinator(|| {
+        let unlock_result = lock_file.unlock().map_err(|err| err.to_string());
+        drop(lock_file);
+        let remove_result = match fs::remove_file(&lock_path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.to_string()),
+        };
+        match (unlock_result, remove_result) {
+            (Err(err), _) => Err(err),
+            (Ok(()), Err(err)) => Err(err),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    });
+
+    match (result, cleanup_result) {
         (Err(err), _) => Err(err),
         (Ok(_), Err(err)) => Err(err),
         (Ok(value), Ok(())) => Ok(value),
@@ -913,8 +962,27 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).unwrap(), "id\n2\n");
         assert!(!dir.join(".items.txt.tmp").exists());
         assert!(!dir.join(".items.txt.save-lock").exists());
-        assert!(lock_path_for(&target).unwrap().exists());
+        assert!(!lock_path_for(&target).unwrap().exists());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn target_lock_file_is_removed_when_locked_operation_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "txteditor-lock-cleanup-error-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("items.txt");
+        let lock_path = lock_path_for(&target).unwrap();
+
+        let result: Result<(), String> =
+            with_target_lock(&target, || Err("simulated save failure".to_string()));
+
+        assert_eq!(result.unwrap_err(), "simulated save failure");
+        assert!(!lock_path.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
