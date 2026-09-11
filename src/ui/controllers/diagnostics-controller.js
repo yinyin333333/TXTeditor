@@ -60,6 +60,9 @@ export function createDiagnosticsController({
   let problemButtonsById = null;
   let activeProblemIds = new Set();
   const delegatedProblemLists = new WeakSet();
+  let overviewProjection = null;
+  let renderedOverviewRuler = null;
+  let renderedOverviewHtml = null;
 
   function rebuildDiagnosticIndex() {
     const byFile = new Map();
@@ -160,15 +163,24 @@ export function createDiagnosticsController({
     ruler.style.right = "0px";
     const doc = activeDoc();
     if (isJsonDocument(doc)) {
-      ruler.innerHTML = "";
+      overviewProjection = null;
+      renderOverviewMarks(ruler, "");
       recordUiPerf("update-overview-ruler", started, { marks: 0, json: true });
       return;
     }
     const diags = lintActive() ? diagnosticsForDoc(doc) : [];
     const rowCount = doc.rowCount;
     if (!diags.length || !rowCount) {
-      ruler.innerHTML = "";
+      overviewProjection = null;
+      renderOverviewMarks(ruler, "");
       recordUiPerf("update-overview-ruler", started, { marks: 0 });
+      return;
+    }
+    // The per-file array is replaced whenever the diagnostic index is rebuilt,
+    // including preserveVersion updates. Row count also changes marker positions.
+    if (overviewProjection?.diagnostics === diags && overviewProjection.rowCount === rowCount) {
+      renderOverviewMarks(ruler, overviewProjection.html);
+      recordUiPerf("update-overview-ruler", started, { marks: overviewProjection.marks });
       return;
     }
     const seenRows = new Map();
@@ -178,11 +190,22 @@ export function createDiagnosticsController({
         seenRows.set(diag.rowIndex, diag.severity);
       }
     }
-    ruler.innerHTML = [...seenRows.entries()].map(([row, severity]) => {
+    const html = [...seenRows.entries()].map(([row, severity]) => {
       const pct = (row + 0.5) / rowCount * 100;
       return `<div class="ruler-mark ruler-mark-${severity}" style="top:${pct}%"></div>`;
     }).join("");
+    overviewProjection = { diagnostics: diags, rowCount, html, marks: seenRows.size };
+    renderOverviewMarks(ruler, html);
     recordUiPerf("update-overview-ruler", started, { marks: seenRows.size });
+  }
+
+  function renderOverviewMarks(ruler, html) {
+    // Compare the full output, not a hash: identical projections can retain nodes
+    // even across document changes or diagnostic updates with different messages.
+    if (renderedOverviewRuler === ruler && renderedOverviewHtml === html) return;
+    ruler.innerHTML = html;
+    renderedOverviewRuler = ruler;
+    renderedOverviewHtml = html;
   }
 
   function docDiagnosticSeverity(_doc) {
