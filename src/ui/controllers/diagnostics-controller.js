@@ -59,6 +59,7 @@ export function createDiagnosticsController({
   let diagnosticIndex = null;
   let problemButtonsById = null;
   let activeProblemIds = new Set();
+  const delegatedProblemLists = new WeakSet();
 
   function rebuildDiagnosticIndex() {
     const byFile = new Map();
@@ -319,14 +320,33 @@ export function createDiagnosticsController({
     }
     const problemButtons = els.problemsList.querySelectorAll("[data-diagnostic-id]");
     rebuildProblemButtonIndex(problemButtons);
-    for (const button of problemButtons) {
-      button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
-      button.addEventListener("contextmenu", (event) => openDiagnosticContextMenu(event, button));
-      button.addEventListener("keydown", (event) => handleDiagnosticKeydown(event, button));
-    }
+    bindProblemListEvents(els.problemsList);
     const effect = problemsPanelRenderEffect(decision);
     if (effect.updateActiveHighlight) updateActiveProblemHighlight();
     recordUiPerf("render-problems-panel", started, effect.perfDetails);
+  }
+
+  function bindProblemListEvents(list) {
+    if (delegatedProblemLists.has(list)) return;
+    delegatedProblemLists.add(list);
+    const diagnosticButton = (event) => {
+      const button = event.target?.closest?.("button[data-diagnostic-id]");
+      if (!button || !list.contains(button) || button.disabled) return null;
+      // Only route events from the current render, including clicks on nested spans.
+      return problemButtonsById?.get(button.dataset.diagnosticId)?.includes(button) ? button : null;
+    };
+    list.addEventListener("click", (event) => {
+      const button = diagnosticButton(event);
+      if (button) goToDiagnostic(button.dataset.diagnosticId).catch(showError);
+    });
+    list.addEventListener("contextmenu", (event) => {
+      const button = diagnosticButton(event);
+      if (button) openDiagnosticContextMenu(event, button);
+    });
+    list.addEventListener("keydown", (event) => {
+      const button = diagnosticButton(event);
+      if (button) handleDiagnosticKeydown(event, button);
+    });
   }
 
   function updateActiveProblemHighlight({ scroll = false } = {}) {
