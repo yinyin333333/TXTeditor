@@ -124,9 +124,12 @@ export function createGridCommandController({
     const doc = activeDoc();
     const rows = rowsForContextOperation().filter((row) => row > 0 && row < doc.rowCount);
     if (!rows.length) return showError(tText("error.cloneRows"));
-    const insertAt = state.cloneRowPosition === CLONE_ROW_POSITION_AFTER_CURRENT
-      ? Math.max(...rows) + 1
-      : doc.rowCount;
+    let insertAt = doc.rowCount;
+    if (state.cloneRowPosition === CLONE_ROW_POSITION_AFTER_CURRENT) {
+      let lastRow = rows[0];
+      for (let i = 1; i < rows.length; i += 1) lastRow = Math.max(lastRow, rows[i]);
+      insertAt = lastRow + 1;
+    }
     execute(cloneRowsCommand(doc, rows, insertAt));
   }
 

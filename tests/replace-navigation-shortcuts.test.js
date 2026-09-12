@@ -172,6 +172,41 @@ test("Clone Row inserts after the selected rows when configured", () => {
   assert.deepEqual(doc.rows.map((row) => row[0]), ["name", "first", "second", "first", "second", "third"]);
 });
 
+test("Clone Row inserts 200,000 selected rows without overflowing the argument stack", () => {
+  const selectedCount = 200_000;
+  const sourceRows = Array.from({ length: selectedCount }, (_, index) => `row-${index + 1}`);
+  const doc = TableDocument.fromText("large.txt", ["name", ...sourceRows, "tail"].join("\n"));
+  const selectedRows = Array.from({ length: selectedCount }, (_, index) => index + 1);
+  let command = null;
+  const controller = createGridCommandController({
+    state: { selection: new SelectionModel(), cloneRowPosition: "after-current" },
+    grid: {},
+    activeDoc: () => doc,
+    hasOpenDocument: () => true,
+    execute: (nextCommand) => {
+      command = nextCommand;
+      command.redo(doc);
+    },
+    saveSelectionState: () => {}, renderChrome: () => {},
+    showError: (error) => { throw new Error(String(error)); },
+    applyFreezeToDoc: () => {},
+    rowsForContextOperation: () => selectedRows,
+    columnsFromSelection: () => []
+  });
+
+  controller.cloneRows();
+  assert.equal(doc.rowCount, selectedCount * 2 + 2);
+  assert.equal(doc.getCell(selectedCount + 1, 0), "row-1");
+  assert.equal(doc.getCell(selectedCount * 2, 0), `row-${selectedCount}`);
+  assert.equal(doc.getCell(selectedCount * 2 + 1, 0), "tail");
+
+  command.undo(doc);
+  assert.equal(doc.rowCount, selectedCount + 2);
+  assert.equal(doc.getCell(selectedCount + 1, 0), "tail");
+  command.redo(doc);
+  assert.equal(doc.getCell(selectedCount * 2 + 1, 0), "tail");
+});
+
 test("numeric prompts can enforce an upper bound", async () => {
   const result = await promptNumber({
     title: "Go to Row",
