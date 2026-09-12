@@ -11,6 +11,7 @@ import {
 import { indexRange } from "../row-operation-policy.js";
 import { persistFreezeState } from "../freeze-state-policy.js";
 import { tText } from "../../core/i18n.js";
+import { CLONE_ROW_POSITION_AFTER_CURRENT } from "../app-settings-policy.js";
 
 export function createGridCommandController({
   state,
@@ -123,7 +124,13 @@ export function createGridCommandController({
     const doc = activeDoc();
     const rows = rowsForContextOperation().filter((row) => row > 0 && row < doc.rowCount);
     if (!rows.length) return showError(tText("error.cloneRows"));
-    execute(cloneRowsCommand(doc, rows, doc.rowCount));
+    let insertAt = doc.rowCount;
+    if (state.cloneRowPosition === CLONE_ROW_POSITION_AFTER_CURRENT) {
+      let lastRow = rows[0];
+      for (let i = 1; i < rows.length; i += 1) lastRow = Math.max(lastRow, rows[i]);
+      insertAt = lastRow + 1;
+    }
+    execute(cloneRowsCommand(doc, rows, insertAt));
   }
 
   function cloneColumns() {

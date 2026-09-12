@@ -24,6 +24,7 @@ import {
   normaliseGridFont,
   normaliseGridScrollMode,
   normaliseZoomLevel,
+  normalizeCloneRowPosition,
   normalizeJsonDiagnosticRules,
   normalizeJsonRuleAction,
   parseJsonKeyUsageIdStart
@@ -143,6 +144,12 @@ export function createSettingsController({
     state.scrollMode = normaliseGridScrollMode(mode);
     localStorage.setItem("txteditor.scrollMode", state.scrollMode);
     grid.setScrollMode(state.scrollMode);
+    renderChrome();
+  }
+
+  function setCloneRowPosition(position) {
+    state.cloneRowPosition = normalizeCloneRowPosition(position);
+    localStorage.setItem("txteditor.cloneRowPosition", state.cloneRowPosition);
     renderChrome();
   }
 
@@ -389,13 +396,17 @@ export function createSettingsController({
       excludeWorkspaceSubfolders: state.excludeWorkspaceSubfolders,
       theme: state.theme,
       gridFont: state.gridFont,
-      scrollMode: state.scrollMode
+      scrollMode: state.scrollMode,
+      cloneRowPosition: state.cloneRowPosition
     });
     const fontOptions = visualControls.font.options.map(([label, value]) =>
       `<option value="${escapeHtml(value)}"${visualControls.font.value === value ? " selected" : ""}>${escapeHtml(label)}</option>`
     ).join("");
     const scrollModeOptions = visualControls.scrollMode.options.map(([value, label]) =>
       `<option value="${escapeHtml(value)}"${visualControls.scrollMode.value === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
+    const cloneRowPositionOptions = visualControls.cloneRowPosition.options.map(([value, label]) =>
+      `<option value="${escapeHtml(value)}"${visualControls.cloneRowPosition.value === value ? " selected" : ""}>${escapeHtml(label)}</option>`
     ).join("");
     const themeControls = visualControls.themes.map((option) =>
       `<button class="${option.active ? "active" : ""}" data-settings-theme="${option.theme}">${option.label}</button>`
@@ -441,6 +452,8 @@ export function createSettingsController({
           <select class="modal-input settings-font-select" id="${visualControls.font.id}">${fontOptions}</select>
           <label class="settings-label" for="${visualControls.scrollMode.id}">${visualControls.scrollMode.label}</label>
           <select class="modal-input settings-font-select" id="${visualControls.scrollMode.id}">${scrollModeOptions}</select>
+          <label class="settings-label" for="${visualControls.cloneRowPosition.id}">${visualControls.cloneRowPosition.label}</label>
+          <select class="modal-input settings-font-select" id="${visualControls.cloneRowPosition.id}">${cloneRowPositionOptions}</select>
           <div class="settings-label" data-settings-i18n="settings.theme">${translate("settings.theme")}</div>
           <div class="settings-segmented" role="group" aria-label="${translate("settings.theme")}">
             ${themeControls}
@@ -465,6 +478,7 @@ export function createSettingsController({
     const workspaceSubfoldersInput = backdrop.querySelector("#settingsExcludeWorkspaceSubfolders");
     const fontInput = backdrop.querySelector("#settingsGridFont");
     const scrollModeInput = backdrop.querySelector("#settingsScrollMode");
+    const cloneRowPositionInput = backdrop.querySelector("#settingsCloneRowPosition");
     const localeInput = backdrop.querySelector("#settingsLocale");
     const themeButtons = [...backdrop.querySelectorAll("[data-settings-theme]")];
     const dockButtons = [...backdrop.querySelectorAll("[data-settings-dock-panel]")];
@@ -476,6 +490,7 @@ export function createSettingsController({
       workspaceSubfoldersInput.checked = state.excludeWorkspaceSubfolders;
       fontInput.value = state.gridFont;
       scrollModeInput.value = state.scrollMode;
+      cloneRowPositionInput.value = state.cloneRowPosition;
       localeInput.value = state.locale;
       for (const button of themeButtons) button.classList.toggle("active", button.dataset.settingsTheme === state.theme);
       for (const button of dockButtons) button.classList.toggle("active", dockForPanel(button.dataset.settingsDockPanel) === button.dataset.settingsDockEdge);
@@ -507,6 +522,7 @@ export function createSettingsController({
     });
     fontInput.addEventListener("change", () => { changeGridFont(fontInput.value); refresh(); });
     scrollModeInput.addEventListener("change", () => { setScrollMode(scrollModeInput.value); refresh(); });
+    cloneRowPositionInput.addEventListener("change", () => { setCloneRowPosition(cloneRowPositionInput.value); refresh(); });
     localeInput.addEventListener("change", () => {
       setLocale(localeInput.value).then(() => {
         refresh();
@@ -917,6 +933,7 @@ export function createSettingsController({
     saveLintSettings,
     setColorizeColumns,
     setScrollMode,
+    setCloneRowPosition,
     setMouseResizeLocked,
     setAutoResizeToFitOnOpen,
     setKeepZoomLevel,

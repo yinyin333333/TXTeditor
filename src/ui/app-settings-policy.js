@@ -2,6 +2,12 @@ import { tText } from "../core/i18n.js";
 import { GRID_SCROLL_MODE_PIXEL, normalizeGridScrollMode } from "./grid-scroll-mode-policy.js";
 
 export const DEFAULT_GRID_FONT = "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace";
+export const CLONE_ROW_POSITION_END = "end";
+export const CLONE_ROW_POSITION_AFTER_CURRENT = "after-current";
+
+export function normalizeCloneRowPosition(value) {
+  return value === CLONE_ROW_POSITION_AFTER_CURRENT ? CLONE_ROW_POSITION_AFTER_CURRENT : CLONE_ROW_POSITION_END;
+}
 
 export const FONT_OPTIONS = [
   ["Cascadia Mono", "'Cascadia Mono', Consolas, 'Segoe UI Mono', monospace"],
@@ -113,7 +119,8 @@ export function appSettingsVisualControls({
   excludeWorkspaceSubfolders = false,
   theme = "dark",
   gridFont = DEFAULT_GRID_FONT,
-  scrollMode = GRID_SCROLL_MODE_PIXEL
+  scrollMode = GRID_SCROLL_MODE_PIXEL,
+  cloneRowPosition = CLONE_ROW_POSITION_END
 } = {}) {
   return {
     colorize: { id: "settingsColorizeColumns", label: tText("settings.colorizeColumns"), checked: Boolean(colorizeColumns) },
@@ -150,6 +157,15 @@ export function appSettingsVisualControls({
       options: [
         [GRID_SCROLL_MODE_PIXEL, tText("settings.scrollModePixel")],
         ["cell", tText("settings.scrollModeCell")]
+      ]
+    },
+    cloneRowPosition: {
+      id: "settingsCloneRowPosition",
+      label: tText("settings.cloneRowPosition"),
+      value: normalizeCloneRowPosition(cloneRowPosition),
+      options: [
+        [CLONE_ROW_POSITION_END, tText("settings.cloneRowPositionEnd")],
+        [CLONE_ROW_POSITION_AFTER_CURRENT, tText("settings.cloneRowPositionAfterCurrent")]
       ]
     },
     themes: [
