@@ -153,6 +153,25 @@ test("Clone Row and Clone Column preserve the existing focus and viewport", () =
   assert.deepEqual(executed, ["Clone 1 Row(s)", "Clone 1 Column(s)"]);
 });
 
+test("Clone Row inserts after the selected rows when configured", () => {
+  const doc = TableDocument.fromText("skills.txt", "name\tid\nfirst\t1\nsecond\t2\nthird\t3");
+  const controller = createGridCommandController({
+    state: { selection: new SelectionModel(), cloneRowPosition: "after-current" },
+    grid: {},
+    activeDoc: () => doc,
+    hasOpenDocument: () => true,
+    execute: (command) => command.redo(doc),
+    saveSelectionState: () => {}, renderChrome: () => {},
+    showError: (error) => { throw new Error(String(error)); },
+    applyFreezeToDoc: () => {},
+    rowsForContextOperation: () => [1, 2],
+    columnsFromSelection: () => []
+  });
+
+  controller.cloneRows();
+  assert.deepEqual(doc.rows.map((row) => row[0]), ["name", "first", "second", "first", "second", "third"]);
+});
+
 test("numeric prompts can enforce an upper bound", async () => {
   const result = await promptNumber({
     title: "Go to Row",

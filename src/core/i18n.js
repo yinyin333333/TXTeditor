@@ -471,6 +471,16 @@ CATALOG_ROWS["settings.keepZoomLevel"] = [
   "保持缩放级别"
 ];
 
+CATALOG_ROWS["settings.cloneRowPosition"] = [
+  "Clone Row position", "複製列位置", "Position geklonter Zeilen", "Posición de Clonar fila", "Position de la ligne clonée", "Posizione riga clonata", "행 복제 위치", "Pozycja klonowanego wiersza", "Posición de Clonar fila", "行の複製位置", "Posição da linha clonada", "Позиция клонированной строки", "克隆行位置"
+];
+CATALOG_ROWS["settings.cloneRowPositionEnd"] = [
+  "Add at the end", "加入至末尾", "Am Ende hinzufügen", "Añadir al final", "Ajouter à la fin", "Aggiungi alla fine", "맨 아래에 추가", "Dodaj na końcu", "Añadir al final", "末尾に追加", "Adicionar ao final", "Добавить в конец", "添加到末尾"
+];
+CATALOG_ROWS["settings.cloneRowPositionAfterCurrent"] = [
+  "Insert below current row", "插入目前列下方", "Unter der aktuellen Zeile einfügen", "Insertar debajo de la fila actual", "Insérer sous la ligne actuelle", "Inserisci sotto la riga corrente", "현재 행 아래에 삽입", "Wstaw pod bieżącym wierszem", "Insertar debajo de la fila actual", "現在の行の下に挿入", "Inserir abaixo da linha atual", "Вставить под текущей строкой", "插入当前行下方"
+];
+
 CATALOG_ROWS["lint.hoverOn"] = [
   "Hover: On", "懸停：開啟", "Hover: Ein", "Información emergente: activada", "Infobulle : activée", "Hover: attivo", "호버: 켜짐", "Podpowiedź: włączona", "Información emergente: activada", "ホバー: オン", "Dica: ligada", "Подсказка: вкл.", "悬停：开启"
 ];
