@@ -69,6 +69,7 @@ function makeSettingsController({
     vectorLspHover: true,
     gridFont: DEFAULT_GRID_FONT,
     scrollMode: "pixel",
+    cloneRowPosition: "end",
     dockLayout: DEFAULT_DOCK_LAYOUT,
     workspace,
     lint: {
@@ -171,6 +172,7 @@ test("App Settings modal renders visual controls in the controller behavior path
   assert.equal(document.body.querySelector("#settingsVectorLspHover"), null);
   assert.equal(document.body.querySelector("#settingsGridFont")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("#settingsScrollMode")?.tagName, "SELECT");
+  assert.equal(document.body.querySelector("#settingsCloneRowPosition")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("#settingsLocale")?.tagName, "SELECT");
   assert.equal(document.body.querySelector("[data-settings-lint-engine='vector-lsp']"), null);
   assert.equal(document.body.querySelector("[data-settings-lint-engine='legacy']"), null);
@@ -191,6 +193,19 @@ test("scrolling mode applies immediately and persists as a normalized preference
   assert.deepEqual(calls.filter((call) => Array.isArray(call) && call[0] === "scroll-mode"), [["scroll-mode", "cell"]]);
   localStorage.setItem("txteditor.scrollMode", "broken");
   assert.equal(createInitialAppState({ storage: localStorage }).state.scrollMode, "pixel");
+});
+
+test("Clone Row position applies immediately and persists with end as the default", () => {
+  const { controller, document, state } = makeSettingsController();
+  assert.equal(createInitialAppState({ storage: localStorage }).state.cloneRowPosition, "end");
+  controller.showAppSettings();
+  const position = document.body.querySelector("#settingsCloneRowPosition");
+  position.value = "after-current";
+  position.dispatchEvent({ type: "change" });
+  assert.equal(state.cloneRowPosition, "after-current");
+  assert.equal(localStorage.getItem("txteditor.cloneRowPosition"), "after-current");
+  localStorage.setItem("txteditor.cloneRowPosition", "broken");
+  assert.equal(createInitialAppState({ storage: localStorage }).state.cloneRowPosition, "end");
 });
 
 test("App Settings changes the language immediately", async () => {

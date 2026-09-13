@@ -59,6 +59,10 @@ export function createDiagnosticsController({
   let diagnosticIndex = null;
   let problemButtonsById = null;
   let activeProblemIds = new Set();
+  const delegatedProblemLists = new WeakSet();
+  let overviewProjection = null;
+  let renderedOverviewRuler = null;
+  let renderedOverviewHtml = null;
 
   function rebuildDiagnosticIndex() {
     const byFile = new Map();
@@ -159,15 +163,24 @@ export function createDiagnosticsController({
     ruler.style.right = "0px";
     const doc = activeDoc();
     if (isJsonDocument(doc)) {
-      ruler.innerHTML = "";
+      overviewProjection = null;
+      renderOverviewMarks(ruler, "");
       recordUiPerf("update-overview-ruler", started, { marks: 0, json: true });
       return;
     }
     const diags = lintActive() ? diagnosticsForDoc(doc) : [];
     const rowCount = doc.rowCount;
     if (!diags.length || !rowCount) {
-      ruler.innerHTML = "";
+      overviewProjection = null;
+      renderOverviewMarks(ruler, "");
       recordUiPerf("update-overview-ruler", started, { marks: 0 });
+      return;
+    }
+    // The per-file array is replaced whenever the diagnostic index is rebuilt,
+    // including preserveVersion updates. Row count also changes marker positions.
+    if (overviewProjection?.diagnostics === diags && overviewProjection.rowCount === rowCount) {
+      renderOverviewMarks(ruler, overviewProjection.html);
+      recordUiPerf("update-overview-ruler", started, { marks: overviewProjection.marks });
       return;
     }
     const seenRows = new Map();
@@ -177,11 +190,22 @@ export function createDiagnosticsController({
         seenRows.set(diag.rowIndex, diag.severity);
       }
     }
-    ruler.innerHTML = [...seenRows.entries()].map(([row, severity]) => {
+    const html = [...seenRows.entries()].map(([row, severity]) => {
       const pct = (row + 0.5) / rowCount * 100;
       return `<div class="ruler-mark ruler-mark-${severity}" style="top:${pct}%"></div>`;
     }).join("");
+    overviewProjection = { diagnostics: diags, rowCount, html, marks: seenRows.size };
+    renderOverviewMarks(ruler, html);
     recordUiPerf("update-overview-ruler", started, { marks: seenRows.size });
+  }
+
+  function renderOverviewMarks(ruler, html) {
+    // Compare the full output, not a hash: identical projections can retain nodes
+    // even across document changes or diagnostic updates with different messages.
+    if (renderedOverviewRuler === ruler && renderedOverviewHtml === html) return;
+    ruler.innerHTML = html;
+    renderedOverviewRuler = ruler;
+    renderedOverviewHtml = html;
   }
 
   function docDiagnosticSeverity(_doc) {
@@ -319,14 +343,33 @@ export function createDiagnosticsController({
     }
     const problemButtons = els.problemsList.querySelectorAll("[data-diagnostic-id]");
     rebuildProblemButtonIndex(problemButtons);
-    for (const button of problemButtons) {
-      button.addEventListener("click", async () => goToDiagnostic(button.dataset.diagnosticId).catch(showError));
-      button.addEventListener("contextmenu", (event) => openDiagnosticContextMenu(event, button));
-      button.addEventListener("keydown", (event) => handleDiagnosticKeydown(event, button));
-    }
+    bindProblemListEvents(els.problemsList);
     const effect = problemsPanelRenderEffect(decision);
     if (effect.updateActiveHighlight) updateActiveProblemHighlight();
     recordUiPerf("render-problems-panel", started, effect.perfDetails);
+  }
+
+  function bindProblemListEvents(list) {
+    if (delegatedProblemLists.has(list)) return;
+    delegatedProblemLists.add(list);
+    const diagnosticButton = (event) => {
+      const button = event.target?.closest?.("button[data-diagnostic-id]");
+      if (!button || !list.contains(button) || button.disabled) return null;
+      // Only route events from the current render, including clicks on nested spans.
+      return problemButtonsById?.get(button.dataset.diagnosticId)?.includes(button) ? button : null;
+    };
+    list.addEventListener("click", (event) => {
+      const button = diagnosticButton(event);
+      if (button) goToDiagnostic(button.dataset.diagnosticId).catch(showError);
+    });
+    list.addEventListener("contextmenu", (event) => {
+      const button = diagnosticButton(event);
+      if (button) openDiagnosticContextMenu(event, button);
+    });
+    list.addEventListener("keydown", (event) => {
+      const button = diagnosticButton(event);
+      if (button) handleDiagnosticKeydown(event, button);
+    });
   }
 
   function updateActiveProblemHighlight({ scroll = false } = {}) {

@@ -97,15 +97,15 @@ function sha256(value) {
 }
 
 function verifyTooltipMessageSmoke() {
-  const skilldesc = "Decimal values are not supported here. The game reads '-6.25' as '-6' and ignores '.25'. Use an integer expression that matches your intent.";
+  const decimal = "Decimal value '-6.25' may not work as written here. Use an integer expression unless this field is known to support decimals.";
   const prefixStop = "Character ';' is not supported here. The game uses the valid part before it and ignores the rest. Rewrite the expression if the ignored part is intended to run.";
   const wrongArity = "Invalid calculation: Function 'min()' expects 2 arguments, got 1";
   const samples = {
-    skilldesc: diagnosticTooltipText({ message: skilldesc, data: { hint: "Use an integer expression that matches your intent." } }),
+    decimal: diagnosticTooltipText({ message: decimal, data: { hint: "Use an integer expression unless this field is known to support decimals." } }),
     prefixStop: diagnosticTooltipText({ message: prefixStop, data: { hint: "Rewrite the expression if the ignored part is intended to run." } }),
     wrongArity: diagnosticTooltipText({ message: wrongArity, data: { hint: "Use exactly 2 arguments." } })
   };
-  if (samples.skilldesc !== skilldesc || samples.prefixStop !== prefixStop
+  if (samples.decimal !== decimal || samples.prefixStop !== prefixStop
     || samples.wrongArity !== `${wrongArity}\n\nWhat to do:\nUse exactly 2 arguments.`) {
     throw new Error(`TXTEditor diagnostic tooltip wording changed: ${JSON.stringify(samples)}`);
   }
